@@ -71,20 +71,21 @@ process.stdin.on('end', () => {
       } catch (e) {}
     }
 
-    // Mosic sync status
+    // Mosic project status (Mosic-only architecture - no local .planning files)
     let mosicStatus = '';
-    const configFile = path.join(dir, '.planning', 'config.json');
+    const configFile = path.join(dir, 'gsd-config.json');
     if (fs.existsSync(configFile)) {
       try {
         const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-        if (config.mosic?.enabled) {
-          const pendingCount = config.mosic?.pending_sync?.length || 0;
-          if (pendingCount > 0) {
-            // Yellow warning - pending sync items
-            mosicStatus = `\x1b[33m◐ ${pendingCount}\x1b[0m │ `;
+        if (config.mosic?.enabled && config.mosic?.project_id) {
+          // Has active Mosic project - show active task or project indicator
+          const activeTask = config.mosic?.session?.active_task;
+          if (activeTask) {
+            // Show active task identifier (e.g., "AUTH-1")
+            mosicStatus = `\x1b[32m◉ ${activeTask}\x1b[0m │ `;
           } else {
-            // Green - synced
-            mosicStatus = '\x1b[32m◉\x1b[0m │ ';
+            // Show Mosic is connected but no active task
+            mosicStatus = '\x1b[32m◉ Mosic\x1b[0m │ ';
           }
         }
       } catch (e) {}
