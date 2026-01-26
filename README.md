@@ -6,6 +6,8 @@
 
 **Solves context rot — the quality degradation that happens as Claude fills its context window.**
 
+**Now with [Mosic MCP](https://mosic.pro) integration for cloud-based project management.**
+
 [![npm version](https://img.shields.io/npm/v/get-shit-done-cc?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/get-shit-done-cc)
 [![npm downloads](https://img.shields.io/npm/dm/get-shit-done-cc?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/get-shit-done-cc)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/5JJgD5svVS)
@@ -36,7 +38,7 @@ npx get-shit-done-cc
 
 **Trusted by engineers at Amazon, Google, Shopify, and Webflow.**
 
-[Why I Built This](#why-i-built-this) · [How It Works](#how-it-works) · [Commands](#commands) · [Why It Works](#why-it-works)
+[Why I Built This](#why-i-built-this) · [How It Works](#how-it-works) · [Commands](#commands) · [Why It Works](#why-it-works) · [Mosic Integration](#mosic-mcp-integration)
 
 </div>
 
@@ -522,6 +524,97 @@ Use `/gsd:settings` to toggle these, or override per-invocation:
 |---------|---------|------------------|
 | `parallelization.enabled` | `true` | Run independent plans simultaneously |
 | `planning.commit_docs` | `true` | Track `.planning/` in git |
+
+---
+
+## Mosic MCP Integration
+
+GSD integrates with **[Mosic](https://mosic.pro)** for cloud-based project management. When enabled, your local `.planning/` files sync bidirectionally with Mosic's visual interface — kanban boards, timelines, and dependency graphs.
+
+### What Syncs
+
+```
+LOCAL (.planning/)              CLOUD (Mosic)
+═════════════════               ════════════════
+PROJECT.md          ───────►    MProject + Overview Page
+ROADMAP.md          ───────►    MTask Lists (phases) + Roadmap Page
+PLAN.md files       ───────►    MTasks + Plan Pages (Spec type)
+SUMMARY.md files    ───────►    Summary Pages (Document type)
+Plan tasks          ───────►    MTask CheckLists
+Dependencies        ───────►    M Relations (Depends/Blocker)
+                    ◄───────    Live status, cross-session updates
+```
+
+### Enabling Mosic
+
+```bash
+/gsd:settings → Mosic Integration → Enable
+```
+
+You'll need:
+1. A Mosic workspace ID (from Mosic settings)
+2. Optionally, a space ID for project organization
+
+### How It Works
+
+**During `/gsd:new-project`:**
+- Creates or links MProject with metadata
+- Creates MTask Lists for each phase
+- Creates M Pages (Overview, Requirements, Roadmap)
+- Sets up tags (gsd-managed, phase-01, phase-02, etc.)
+
+**During `/gsd:plan-phase`:**
+- Creates MTasks for each plan
+- Creates plan M Pages (type: Spec)
+- Creates CheckLists from plan tasks
+- Creates dependency relations between plans
+
+**During `/gsd:execute-phase`:**
+- Updates task status (In Progress → Completed)
+- Marks checklist items as done
+- Creates summary M Pages
+- Adds commit hashes as comments
+
+**During `/gsd:verify-work`:**
+- Creates UAT M Page
+- Creates issue tasks with Blocker relations
+- Updates phase status based on results
+
+### Error Handling
+
+Mosic sync failures **never block local work**. If Mosic is unavailable:
+1. Warning displayed
+2. Failed operation queued in `pending_sync`
+3. Local operation continues normally
+4. Retry on next `/gsd:progress` or manual sync
+
+### Configuration
+
+All Mosic IDs stored in `.planning/config.json`:
+
+```json
+{
+  "mosic": {
+    "enabled": true,
+    "workspace_id": "your-workspace-id",
+    "project_id": "created-project-id",
+    "task_lists": { "phase-01": "...", "phase-02": "..." },
+    "tasks": { "phase-01-plan-01": "..." },
+    "pages": { "overview": "...", "roadmap": "..." },
+    "pending_sync": []
+  }
+}
+```
+
+### Benefits
+
+| Feature | Without Mosic | With Mosic |
+|---------|---------------|------------|
+| View progress | Run `/gsd:progress` | Dashboard always visible |
+| Share status | Share terminal output | Send Mosic URL |
+| Cross-session | STATE.md only | Live task updates |
+| Visualization | None | Kanban, timeline, graphs |
+| Backup | Git only | Git + cloud |
 
 ---
 

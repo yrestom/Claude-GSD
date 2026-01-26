@@ -483,6 +483,90 @@ How to make tests pass
 
 ---
 
+## Mosic Integration Patterns
+
+GSD integrates with Mosic MCP for cloud-based project management. Key patterns:
+
+### Mosic Hierarchy
+
+```
+M Workspace → M Space → MProject → MTask List → MTask → MTask (subtask)
+```
+
+**GSD mapping:**
+- MProject = GSD Project (from PROJECT.md)
+- MTask List = Phase (from ROADMAP.md phases)
+- MTask = Plan execution unit (from PLAN.md)
+- M Page = Documentation (plans, summaries, research)
+- M Tag = Cross-cutting labels (gsd-managed, plan, research, phase-NN)
+- M Relation = Links between entities (Related, Depends, Blocker)
+
+### Frontmatter Convention
+
+All GSD templates include Mosic integration fields:
+
+```yaml
+---
+# Mosic Integration (populated when synced with Mosic)
+mosic_page_id: ""              # M Page ID
+mosic_task_id: ""              # Linked MTask ID (if applicable)
+mosic_workspace_id: ""         # Workspace ID
+mosic_tags: ["gsd-managed", "category", "phase-NN"]
+---
+```
+
+**Field behavior:**
+- Fields start empty (local-first workflow)
+- Populated when `/gsd:sync` or auto-sync runs
+- Read during subsequent syncs to update vs create
+
+### Page Types
+
+| Content Type | Mosic Page Type | Icon |
+|--------------|-----------------|------|
+| Plans | Spec | lucide:file-code |
+| Summaries | Document | lucide:check-circle |
+| Research | Document | lucide:search |
+| Requirements | Spec | lucide:list-checks |
+| Debug sessions | Note | lucide:bug |
+
+### Relation Types
+
+| Relationship | Mosic Relation | Use Case |
+|--------------|----------------|----------|
+| Documentation | Related | Plan → Summary, Task → Page |
+| Dependencies | Depends | Plan → Plan, Phase → Phase |
+| Blockers | Blocker | Issue → Task |
+
+### Error Handling
+
+Mosic operations use graceful degradation:
+
+```
+TRY:
+  [Mosic operation]
+CATCH mosic_error:
+  - Display warning (don't block)
+  - Add to config.mosic.pending_sync
+  - Continue local operation
+```
+
+**Principle:** Mosic failures never block local work. Failed syncs queue for retry.
+
+### Tag Conventions
+
+Standard tags (stored in config.json):
+- `gsd-managed` — All GSD-created content
+- `plan` — Execution plans
+- `summary` — Completion summaries
+- `research` — Research documents
+- `requirements` — Requirements specs
+- `phase-01`, `phase-02` — Phase identification
+- `quick` — Quick tasks outside roadmap
+- `debug` — Debug sessions
+
+---
+
 ## Summary: Core Meta-Patterns
 
 1. **XML for semantic structure, Markdown for content**
@@ -500,3 +584,5 @@ How to make tests pass
 13. **Deviation rules are automatic** — no permission for bugs/critical
 14. **Depth controls compression** — derive from actual work
 15. **TDD gets dedicated plans** — cycle too heavy to embed
+16. **Mosic integration is optional** — local-first, sync on demand
+17. **Mosic failures graceful** — queue and retry, never block
