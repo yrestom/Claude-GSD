@@ -15,54 +15,51 @@ allowed-tools:
 List all pending todos, allow selection, load full context for the selected todo, and route to appropriate action.
 
 Enables reviewing captured ideas and deciding what to work on next.
+
+**Mosic-only architecture:** Todos are MTasks with "lucide:lightbulb" icon in Mosic, not local files.
 </objective>
 
 <context>
-@.planning/STATE.md
-@.planning/ROADMAP.md
+Load from Mosic MCP:
+- config.json → workspace_id, project_id
+- mosic_get_project(project_id, { include_task_lists: true })
+- mosic_search_tasks({ workspace_id, project_id, status__in: ["Backlog", "ToDo"], icon: "lucide:lightbulb" })
 </context>
 
 <process>
 
-<step name="check_mosic_enabled">
-**Check if Mosic is enabled:**
+<step name="load_config">
+**Load session context from config.json:**
 
 ```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+WORKSPACE_ID=$(cat config.json 2>/dev/null | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat config.json 2>/dev/null | jq -r ".mosic.project_id")
 ```
 
-Store for later use in listing and syncing steps.
+If config.json missing or IDs not set:
+```
+No active GSD session. Run /gsd:new-project first.
+```
+Exit.
 </step>
 
-<step name="check_exist">
-```bash
-TODO_COUNT=$(ls .planning/todos/pending/*.md 2>/dev/null | wc -l | tr -d ' ')
-echo "Pending todos: $TODO_COUNT"
-```
-
-**If Mosic enabled, also fetch from Mosic:**
+<step name="fetch_todos">
+**Fetch todo tasks from Mosic:**
 
 ```
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-
-# Search for todo tasks in Mosic that may not be local
+# Search for todo tasks (icon: lucide:lightbulb marks todos)
 mosic_todos = mosic_search_tasks({
   workspace_id: WORKSPACE_ID,
   project_id: PROJECT_ID,
   status__in: ["Backlog", "ToDo"],
-  tag_ids: [GSD_MANAGED_TAG]
+  icon: "lucide:lightbulb"
 })
 
-# Filter to tasks with "lucide:lightbulb" icon (todo marker) or in Backlog
-mosic_only_todos = mosic_todos.filter(t =>
-  t.icon == "lucide:lightbulb" &&
-  !local_todos.find(lt => lt.mosic_task_id == t.name)
-)
+# Also get gsd-managed tag for filtering
+GSD_MANAGED_TAG = config.mosic.tags.gsd_managed
 ```
 
-If local count is 0 AND no Mosic-only todos:
+If no todos found:
 ```
 No pending todos.
 
@@ -82,49 +79,29 @@ Exit.
 <step name="parse_filter">
 Check for area filter in arguments:
 - `/gsd:check-todos` → show all
-- `/gsd:check-todos api` → filter to area:api only
+- `/gsd:check-todos api` → filter to area:api tag only
+
+```
+IF area_filter:
+  # Filter todos by area tag
+  mosic_todos = mosic_todos.filter(t =>
+    t.tags.includes("area-" + area_filter)
+  )
+```
 </step>
 
 <step name="list_todos">
-```bash
-for file in .planning/todos/pending/*.md; do
-  created=$(grep "^created:" "$file" | cut -d' ' -f2)
-  title=$(grep "^title:" "$file" | cut -d':' -f2- | xargs)
-  area=$(grep "^area:" "$file" | cut -d' ' -f2)
-  mosic_id=$(grep "^mosic_task_id:" "$file" | cut -d' ' -f2)
-  echo "$created|$title|$area|$file|$mosic_id"
-done | sort
-```
-
-Apply area filter if specified. Display as numbered list:
-
-**If Mosic enabled, show sync status:**
-
-```
-Pending Todos:
-
-1. Add auth token refresh (api, 2d ago) [synced]
-2. Fix modal z-index issue (ui, 1d ago) [synced]
-3. Refactor database connection pool (database, 5h ago) [local only]
-4. [Mosic] Review performance metrics (ops, 3d ago) [Mosic only]
-
----
-
-Sync Status: 2/3 local todos synced to Mosic | 1 Mosic-only todo
-
-Reply with a number to view details, or:
-- `/gsd:check-todos [area]` to filter by area
-- `q` to exit
-```
-
-**If Mosic not enabled:**
+Display todos as numbered list:
 
 ```
 Pending Todos:
 
 1. Add auth token refresh (api, 2d ago)
+   https://mosic.pro/app/MTask/[task_id]
 2. Fix modal z-index issue (ui, 1d ago)
+   https://mosic.pro/app/MTask/[task_id]
 3. Refactor database connection pool (database, 5h ago)
+   https://mosic.pro/app/MTask/[task_id]
 
 ---
 
@@ -133,7 +110,8 @@ Reply with a number to view details, or:
 - `q` to exit
 ```
 
-Format age as relative time.
+Format age as relative time from task.creation_date.
+Extract area from tags (area-* pattern).
 </step>
 
 <step name="handle_selection">
@@ -144,50 +122,55 @@ If invalid: "Invalid selection. Reply with a number (1-[N]) or `q` to exit."
 </step>
 
 <step name="load_context">
-Read the todo file completely. Display:
+**Load full todo context from Mosic:**
 
 ```
-## [title]
-
-**Area:** [area]
-**Created:** [date] ([relative time] ago)
-**Files:** [list or "None"]
-[IF mosic_task_id:] **Mosic:** https://mosic.pro/app/MTask/[mosic_task_id]
-
-### Problem
-[problem section content]
-
-### Solution
-[solution section content]
-```
-
-**If Mosic enabled and todo has mosic_task_id, fetch additional context:**
-
-```
-mosic_task = mosic_get_task(mosic_task_id, {
+selected_task = mosic_get_task(selected_task_id, {
   description_format: "markdown",
   include_comments: true
 })
 
-# Show any comments/updates made in Mosic
-IF mosic_task.comments.length > 0:
-  Display:
-  ### Mosic Updates
-  [list recent comments]
+# Get related pages if any
+related_pages = mosic_get_entity_pages("MTask", selected_task_id)
 ```
 
-If `files` field has entries, read and briefly summarize each.
+Display:
+
+```
+## [title]
+
+**Area:** [area from tags]
+**Created:** [date] ([relative time] ago)
+**Mosic:** https://mosic.pro/app/MTask/[task_id]
+
+### Description
+[task description in markdown]
+
+[IF comments exist:]
+### Comments
+[list recent comments]
+[END IF]
+
+[IF related_pages exist:]
+### Related Documentation
+[list page titles with URLs]
+[END IF]
+```
 </step>
 
 <step name="check_roadmap">
-```bash
-ls .planning/ROADMAP.md 2>/dev/null && echo "Roadmap exists"
+**Check if todo maps to a phase:**
+
+```
+# Get project phases from Mosic
+project = mosic_get_project(PROJECT_ID, { include_task_lists: true })
+phases = project.task_lists
+
+# Check if todo's area tag matches a phase
+# Or if todo has a task_list assignment
 ```
 
-If roadmap exists:
-1. Check if todo's area matches an upcoming phase
-2. Check if todo's files overlap with a phase's scope
-3. Note any match for action options
+Note any phase match for action options.
 </step>
 
 <step name="offer_actions">
@@ -197,8 +180,8 @@ Use AskUserQuestion:
 - header: "Action"
 - question: "This todo relates to Phase [N]: [name]. What would you like to do?"
 - options:
-  - "Work on it now" — move to done, start working
-  - "Add to phase plan" — include when planning Phase [N]
+  - "Work on it now" — update status, start working
+  - "Add to phase plan" — move to phase task list
   - "Brainstorm approach" — think through before deciding
   - "Put it back" — return to list
 
@@ -208,7 +191,7 @@ Use AskUserQuestion:
 - header: "Action"
 - question: "What would you like to do with this todo?"
 - options:
-  - "Work on it now" — move to done, start working
+  - "Work on it now" — update status, start working
   - "Create a phase" — /gsd:add-phase with this scope
   - "Brainstorm approach" — think through before deciding
   - "Put it back" — return to list
@@ -216,91 +199,10 @@ Use AskUserQuestion:
 
 <step name="execute_action">
 **Work on it now:**
-```bash
-mv ".planning/todos/pending/[filename]" ".planning/todos/done/"
-```
-Update STATE.md todo count. Present problem/solution context. Begin work or ask how to proceed.
-
-**If Mosic enabled and todo has mosic_task_id:**
-```
-# Update task status in Mosic
-mosic_update_document("MTask", mosic_task_id, {
-  status: "In Progress"
-})
-```
-
-**Add to phase plan:**
-Note todo reference in phase planning notes. Keep in pending. Return to list or exit.
-
-**If Mosic enabled:**
-```
-# Add comment to Mosic task noting phase assignment
-mosic_create_document("M Comment", {
-  workspace_id: WORKSPACE_ID,
-  ref_doc: "MTask",
-  ref_name: mosic_task_id,
-  content: "Assigned to Phase [N] planning"
-})
-```
-
-**Create a phase:**
-Display: `/gsd:add-phase [description from todo]`
-Keep in pending. User runs command in fresh context.
-
-**Brainstorm approach:**
-Keep in pending. Start discussion about problem and approaches.
-
-**Put it back:**
-Return to list_todos step.
-</step>
-
-<step name="update_state">
-After any action that changes todo count:
-
-```bash
-ls .planning/todos/pending/*.md 2>/dev/null | wc -l
-```
-
-Update STATE.md "### Pending Todos" section if exists.
-</step>
-
-<step name="git_commit">
-If todo was moved to done/, commit the change:
-
-**Check planning config:**
-
-```bash
-COMMIT_PLANNING_DOCS=$(cat .planning/config.json 2>/dev/null | grep -o '"commit_docs"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "true")
-git check-ignore -q .planning 2>/dev/null && COMMIT_PLANNING_DOCS=false
-```
-
-**If `COMMIT_PLANNING_DOCS=false`:** Skip git operations, log "Todo moved (not committed - commit_docs: false)"
-
-**If `COMMIT_PLANNING_DOCS=true` (default):**
-
-```bash
-git add .planning/todos/done/[filename]
-git rm --cached .planning/todos/pending/[filename] 2>/dev/null || true
-[ -f .planning/STATE.md ] && git add .planning/STATE.md
-git commit -m "$(cat <<'EOF'
-docs: start work on todo - [title]
-
-Moved to done/, beginning implementation.
-EOF
-)"
-```
-
-Confirm: "Committed: docs: start work on todo - [title]"
-</step>
-
-<step name="sync_completion_to_mosic">
-**If Mosic enabled and todo has mosic_task_id:**
-
-When todo is moved to done/ (work starting):
 
 ```
 # Update task status in Mosic
-mosic_update_document("MTask", mosic_task_id, {
+mosic_update_document("MTask", selected_task_id, {
   status: "In Progress",
   start_date: "[today's date]"
 })
@@ -308,55 +210,87 @@ mosic_update_document("MTask", mosic_task_id, {
 # Add progress comment
 mosic_create_document("M Comment", {
   workspace_id: WORKSPACE_ID,
-  ref_doc: "MTask",
-  ref_name: mosic_task_id,
+  reference_doctype: "MTask",
+  reference_name: selected_task_id,
   content: "Work started via /gsd:check-todos"
 })
 ```
 
 Display:
 ```
-✓ Mosic task updated to "In Progress"
+✓ Todo started: [title]
+  Status: In Progress
+  Mosic: https://mosic.pro/app/MTask/[task_id]
 ```
 
-**Error handling:**
+Present description context. Begin work or ask how to proceed.
+
+**Add to phase plan:**
 
 ```
-IF mosic sync fails:
-  - Display warning: "Mosic status update failed: [error]. Continuing locally."
-  - Add to mosic.pending_sync array:
-    { type: "todo_status", task_id: mosic_task_id, status: "In Progress" }
-  - Continue (don't block)
+# Move task to phase task list
+mosic_update_document("MTask", selected_task_id, {
+  task_list: PHASE_TASK_LIST_ID
+})
+
+# Add comment noting phase assignment
+mosic_create_document("M Comment", {
+  workspace_id: WORKSPACE_ID,
+  reference_doctype: "MTask",
+  reference_name: selected_task_id,
+  content: "Assigned to Phase [N] planning"
+})
+```
+
+Return to list or exit.
+
+**Create a phase:**
+Display: `/gsd:add-phase [description from todo]`
+Keep as Backlog. User runs command in fresh context.
+
+**Brainstorm approach:**
+Keep as Backlog. Start discussion about problem and approaches.
+
+**Put it back:**
+Return to list_todos step.
+</step>
+
+<step name="update_session">
+After any action, update config.json with current task if working:
+
+```json
+{
+  "session": {
+    "current_task_id": "[selected_task_id]",
+    "current_task_title": "[title]",
+    "last_activity": "[timestamp]"
+  }
+}
 ```
 </step>
 
 </process>
 
 <output>
-- Moved todo to `.planning/todos/done/` (if "Work on it now")
-- Updated `.planning/STATE.md` (if todo count changed)
-- Mosic MTask status updated (if enabled and todo synced)
+- MTask status updated in Mosic (if "Work on it now")
+- Session context updated in config.json
+- M Comment added for tracking
 </output>
 
 <anti_patterns>
-- Don't delete todos — move to done/ when work begins
-- Don't start work without moving to done/ first
+- Don't delete todos — update status to "In Progress" when work begins
+- Don't start work without updating Mosic status first
 - Don't create plans from this command — route to /gsd:plan-phase or /gsd:add-phase
+- Don't reference local .planning/ files — all data lives in Mosic
 </anti_patterns>
 
 <success_criteria>
-- [ ] All pending todos listed with title, area, age
-- [ ] Mosic sync status shown (if enabled)
-- [ ] Mosic-only todos included in list (if any)
-- [ ] Area filter applied if specified
-- [ ] Selected todo's full context loaded (including Mosic comments)
-- [ ] Roadmap context checked for phase match
+- [ ] Todos fetched from Mosic via mosic_search_tasks
+- [ ] Todos filtered by "lucide:lightbulb" icon
+- [ ] Area filter applied via tags if specified
+- [ ] Selected todo's full context loaded (description, comments, related pages)
+- [ ] Phase context checked via project task lists
 - [ ] Appropriate actions offered
-- [ ] Selected action executed
-- [ ] STATE.md updated if todo count changed
-- [ ] Changes committed to git (if todo moved to done/)
-- [ ] Mosic sync (if enabled):
-  - [ ] Task status updated when work starts
-  - [ ] Comments added for phase assignments
-  - [ ] Sync failures handled gracefully (added to pending_sync)
+- [ ] Selected action executed in Mosic
+- [ ] Session context updated in config.json
 </success_criteria>

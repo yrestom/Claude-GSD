@@ -12,7 +12,7 @@ allowed-tools:
 <objective>
 Allow users to configure GSD settings including workflow agents, model profile, and Mosic integration.
 
-Updates `.planning/config.json` with:
+Updates `config.json` with:
 - Workflow preferences (research, plan_check, verifier)
 - Model profile selection (quality, balanced, budget)
 - Mosic integration settings (enable/disable, workspace, sync options)
@@ -23,7 +23,7 @@ Updates `.planning/config.json` with:
 ## 1. Validate Environment
 
 ```bash
-ls .planning/config.json 2>/dev/null
+ls config.json 2>/dev/null
 ```
 
 **If not found:** Error - run `/gsd:new-project` first.
@@ -31,7 +31,7 @@ ls .planning/config.json 2>/dev/null
 ## 2. Read Current Config
 
 ```bash
-cat .planning/config.json
+cat config.json
 ```
 
 Parse current values:
@@ -318,7 +318,7 @@ ToolSearch("mosic project")
 projects = mosic_search({
   workspace_id: workspace_id,
   doctypes: ["MProject"],
-  query: "{project_name from STATE.md}"
+  query: "{project_name from config.json or MProject}"
 })
 ```
 
@@ -405,7 +405,7 @@ Merge all settings into existing config.json:
 }
 ```
 
-Write updated config to `.planning/config.json`.
+Write updated config to `config.json`.
 
 ---
 

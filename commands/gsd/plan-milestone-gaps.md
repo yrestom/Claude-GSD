@@ -8,14 +8,17 @@ allowed-tools:
   - Glob
   - Grep
   - AskUserQuestion
+  - mcp__mosic_pro__*
 ---
 
 <objective>
 Create all phases necessary to close gaps identified by `/gsd:audit-milestone`.
 
-Reads MILESTONE-AUDIT.md, groups gaps into logical phases, creates phase entries in ROADMAP.md, and offers to plan each phase.
+Reads audit page from Mosic, groups gaps into logical phases, creates MTask Lists for phases, and offers to plan each phase.
 
 One command creates all fix phases — no manual `/gsd:add-phase` per gap.
+
+**Mosic-only architecture:** All context from Mosic M Pages, phases created as MTask Lists.
 </objective>
 
 <execution_context>
@@ -23,40 +26,62 @@ One command creates all fix phases — no manual `/gsd:add-phase` per gap.
 </execution_context>
 
 <context>
-**Audit results:**
-Glob: .planning/v*-MILESTONE-AUDIT.md (use most recent)
-
-**Original intent (for prioritization):**
-@.planning/PROJECT.md
-@.planning/REQUIREMENTS.md
-
-**Current state:**
-@.planning/ROADMAP.md
-@.planning/STATE.md
+Load from Mosic MCP:
+- config.json → workspace_id, project_id, audits
+- mosic_get_page(audit_page_id, { content_format: "markdown" }) → audit results
+- mosic_get_entity_pages("MProject", project_id) → requirements, overview pages
+- mosic_get_project(project_id, { include_task_lists: true }) → current phases
 </context>
 
 <process>
 
-## 1. Load Audit Results
+## 1. Load Audit Results from Mosic
 
 ```bash
-# Find the most recent audit file
-ls -t .planning/v*-MILESTONE-AUDIT.md 2>/dev/null | head -1
+WORKSPACE_ID=$(cat config.json | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat config.json | jq -r ".mosic.project_id")
+LATEST_AUDIT=$(cat config.json | jq -r ".mosic.audits | keys | last")
+AUDIT_PAGE_ID=$(cat config.json | jq -r ".mosic.audits[\"$LATEST_AUDIT\"].page_id")
 ```
 
-Parse YAML frontmatter to extract structured gaps:
-- `gaps.requirements` — unsatisfied requirements
-- `gaps.integration` — missing cross-phase connections
-- `gaps.flows` — broken E2E flows
+```
+# Get audit page content
+audit_page = mosic_get_page(AUDIT_PAGE_ID, {
+  content_format: "markdown"
+})
 
-If no audit file exists or has no gaps, error:
+# Parse gaps from audit content
+gaps = parse_audit_gaps(audit_page.content)
+# gaps.requirements — unsatisfied requirements
+# gaps.integration — missing cross-phase connections
+# gaps.flows — broken E2E flows
+```
+
+If no audit page exists or has no gaps:
 ```
 No audit gaps found. Run `/gsd:audit-milestone` first.
 ```
+Exit.
 
-## 2. Prioritize Gaps
+## 2. Load Project Context
 
-Group gaps by priority from REQUIREMENTS.md:
+```
+# Get project pages for requirements and overview
+project_pages = mosic_get_entity_pages("MProject", PROJECT_ID, {
+  content_format: "markdown"
+})
+
+requirements_page = project_pages.find(p => p.title.includes("Requirements"))
+overview_page = project_pages.find(p => p.title.includes("Overview"))
+
+# Get current phases
+project = mosic_get_project(PROJECT_ID, { include_task_lists: true })
+existing_phases = project.task_lists
+```
+
+## 3. Prioritize Gaps
+
+Group gaps by priority from requirements:
 
 | Priority | Action |
 |----------|--------|
@@ -66,7 +91,7 @@ Group gaps by priority from REQUIREMENTS.md:
 
 For integration/flow gaps, infer priority from affected requirements.
 
-## 3. Group Gaps into Phases
+## 4. Group Gaps into Phases
 
 Cluster related gaps into logical phases:
 
@@ -89,17 +114,20 @@ Gap: Flow "View dashboard" broken at data fetch
   - Render user data
 ```
 
-## 4. Determine Phase Numbers
+## 5. Determine Phase Numbers
 
-Find highest existing phase:
-```bash
-ls -d .planning/phases/*/ | sort -V | tail -1
+Find highest existing phase from task lists:
+
+```
+max_phase = existing_phases
+  .map(tl => extract_phase_number(tl.title))
+  .max()
 ```
 
 New phases continue from there:
 - If Phase 5 is highest, gaps become Phase 6, 7, 8...
 
-## 5. Present Gap Closure Plan
+## 6. Present Gap Closure Plan
 
 ```markdown
 ## Gap Closure Plan
@@ -136,94 +164,49 @@ Create these {X} phases? (yes / adjust / defer all optional)
 
 Wait for user confirmation.
 
-## 6. Update ROADMAP.md
-
-Add new phases to current milestone:
-
-```markdown
-### Phase {N}: {Name}
-**Goal:** {derived from gaps being closed}
-**Requirements:** {REQ-IDs being satisfied}
-**Gap Closure:** Closes gaps from audit
-
-### Phase {N+1}: {Name}
-...
-```
-
-## 7. Create Phase Directories
-
-```bash
-mkdir -p ".planning/phases/{NN}-{name}"
-```
-
-## 8. Sync Gap Closure Phases to Mosic (Deep Integration)
-
-**Check if Mosic is enabled:**
-
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true:**
-
-Display:
-```
-◆ Syncing gap closure phases to Mosic...
-```
-
-### Step 8.1: Load Mosic Config
-
-```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-FIX_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.fix")
-```
-
-### Step 8.2: Create Fix Tag if Not Exists
+## 7. Create MTask Lists for Gap Closure Phases
 
 ```
-IF FIX_TAG is null:
-  fix_tag = mosic_search_tags({ workspace_id, query: "fix" })
-  IF fix_tag.length == 0:
-    fix_tag = mosic_create_document("M Tag", {
-      workspace_id: workspace_id,
-      name: "fix",
-      color: "red"  # Red to indicate gap/fix work
-    })
+GSD_MANAGED_TAG = config.mosic.tags.gsd_managed
+
+# Get or create fix tag
+fix_tag = mosic_search_tags({ workspace_id: WORKSPACE_ID, query: "fix" })
+IF fix_tag.length == 0:
+  fix_tag = mosic_create_document("M Tag", {
+    workspace_id: WORKSPACE_ID,
+    title: "fix",
+    color: "#EF4444",  # Red for gap/fix work
+    description: "Gap closure / fix work"
+  })
   FIX_TAG = fix_tag.name
-  mosic.tags.fix = FIX_TAG
-```
+ELSE:
+  FIX_TAG = fix_tag[0].name
 
-### Step 8.3: Create MTask List for Each Gap Closure Phase
+# Track previous phase for dependencies
+prev_task_list = existing_phases[existing_phases.length - 1]
 
-```
 FOR each gap_phase in created_phases:
   phase_num = gap_phase.number
   phase_name = gap_phase.name
   gaps_closed = gap_phase.gaps
 
   # Create phase tag
-  phase_tag = mosic_search_tags({ workspace_id, query: "phase-" + phase_num })
+  phase_tag = mosic_search_tags({ workspace_id: WORKSPACE_ID, query: "phase-" + phase_num })
   IF phase_tag.length == 0:
     phase_tag = mosic_create_document("M Tag", {
-      workspace_id: workspace_id,
-      name: "phase-" + phase_num,
-      color: "red"  # Red for gap closure phases
+      workspace_id: WORKSPACE_ID,
+      title: "phase-" + phase_num,
+      color: "#EF4444"  # Red for gap closure phases
     })
-
-  # Get previous phase task list for dependency
-  prev_phase_num = phase_num - 1
-  PREV_TASK_LIST = mosic.task_lists["phase-" + prev_phase_num]
 
   # Create MTask List with gap closure metadata
   task_list = mosic_create_document("MTask List", {
-    workspace_id: workspace_id,
+    workspace_id: WORKSPACE_ID,
     project: PROJECT_ID,
     title: "Phase " + phase_num + ": " + phase_name + " (GAP CLOSURE)",
     description: build_gap_closure_description(gaps_closed),
     icon: "lucide:wrench",  # Wrench for fix work
-    color: "red",
+    color: "#EF4444",
     status: "Backlog",
     prefix: "P" + phase_num
   })
@@ -238,41 +221,30 @@ FOR each gap_phase in created_phases:
   ])
 
   # Create Depends relation to previous phase
-  IF PREV_TASK_LIST:
+  IF prev_task_list:
     mosic_create_document("M Relation", {
-      workspace_id: workspace_id,
+      workspace_id: WORKSPACE_ID,
       source_doctype: "MTask List",
       source_name: task_list_id,
       target_doctype: "MTask List",
-      target_name: PREV_TASK_LIST,
+      target_name: prev_task_list.name,
       relation_type: "Depends"
     })
 
-  # Store mapping
-  mosic.task_lists["phase-" + phase_num] = task_list_id
-  mosic.tags.phase_tags["phase-" + phase_num] = phase_tag.name
+  prev_task_list = task_list
 ```
 
-### Step 8.4: Create Gap Closure Documentation Page
+## 8. Create Gap Closure Documentation Page
 
 ```
 # Create a summary page linking audit to gap phases
 gap_doc_page = mosic_create_entity_page("MProject", PROJECT_ID, {
-  workspace_id: workspace_id,
+  workspace_id: WORKSPACE_ID,
   title: "Gap Closure Plan - " + milestone_version,
   page_type: "Document",
   icon: "lucide:clipboard-list",
   status: "Published",
-  content: {
-    blocks: [
-      { type: "header", data: { text: "Gap Closure Plan", level: 1 } },
-      { type: "paragraph", data: { text: "Phases created to close gaps identified by milestone audit." } },
-      { type: "header", data: { text: "Gaps Addressed", level: 2 } },
-      { type: "list", data: { style: "unordered", items: all_gaps_list } },
-      { type: "header", data: { text: "Closure Phases", level: 2 } },
-      build_phase_list_blocks(created_phases)
-    ]
-  },
+  content: build_gap_doc_content(created_phases, gaps),
   relation_type: "Related"
 })
 
@@ -281,74 +253,52 @@ mosic_batch_add_tags_to_document("M Page", gap_doc_page.name, [
   FIX_TAG
 ])
 
-mosic.pages["gap-closure-" + milestone_version] = gap_doc_page.name
+# Create relation from gap doc to audit
+mosic_create_document("M Relation", {
+  workspace_id: WORKSPACE_ID,
+  source_doctype: "M Page",
+  source_name: gap_doc_page.name,
+  target_doctype: "M Page",
+  target_name: AUDIT_PAGE_ID,
+  relation_type: "Related"
+})
 ```
 
-### Step 8.5: Link to Original Audit
+## 9. Update config.json
 
-```
-# Create relation from gap doc to audit findings
-IF mosic.pages["milestone-audit-" + milestone_version]:
-  mosic_create_document("M Relation", {
-    workspace_id: workspace_id,
-    source_doctype: "M Page",
-    source_name: gap_doc_page.name,
-    target_doctype: "M Page",
-    target_name: mosic.pages["milestone-audit-" + milestone_version],
-    relation_type: "Related"
-  })
-```
-
-### Step 8.6: Update config.json
-
-```bash
-# Update config.json with:
-# mosic.task_lists["phase-NN"] for each new phase
-# mosic.tags.phase_tags["phase-NN"] for each new phase
-# mosic.tags.fix if created
-# mosic.pages["gap-closure-VERSION"]
-# mosic.last_sync = current timestamp
+```json
+{
+  "mosic": {
+    "task_lists": {
+      "phase-6": "[task_list_id]",
+      "phase-7": "[task_list_id]"
+    },
+    "tags": {
+      "fix": "[FIX_TAG]",
+      "phase_tags": {
+        "phase-6": "[tag_id]",
+        "phase-7": "[tag_id]"
+      }
+    },
+    "pages": {
+      "gap-closure-v1.0": "[gap_doc_page.name]"
+    },
+    "last_sync": "[timestamp]"
+  }
+}
 ```
 
 Display:
 ```
-✓ Gap closure phases synced to Mosic
+✓ Gap closure phases created
 
-  Phases created: [N]
-  Gap doc: https://mosic.pro/app/page/[gap_doc_page.name]
+  Phases: [N] new task lists
+  Gap Doc: https://mosic.pro/app/page/[gap_doc_page.name]
 
   Phase Structure:
   ├─ Phase [X]: [name] (GAP CLOSURE) → depends on [X-1]
   ├─ Phase [X+1]: [name] (GAP CLOSURE) → depends on [X]
   └─ ...
-```
-
-**Error handling:**
-```
-IF mosic sync fails:
-  - Log warning: "Mosic sync failed: [error]. Gap phases created locally."
-  - Add to mosic.pending_sync array for retry
-  - Continue to commit step (don't block)
-```
-
-**If mosic.enabled = false:** Skip to commit step.
-
-## 9. Commit Roadmap Update
-
-**Check planning config:**
-
-```bash
-COMMIT_PLANNING_DOCS=$(cat .planning/config.json 2>/dev/null | grep -o '"commit_docs"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "true")
-git check-ignore -q .planning 2>/dev/null && COMMIT_PLANNING_DOCS=false
-```
-
-**If `COMMIT_PLANNING_DOCS=false`:** Skip git operations
-
-**If `COMMIT_PLANNING_DOCS=true` (default):**
-
-```bash
-git add .planning/ROADMAP.md
-git commit -m "docs(roadmap): add gap closure phases {N}-{M}"
 ```
 
 ## 10. Offer Next Steps
@@ -358,9 +308,7 @@ git commit -m "docs(roadmap): add gap closure phases {N}-{M}"
 
 **Phases added:** {N} - {M}
 **Gaps addressed:** {count} requirements, {count} integration, {count} flows
-[IF mosic.enabled:]
 **Mosic:** https://mosic.pro/app/page/[gap_doc_page.name]
-[END IF]
 
 ---
 
@@ -376,7 +324,7 @@ git commit -m "docs(roadmap): add gap closure phases {N}-{M}"
 
 **Also available:**
 - `/gsd:execute-phase {N}` — if plans already exist
-- `cat .planning/ROADMAP.md` — see updated roadmap
+- View gap doc: https://mosic.pro/app/page/[gap_doc_page.name]
 
 ---
 
@@ -463,21 +411,26 @@ becomes:
 
 </gap_to_phase_mapping>
 
+<error_handling>
+```
+IF mosic operation fails:
+  - Log warning: "Mosic operation failed: [error]. Continuing..."
+  - Add to config.mosic.pending_sync for retry
+  - Continue (don't block)
+```
+</error_handling>
+
 <success_criteria>
-- [ ] MILESTONE-AUDIT.md loaded and gaps parsed
+- [ ] Audit page loaded from Mosic and gaps parsed
+- [ ] Project context loaded (requirements, existing phases)
 - [ ] Gaps prioritized (must/should/nice)
 - [ ] Gaps grouped into logical phases
 - [ ] User confirmed phase plan
-- [ ] ROADMAP.md updated with new phases
-- [ ] Phase directories created
-- [ ] Mosic sync (if enabled):
-  - [ ] Fix tag created (if not exists)
-  - [ ] MTask Lists created for each gap closure phase with (GAP CLOSURE) marker
-  - [ ] Depends relations created between phases
-  - [ ] Tags applied (gsd-managed, fix, phase-NN)
-  - [ ] Gap Closure documentation page created
-  - [ ] Related relation to audit findings (if exists)
-  - [ ] config.json updated with all mappings
-- [ ] Changes committed
+- [ ] MTask Lists created for each gap closure phase
+- [ ] Depends relations created between phases
+- [ ] Tags applied (gsd-managed, fix, phase-NN)
+- [ ] Gap Closure documentation page created
+- [ ] Related relation to audit page created
+- [ ] config.json updated with all mappings
 - [ ] User knows to run `/gsd:plan-phase` next
 </success_criteria>

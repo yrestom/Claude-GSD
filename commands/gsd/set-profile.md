@@ -40,10 +40,10 @@ if $ARGUMENTS.profile not in ["quality", "balanced", "budget"]:
 ## 2. Check for project
 
 ```bash
-ls .planning/config.json 2>/dev/null
+ls config.json 2>/dev/null
 ```
 
-If no `.planning/` directory:
+If no config.json:
 ```
 Error: No GSD project found.
 Run /gsd:new-project first to initialize a project.
@@ -53,7 +53,7 @@ Run /gsd:new-project first to initialize a project.
 
 Read current config:
 ```bash
-cat .planning/config.json
+cat config.json
 ```
 
 Update `model_profile` field (or add if missing):
@@ -63,20 +63,20 @@ Update `model_profile` field (or add if missing):
 }
 ```
 
-Write updated config back to `.planning/config.json`.
+Write updated config back to `config.json`.
 
 ## 4. Sync to Mosic (if enabled)
 
 **Store profile in Mosic project metadata:**
 
 ```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+MOSIC_ENABLED=$(cat config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
 ```
 
 **If mosic.enabled = true:**
 
 ```bash
-PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
+PROJECT_ID=$(cat config.json | jq -r ".mosic.project_id")
 ```
 
 ```

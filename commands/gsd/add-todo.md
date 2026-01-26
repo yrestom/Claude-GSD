@@ -14,23 +14,44 @@ allowed-tools:
 Capture an idea, task, or issue that surfaces during a GSD session as a structured todo for later work.
 
 Enables "thought → capture → continue" flow without losing context or derailing current work.
+
+**Mosic-only architecture:** Todos are created directly as MTasks in Mosic with "lucide:lightbulb" icon.
 </objective>
 
 <context>
-@.planning/STATE.md
+Load from Mosic MCP:
+- config.json → workspace_id, project_id
+- mosic_search_tags({ workspace_id, query: "area-" }) → existing area tags
 </context>
 
 <process>
 
-<step name="ensure_directory">
+<step name="load_config">
+**Load session context from config.json:**
+
 ```bash
-mkdir -p .planning/todos/pending .planning/todos/done
+WORKSPACE_ID=$(cat config.json 2>/dev/null | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat config.json 2>/dev/null | jq -r ".mosic.project_id")
+GSD_MANAGED_TAG=$(cat config.json 2>/dev/null | jq -r ".mosic.tags.gsd_managed")
 ```
+
+If config.json missing or IDs not set:
+```
+No active GSD session. Run /gsd:new-project first.
+```
+Exit.
 </step>
 
 <step name="check_existing_areas">
-```bash
-ls .planning/todos/pending/*.md 2>/dev/null | xargs -I {} grep "^area:" {} 2>/dev/null | cut -d' ' -f2 | sort -u
+**Fetch existing area tags from Mosic:**
+
+```
+existing_tags = mosic_search_tags({
+  workspace_id: WORKSPACE_ID,
+  query: "area-"
+})
+
+area_tags = existing_tags.map(t => t.title.replace("area-", ""))
 ```
 
 Note existing areas for consistency in infer_area step.
@@ -63,7 +84,6 @@ Infer area from file paths:
 | `src/db/*`, `database/*` | `database` |
 | `tests/*`, `__tests__/*` | `testing` |
 | `docs/*` | `docs` |
-| `.planning/*` | `planning` |
 | `scripts/*`, `bin/*` | `tooling` |
 | No files or unclear | `general` |
 
@@ -71,12 +91,20 @@ Use existing area from step 2 if similar match exists.
 </step>
 
 <step name="check_duplicates">
-```bash
-grep -l -i "[key words from title]" .planning/todos/pending/*.md 2>/dev/null
+**Search for existing similar todos in Mosic:**
+
+```
+existing_todos = mosic_search_tasks({
+  workspace_id: WORKSPACE_ID,
+  project_id: PROJECT_ID,
+  query: "[key words from title]",
+  status__in: ["Backlog", "ToDo"],
+  icon: "lucide:lightbulb"
+})
 ```
 
 If potential duplicate found:
-1. Read the existing todo
+1. Check the existing todo details
 2. Compare scope
 
 If overlapping, use AskUserQuestion:
@@ -84,29 +112,39 @@ If overlapping, use AskUserQuestion:
 - question: "Similar todo exists: [title]. What would you like to do?"
 - options:
   - "Skip" — keep existing todo
-  - "Replace" — update existing with new context
+  - "Update existing" — add context to existing todo
   - "Add anyway" — create as separate todo
 </step>
 
-<step name="create_file">
-```bash
-timestamp=$(date "+%Y-%m-%dT%H:%M")
-date_prefix=$(date "+%Y-%m-%d")
+<step name="get_or_create_area_tag">
+**Ensure area tag exists:**
+
 ```
+area_tag_name = "area-" + area
 
-Generate slug from title (lowercase, hyphens, no special chars).
+existing_tag = mosic_search_tags({
+  workspace_id: WORKSPACE_ID,
+  query: area_tag_name
+}).find(t => t.title == area_tag_name)
 
-Write to `.planning/todos/pending/${date_prefix}-${slug}.md`:
+IF !existing_tag:
+  area_tag = mosic_create_document("M Tag", {
+    workspace_id: WORKSPACE_ID,
+    title: area_tag_name,
+    color: "#78716C",
+    description: "Area: " + area
+  })
+  area_tag_id = area_tag.name
+ELSE:
+  area_tag_id = existing_tag.name
+```
+</step>
 
-```markdown
----
-created: [timestamp]
-title: [title]
-area: [area]
-files:
-  - [file:lines]
----
+<step name="create_todo_task">
+**Create MTask for the todo in Mosic:**
 
+```
+todo_description = """
 ## Problem
 
 [problem description - enough context for future Claude to understand weeks later]
@@ -114,149 +152,59 @@ files:
 ## Solution
 
 [approach hints or "TBD"]
-```
-</step>
 
-<step name="update_state">
-If `.planning/STATE.md` exists:
+## Files
+[list of relevant file paths]
 
-1. Count todos: `ls .planning/todos/pending/*.md 2>/dev/null | wc -l`
-2. Update "### Pending Todos" under "## Accumulated Context"
-</step>
+---
+*Captured via /gsd:add-todo*
+"""
 
-<step name="git_commit">
-Commit the todo and any updated state:
-
-**Check planning config:**
-
-```bash
-COMMIT_PLANNING_DOCS=$(cat .planning/config.json 2>/dev/null | grep -o '"commit_docs"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "true")
-git check-ignore -q .planning 2>/dev/null && COMMIT_PLANNING_DOCS=false
-```
-
-**If `COMMIT_PLANNING_DOCS=false`:** Skip git operations, log "Todo saved (not committed - commit_docs: false)"
-
-**If `COMMIT_PLANNING_DOCS=true` (default):**
-
-```bash
-git add .planning/todos/pending/[filename]
-[ -f .planning/STATE.md ] && git add .planning/STATE.md
-git commit -m "$(cat <<'EOF'
-docs: capture todo - [title]
-
-Area: [area]
-EOF
-)"
-```
-
-Confirm: "Committed: docs: capture todo - [title]"
-</step>
-
-<step name="sync_to_mosic">
-**Check if Mosic is enabled:**
-
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true:**
-
-### Step 1: Get Mosic Context
-
-```bash
-# Get workspace and project IDs from config
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-```
-
-### Step 2: Determine Target Entity
-
-**If todo maps to a phase (from check_roadmap):**
-```
-# Get the phase's task list ID
-TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PHASE}\"]")
-target_entity_type = "MTask List"
-target_entity_id = TASK_LIST_ID
-```
-
-**If no phase match (general todo):**
-```
-target_entity_type = "MProject"
-target_entity_id = PROJECT_ID
-```
-
-### Step 3: Create MTask for the Todo
-
-```
 todo_task = mosic_create_document("MTask", {
   workspace_id: WORKSPACE_ID,
-  task_list: TASK_LIST_ID,  # or null if project-level
   project: PROJECT_ID,
   title: "[todo title]",
-  description: "## Problem\n\n[problem from todo]\n\n## Solution\n\n[solution from todo]\n\n---\n*Captured via /gsd:add-todo*",
-  icon: "lucide:lightbulb",
+  description: todo_description,
+  icon: "lucide:lightbulb",  # Marks this as a todo
   status: "Backlog",
   priority: "Normal"
 })
 
 todo_task_id = todo_task.name
 ```
+</step>
 
-### Step 4: Tag the Task
+<step name="tag_todo">
+**Apply tags to the todo task:**
 
 ```
 mosic_batch_add_tags_to_document("MTask", todo_task_id, [
   GSD_MANAGED_TAG,
-  # Add area-specific tag if exists
+  area_tag_id
 ])
-
-# Create area tag if needed
-IF area tag doesn't exist:
-  area_tag = mosic_create_document("M Tag", {
-    workspace_id: WORKSPACE_ID,
-    title: "area-" + area,
-    color: "#78716C",
-    description: "Area: " + area
-  })
-  mosic_add_tag_to_document("MTask", todo_task_id, area_tag.name)
 ```
+</step>
 
-### Step 5: Update Todo File with Mosic ID
+<step name="update_session">
+**Update config.json with todo reference:**
 
-Add to todo frontmatter:
-```yaml
-mosic_task_id: [todo_task_id]
+```json
+{
+  "session": {
+    "last_todo_id": "[todo_task_id]",
+    "last_activity": "[timestamp]"
+  }
+}
 ```
-
-### Step 6: Display Sync Status
-
-```
-✓ Todo synced to Mosic
-  Task: https://mosic.pro/app/MTask/[todo_task_id]
-```
-
-**Error handling:**
-
-```
-IF mosic sync fails:
-  - Display warning: "Mosic sync failed: [error]. Todo saved locally."
-  - Add to mosic.pending_sync array in config.json:
-    { type: "todo", file: "[filename]", action: "create" }
-  - Continue (don't block)
-```
-
-**If mosic.enabled = false:** Skip Mosic sync.
 </step>
 
 <step name="confirm">
 ```
-Todo saved: .planning/todos/pending/[filename]
+✓ Todo captured
 
-  [title]
+  Title: [title]
   Area: [area]
-  Files: [count] referenced
-  [IF mosic.enabled:] Mosic: https://mosic.pro/app/MTask/[todo_task_id]
+  Mosic: https://mosic.pro/app/MTask/[todo_task_id]
 
 ---
 
@@ -271,28 +219,26 @@ Would you like to:
 </process>
 
 <output>
-- `.planning/todos/pending/[date]-[slug].md`
-- Updated `.planning/STATE.md` (if exists)
-- MTask in Mosic (if enabled)
+- MTask created in Mosic with "lucide:lightbulb" icon
+- Tags applied (gsd-managed, area tag)
+- config.json updated with todo reference
 </output>
 
 <anti_patterns>
 - Don't create todos for work in current plan (that's deviation rule territory)
 - Don't create elaborate solution sections — captures ideas, not plans
 - Don't block on missing information — "TBD" is fine
+- Don't create local files — all todos live in Mosic
 </anti_patterns>
 
 <success_criteria>
-- [ ] Directory structure exists
-- [ ] Todo file created with valid frontmatter
-- [ ] Problem section has enough context for future Claude
-- [ ] No duplicates (checked and resolved)
-- [ ] Area consistent with existing todos
-- [ ] STATE.md updated if exists
-- [ ] Todo and state committed to git
-- [ ] Mosic sync (if enabled):
-  - [ ] MTask created for todo
-  - [ ] Tags applied (gsd-managed, area tag)
-  - [ ] mosic_task_id added to todo frontmatter
-  - [ ] Sync failure handled gracefully (added to pending_sync)
+- [ ] Config loaded from config.json
+- [ ] Existing area tags fetched from Mosic
+- [ ] Todo content extracted (title, problem, solution, files)
+- [ ] Area inferred and tag created if needed
+- [ ] Duplicate check performed via mosic_search_tasks
+- [ ] MTask created with "lucide:lightbulb" icon
+- [ ] Tags applied (gsd-managed, area tag)
+- [ ] config.json updated
+- [ ] User shown todo URL and next options
 </success_criteria>

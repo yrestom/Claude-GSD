@@ -1,6 +1,6 @@
 ---
 name: gsd:new-milestone
-description: Start a new milestone cycle — update PROJECT.md and route to requirements
+description: Start a new milestone cycle — update project and route to requirements
 argument-hint: "[milestone name, e.g., 'v1.1 Notifications']"
 allowed-tools:
   - Read
@@ -8,19 +8,22 @@ allowed-tools:
   - Bash
   - Task
   - AskUserQuestion
+  - mcp__mosic_pro__*
 ---
 
 <objective>
 Start a new milestone through unified flow: questioning → research (optional) → requirements → roadmap.
 
-This is the brownfield equivalent of new-project. The project exists, PROJECT.md has history. This command gathers "what's next", updates PROJECT.md, then continues through the full requirements → roadmap cycle.
+This is the brownfield equivalent of new-project. The project exists in Mosic. This command gathers "what's next", updates the project, then continues through the full requirements → roadmap cycle.
+
+**Mosic-only architecture:** All state stored in Mosic. Local config.json for session context only.
 
 **Creates/Updates:**
-- `.planning/PROJECT.md` — updated with new milestone goals
-- `.planning/research/` — domain research (optional, focuses on NEW features)
-- `.planning/REQUIREMENTS.md` — scoped requirements for this milestone
-- `.planning/ROADMAP.md` — phase structure (continues numbering)
-- `.planning/STATE.md` — reset for new milestone
+- MProject in Mosic — updated with new milestone goals
+- M Pages — research documents (optional, focuses on NEW features)
+- M Page — requirements page scoped for this milestone
+- MTask Lists — phases for this milestone
+- config.json — local session context
 
 **After this command:** Run `/gsd:plan-phase [N]` to start execution.
 </objective>
@@ -35,32 +38,49 @@ This is the brownfield equivalent of new-project. The project exists, PROJECT.md
 <context>
 Milestone name: $ARGUMENTS (optional - will prompt if not provided)
 
-**Load project context:**
-@.planning/PROJECT.md
-@.planning/STATE.md
-@.planning/MILESTONES.md
-@.planning/config.json
-
-**Load milestone context (if exists, from /gsd:discuss-milestone):**
-@.planning/MILESTONE-CONTEXT.md
+Load from Mosic MCP:
+- config.json → workspace_id, project_id
+- mosic_get_project(project_id, { include_task_lists: true }) → existing project
+- mosic_get_entity_pages("MProject", project_id, { content_format: "markdown" }) → project docs
 </context>
 
 <process>
 
-## Phase 1: Load Context
+## Phase 1: Load Context from Mosic
 
-- Read PROJECT.md (existing project, Validated requirements, decisions)
-- Read MILESTONES.md (what shipped previously)
-- Read STATE.md (pending todos, blockers)
-- Check for MILESTONE-CONTEXT.md (from /gsd:discuss-milestone)
+```bash
+WORKSPACE_ID=$(cat config.json 2>/dev/null | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat config.json 2>/dev/null | jq -r ".mosic.project_id")
+```
+
+```
+# Get project with task lists
+project = mosic_get_project(PROJECT_ID, { include_task_lists: true })
+
+# Get project documentation
+project_pages = mosic_get_entity_pages("MProject", PROJECT_ID, {
+  content_format: "markdown"
+})
+
+# Find key pages
+overview_page = project_pages.find(p => p.title.includes("Overview"))
+requirements_page = project_pages.find(p => p.title.includes("Requirements"))
+milestones_page = project_pages.find(p => p.title.includes("Milestones"))
+
+# Get completed phases (for numbering)
+completed_phases = project.task_lists.filter(tl =>
+  tl.status == "Completed" || tl.status == "Done"
+)
+```
 
 ## Phase 2: Gather Milestone Goals
 
-**If MILESTONE-CONTEXT.md exists:**
-- Use features and scope from discuss-milestone
+**If milestone context exists (from /gsd:discuss-milestone):**
+- Check for recent milestone context page
+- Use features and scope from discussion
 - Present summary for confirmation
 
-**If no context file:**
+**If no context:**
 - Present what shipped in last milestone
 - Ask: "What do you want to build next?"
 - Use AskUserQuestion to explore features
@@ -68,69 +88,66 @@ Milestone name: $ARGUMENTS (optional - will prompt if not provided)
 
 ## Phase 3: Determine Milestone Version
 
-- Parse last version from MILESTONES.md
+- Parse last version from milestones page or project metadata
 - Suggest next version (v1.0 → v1.1, or v2.0 for major)
 - Confirm with user
 
-## Phase 4: Update PROJECT.md
+## Phase 4: Update Project in Mosic
 
-Add/update these sections:
+```
+# Update project with new milestone info
+mosic_update_document("MProject", PROJECT_ID, {
+  description: build_milestone_description({
+    current_milestone: milestone_version,
+    milestone_name: milestone_name,
+    goal: milestone_goal,
+    features: milestone_features
+  })
+})
 
-```markdown
-## Current Milestone: v[X.Y] [Name]
+# Create/update milestone overview page
+milestone_overview = mosic_create_entity_page("MProject", PROJECT_ID, {
+  workspace_id: WORKSPACE_ID,
+  title: "Milestone v" + milestone_version + " Overview",
+  page_type: "Document",
+  icon: "lucide:rocket",
+  status: "Published",
+  content: build_milestone_overview_content({
+    version: milestone_version,
+    name: milestone_name,
+    goal: milestone_goal,
+    features: milestone_features
+  }),
+  relation_type: "Related"
+})
 
-**Goal:** [One sentence describing milestone focus]
-
-**Target features:**
-- [Feature 1]
-- [Feature 2]
-- [Feature 3]
+# Tag the page
+GSD_MANAGED_TAG = config.mosic.tags.gsd_managed
+mosic_add_tag_to_document("M Page", milestone_overview.name, GSD_MANAGED_TAG)
 ```
 
-Update Active requirements section with new goals.
+## Phase 5: Update Session Context
 
-Update "Last updated" footer.
+Update config.json with milestone session:
 
-## Phase 5: Update STATE.md
-
-```markdown
-## Current Position
-
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: [today] — Milestone v[X.Y] started
+```json
+{
+  "session": {
+    "current_milestone": "v[X.Y]",
+    "milestone_name": "[name]",
+    "status": "defining_requirements",
+    "last_activity": "[timestamp]"
+  }
+}
 ```
 
-Keep Accumulated Context section (decisions, blockers) from previous milestone.
-
-## Phase 6: Cleanup and Commit
-
-Delete MILESTONE-CONTEXT.md if exists (consumed).
-
-Check planning config:
-```bash
-COMMIT_PLANNING_DOCS=$(cat .planning/config.json 2>/dev/null | grep -o '"commit_docs"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "true")
-git check-ignore -q .planning 2>/dev/null && COMMIT_PLANNING_DOCS=false
-```
-
-If `COMMIT_PLANNING_DOCS=false`: Skip git operations
-
-If `COMMIT_PLANNING_DOCS=true` (default):
-```bash
-git add .planning/PROJECT.md .planning/STATE.md
-git commit -m "docs: start milestone v[X.Y] [Name]"
-```
-
-## Phase 6.5: Resolve Model Profile
+## Phase 6: Resolve Model Profile
 
 Read model profile for agent spawning:
 
 ```bash
-MODEL_PROFILE=$(cat .planning/config.json 2>/dev/null | grep -o '"model_profile"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || echo "balanced")
+MODEL_PROFILE=$(cat config.json 2>/dev/null | jq -r ".model_profile // \"balanced\"")
 ```
-
-Default to "balanced" if not set.
 
 **Model lookup table:**
 
@@ -139,8 +156,6 @@ Default to "balanced" if not set.
 | gsd-project-researcher | opus | sonnet | haiku |
 | gsd-research-synthesizer | sonnet | sonnet | haiku |
 | gsd-roadmapper | opus | sonnet | sonnet |
-
-Store resolved models for use in Task calls below.
 
 ## Phase 7: Research Decision
 
@@ -153,642 +168,100 @@ Use AskUserQuestion:
 
 **If "Research first":**
 
-Display stage banner:
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► RESEARCHING
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Display stage banner and spawn 4 parallel researcher agents.
 
-Researching [new features] ecosystem...
-```
-
-Create research directory:
-```bash
-mkdir -p .planning/research
-```
-
-Display spawning indicator:
-```
-◆ Spawning 4 researchers in parallel...
-  → Stack research (for new features)
-  → Features research
-  → Architecture research (integration)
-  → Pitfalls research
-```
-
-Spawn 4 parallel gsd-project-researcher agents with milestone-aware context:
+Research pages created as M Pages linked to project:
 
 ```
-Task(prompt="
-<research_type>
-Project Research — Stack dimension for [new features].
-</research_type>
+FOR each research_type in ["STACK", "FEATURES", "ARCHITECTURE", "PITFALLS"]:
+  research_page = mosic_create_entity_page("MProject", PROJECT_ID, {
+    workspace_id: WORKSPACE_ID,
+    title: "Milestone v" + milestone_version + " Research - " + research_type,
+    page_type: "Document",
+    icon: "lucide:search",
+    status: "Draft",
+    content: research_content,
+    relation_type: "Related"
+  })
 
-<milestone_context>
-SUBSEQUENT MILESTONE — Adding [target features] to existing app.
-
-Existing validated capabilities (DO NOT re-research):
-[List from PROJECT.md Validated requirements]
-
-Focus ONLY on what's needed for the NEW features.
-</milestone_context>
-
-<question>
-What stack additions/changes are needed for [new features]?
-</question>
-
-<project_context>
-[PROJECT.md summary - current state, new milestone goals]
-</project_context>
-
-<downstream_consumer>
-Your STACK.md feeds into roadmap creation. Be prescriptive:
-- Specific libraries with versions for NEW capabilities
-- Integration points with existing stack
-- What NOT to add and why
-</downstream_consumer>
-
-<quality_gate>
-- [ ] Versions are current (verify with Context7/official docs, not training data)
-- [ ] Rationale explains WHY, not just WHAT
-- [ ] Integration with existing stack considered
-</quality_gate>
-
-<output>
-Write to: .planning/research/STACK.md
-Use template: ~/.claude/get-shit-done/templates/research-project/STACK.md
-</output>
-", subagent_type="gsd-project-researcher", model="{researcher_model}", description="Stack research")
-
-Task(prompt="
-<research_type>
-Project Research — Features dimension for [new features].
-</research_type>
-
-<milestone_context>
-SUBSEQUENT MILESTONE — Adding [target features] to existing app.
-
-Existing features (already built):
-[List from PROJECT.md Validated requirements]
-
-Focus on how [new features] typically work, expected behavior.
-</milestone_context>
-
-<question>
-How do [target features] typically work? What's expected behavior?
-</question>
-
-<project_context>
-[PROJECT.md summary - new milestone goals]
-</project_context>
-
-<downstream_consumer>
-Your FEATURES.md feeds into requirements definition. Categorize clearly:
-- Table stakes (must have for these features)
-- Differentiators (competitive advantage)
-- Anti-features (things to deliberately NOT build)
-</downstream_consumer>
-
-<quality_gate>
-- [ ] Categories are clear (table stakes vs differentiators vs anti-features)
-- [ ] Complexity noted for each feature
-- [ ] Dependencies on existing features identified
-</quality_gate>
-
-<output>
-Write to: .planning/research/FEATURES.md
-Use template: ~/.claude/get-shit-done/templates/research-project/FEATURES.md
-</output>
-", subagent_type="gsd-project-researcher", model="{researcher_model}", description="Features research")
-
-Task(prompt="
-<research_type>
-Project Research — Architecture dimension for [new features].
-</research_type>
-
-<milestone_context>
-SUBSEQUENT MILESTONE — Adding [target features] to existing app.
-
-Existing architecture:
-[Summary from PROJECT.md or codebase map]
-
-Focus on how [new features] integrate with existing architecture.
-</milestone_context>
-
-<question>
-How do [target features] integrate with existing [domain] architecture?
-</question>
-
-<project_context>
-[PROJECT.md summary - current architecture, new features]
-</project_context>
-
-<downstream_consumer>
-Your ARCHITECTURE.md informs phase structure in roadmap. Include:
-- Integration points with existing components
-- New components needed
-- Data flow changes
-- Suggested build order
-</downstream_consumer>
-
-<quality_gate>
-- [ ] Integration points clearly identified
-- [ ] New vs modified components explicit
-- [ ] Build order considers existing dependencies
-</quality_gate>
-
-<output>
-Write to: .planning/research/ARCHITECTURE.md
-Use template: ~/.claude/get-shit-done/templates/research-project/ARCHITECTURE.md
-</output>
-", subagent_type="gsd-project-researcher", model="{researcher_model}", description="Architecture research")
-
-Task(prompt="
-<research_type>
-Project Research — Pitfalls dimension for [new features].
-</research_type>
-
-<milestone_context>
-SUBSEQUENT MILESTONE — Adding [target features] to existing app.
-
-Focus on common mistakes when ADDING these features to an existing system.
-</milestone_context>
-
-<question>
-What are common mistakes when adding [target features] to [domain]?
-</question>
-
-<project_context>
-[PROJECT.md summary - current state, new features]
-</project_context>
-
-<downstream_consumer>
-Your PITFALLS.md prevents mistakes in roadmap/planning. For each pitfall:
-- Warning signs (how to detect early)
-- Prevention strategy (how to avoid)
-- Which phase should address it
-</downstream_consumer>
-
-<quality_gate>
-- [ ] Pitfalls are specific to adding these features (not generic)
-- [ ] Integration pitfalls with existing system covered
-- [ ] Prevention strategies are actionable
-</quality_gate>
-
-<output>
-Write to: .planning/research/PITFALLS.md
-Use template: ~/.claude/get-shit-done/templates/research-project/PITFALLS.md
-</output>
-", subagent_type="gsd-project-researcher", model="{researcher_model}", description="Pitfalls research")
+  mosic_batch_add_tags_to_document("M Page", research_page.name, [
+    GSD_MANAGED_TAG,
+    config.mosic.tags.research
+  ])
 ```
 
-After all 4 agents complete, spawn synthesizer to create SUMMARY.md:
-
-```
-Task(prompt="
-<task>
-Synthesize research outputs into SUMMARY.md.
-</task>
-
-<research_files>
-Read these files:
-- .planning/research/STACK.md
-- .planning/research/FEATURES.md
-- .planning/research/ARCHITECTURE.md
-- .planning/research/PITFALLS.md
-</research_files>
-
-<output>
-Write to: .planning/research/SUMMARY.md
-Use template: ~/.claude/get-shit-done/templates/research-project/SUMMARY.md
-Commit after writing.
-</output>
-", subagent_type="gsd-research-synthesizer", model="{synthesizer_model}", description="Synthesize research")
-```
-
-Display research complete banner and key findings:
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► RESEARCH COMPLETE ✓
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-## Key Findings
-
-**Stack additions:** [from SUMMARY.md]
-**New feature table stakes:** [from SUMMARY.md]
-**Watch Out For:** [from SUMMARY.md]
-
-Files: `.planning/research/`
-```
+Spawn synthesizer to create SUMMARY page linking all research.
 
 **If "Skip research":** Continue to Phase 8.
 
 ## Phase 8: Define Requirements
 
-Display stage banner:
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► DEFINING REQUIREMENTS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
+Display stage banner. Gather requirements through conversation.
 
-**Load context:**
-
-Read PROJECT.md and extract:
-- Core value (the ONE thing that must work)
-- Current milestone goals
-- Validated requirements (what already exists)
-
-**If research exists:** Read research/FEATURES.md and extract feature categories.
-
-**Present features by category:**
+**Generate requirements page in Mosic:**
 
 ```
-Here are the features for [new capabilities]:
+requirements_content = build_requirements_content({
+  milestone: milestone_version,
+  categories: requirement_categories,
+  requirements: requirements_list,
+  future: future_requirements,
+  out_of_scope: exclusions
+})
 
-## [Category 1]
-**Table stakes:**
-- Feature A
-- Feature B
+requirements_page = mosic_create_entity_page("MProject", PROJECT_ID, {
+  workspace_id: WORKSPACE_ID,
+  title: "Milestone v" + milestone_version + " Requirements",
+  page_type: "Spec",
+  icon: "lucide:list-checks",
+  status: "Published",
+  content: requirements_content,
+  relation_type: "Related"
+})
 
-**Differentiators:**
-- Feature C
-- Feature D
-
-**Research notes:** [any relevant notes]
-
----
-
-## [Next Category]
-...
-```
-
-**If no research:** Gather requirements through conversation instead.
-
-Ask: "What are the main things users need to be able to do with [new features]?"
-
-For each capability mentioned:
-- Ask clarifying questions to make it specific
-- Probe for related capabilities
-- Group into categories
-
-**Scope each category:**
-
-For each category, use AskUserQuestion:
-
-- header: "[Category name]"
-- question: "Which [category] features are in this milestone?"
-- multiSelect: true
-- options:
-  - "[Feature 1]" — [brief description]
-  - "[Feature 2]" — [brief description]
-  - "[Feature 3]" — [brief description]
-  - "None for this milestone" — Defer entire category
-
-Track responses:
-- Selected features → this milestone's requirements
-- Unselected table stakes → future milestone
-- Unselected differentiators → out of scope
-
-**Identify gaps:**
-
-Use AskUserQuestion:
-- header: "Additions"
-- question: "Any requirements research missed? (Features specific to your vision)"
-- options:
-  - "No, research covered it" — Proceed
-  - "Yes, let me add some" — Capture additions
-
-**Generate REQUIREMENTS.md:**
-
-Create `.planning/REQUIREMENTS.md` with:
-- v1 Requirements for THIS milestone grouped by category (checkboxes, REQ-IDs)
-- Future Requirements (deferred to later milestones)
-- Out of Scope (explicit exclusions with reasoning)
-- Traceability section (empty, filled by roadmap)
-
-**REQ-ID format:** `[CATEGORY]-[NUMBER]` (AUTH-01, NOTIF-02)
-
-Continue numbering from existing requirements if applicable.
-
-**Requirement quality criteria:**
-
-Good requirements are:
-- **Specific and testable:** "User can reset password via email link" (not "Handle password reset")
-- **User-centric:** "User can X" (not "System does Y")
-- **Atomic:** One capability per requirement (not "User can login and manage profile")
-- **Independent:** Minimal dependencies on other requirements
-
-**Present full requirements list:**
-
-Show every requirement (not counts) for user confirmation:
-
-```
-## Milestone v[X.Y] Requirements
-
-### [Category 1]
-- [ ] **CAT1-01**: User can do X
-- [ ] **CAT1-02**: User can do Y
-
-### [Category 2]
-- [ ] **CAT2-01**: User can do Z
-
-[... full list ...]
-
----
-
-Does this capture what you're building? (yes / adjust)
-```
-
-If "adjust": Return to scoping.
-
-**Commit requirements:**
-
-Check planning config (same pattern as Phase 6).
-
-If committing:
-```bash
-git add .planning/REQUIREMENTS.md
-git commit -m "$(cat <<'EOF'
-docs: define milestone v[X.Y] requirements
-
-[X] requirements across [N] categories
-EOF
-)"
+mosic_batch_add_tags_to_document("M Page", requirements_page.name, [
+  GSD_MANAGED_TAG,
+  config.mosic.tags.requirements
+])
 ```
 
 ## Phase 9: Create Roadmap
 
-Display stage banner:
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► CREATING ROADMAP
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-◆ Spawning roadmapper...
-```
+Display stage banner and spawn gsd-roadmapper agent.
 
 **Determine starting phase number:**
 
-Read MILESTONES.md to find the last phase number from previous milestone.
-New phases continue from there (e.g., if v1.0 ended at phase 5, v1.1 starts at phase 6).
-
-Spawn gsd-roadmapper agent with context:
-
 ```
-Task(prompt="
-<planning_context>
+# Find highest phase number from completed task lists
+max_phase = completed_phases
+  .map(tl => extract_phase_number(tl.title))
+  .filter(n => !isNaN(n))
+  .max() || 0
 
-**Project:**
-@.planning/PROJECT.md
-
-**Requirements:**
-@.planning/REQUIREMENTS.md
-
-**Research (if exists):**
-@.planning/research/SUMMARY.md
-
-**Config:**
-@.planning/config.json
-
-**Previous milestone (for phase numbering):**
-@.planning/MILESTONES.md
-
-</planning_context>
-
-<instructions>
-Create roadmap for milestone v[X.Y]:
-1. Start phase numbering from [N] (continues from previous milestone)
-2. Derive phases from THIS MILESTONE's requirements (don't include validated/existing)
-3. Map every requirement to exactly one phase
-4. Derive 2-5 success criteria per phase (observable user behaviors)
-5. Validate 100% coverage of new requirements
-6. Write files immediately (ROADMAP.md, STATE.md, update REQUIREMENTS.md traceability)
-7. Return ROADMAP CREATED with summary
-
-Write files first, then return. This ensures artifacts persist even if context is lost.
-</instructions>
-", subagent_type="gsd-roadmapper", model="{roadmapper_model}", description="Create roadmap")
+starting_phase = max_phase + 1
 ```
 
-**Handle roadmapper return:**
-
-**If `## ROADMAP BLOCKED`:**
-- Present blocker information
-- Work with user to resolve
-- Re-spawn when resolved
-
-**If `## ROADMAP CREATED`:**
-
-Read the created ROADMAP.md and present it nicely inline:
+Roadmapper creates MTask Lists for each phase:
 
 ```
----
-
-## Proposed Roadmap
-
-**[N] phases** | **[X] requirements mapped** | All milestone requirements covered ✓
-
-| # | Phase | Goal | Requirements | Success Criteria |
-|---|-------|------|--------------|------------------|
-| [N] | [Name] | [Goal] | [REQ-IDs] | [count] |
-| [N+1] | [Name] | [Goal] | [REQ-IDs] | [count] |
-...
-
-### Phase Details
-
-**Phase [N]: [Name]**
-Goal: [goal]
-Requirements: [REQ-IDs]
-Success criteria:
-1. [criterion]
-2. [criterion]
-
-[... continue for all phases ...]
-
----
-```
-
-**CRITICAL: Ask for approval before committing:**
-
-Use AskUserQuestion:
-- header: "Roadmap"
-- question: "Does this roadmap structure work for you?"
-- options:
-  - "Approve" — Commit and continue
-  - "Adjust phases" — Tell me what to change
-  - "Review full file" — Show raw ROADMAP.md
-
-**If "Approve":** Continue to commit.
-
-**If "Adjust phases":**
-- Get user's adjustment notes
-- Re-spawn roadmapper with revision context:
-  ```
-  Task(prompt="
-  <revision>
-  User feedback on roadmap:
-  [user's notes]
-
-  Current ROADMAP.md: @.planning/ROADMAP.md
-
-  Update the roadmap based on feedback. Edit files in place.
-  Return ROADMAP REVISED with changes made.
-  </revision>
-  ", subagent_type="gsd-roadmapper", model="{roadmapper_model}", description="Revise roadmap")
-  ```
-- Present revised roadmap
-- Loop until user approves
-
-**If "Review full file":** Display raw `cat .planning/ROADMAP.md`, then re-ask.
-
-**Commit roadmap (after approval):**
-
-Check planning config (same pattern as Phase 6).
-
-If committing:
-```bash
-git add .planning/ROADMAP.md .planning/STATE.md .planning/REQUIREMENTS.md
-git commit -m "$(cat <<'EOF'
-docs: create milestone v[X.Y] roadmap ([N] phases)
-
-Phases:
-[N]. [phase-name]: [requirements covered]
-[N+1]. [phase-name]: [requirements covered]
-...
-
-All milestone requirements mapped to phases.
-EOF
-)"
-```
-
-## Phase 10: Sync Milestone to Mosic (Deep Integration)
-
-**Check if Mosic is enabled:**
-
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true:**
-
-Display:
-```
-◆ Syncing milestone to Mosic...
-```
-
-### Step 10.1: Load Mosic Config
-
-```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-```
-
-### Step 10.2: Update or Create MProject
-
-```
-IF PROJECT_ID exists:
-  # Update existing project with new milestone info
-  mosic_update_document("MProject", PROJECT_ID, {
-    title: project_name + " - " + milestone_version,
-    description: "Current Milestone: v" + milestone_version + " " + milestone_name + "\n\n" + milestone_goal,
-    status: "Active"
-  })
-ELSE:
-  # Create new project for this milestone
-  project = mosic_create_document("MProject", {
-    workspace_id: workspace_id,
-    title: project_name + " - " + milestone_version,
-    description: "Milestone: v" + milestone_version + " " + milestone_name + "\n\n" + milestone_goal,
-    icon: "lucide:rocket",
-    color: "blue",
-    status: "Active",
-    prefix: "MS" + milestone_version.replace(".", "")
-  })
-  PROJECT_ID = project.name
-
-  # Update config with project ID
-  mosic.project_id = PROJECT_ID
-```
-
-### Step 10.3: Tag the Project
-
-```
-mosic_add_tag_to_document("MProject", PROJECT_ID, GSD_MANAGED_TAG)
-```
-
-### Step 10.4: Create Milestone Overview Page
-
-```
-overview_page = mosic_create_entity_page("MProject", PROJECT_ID, {
-  workspace_id: workspace_id,
-  title: "Milestone v" + milestone_version + " Overview",
-  page_type: "Document",
-  icon: mosic.page_icons.overview,
-  status: "Published",
-  content: {
-    blocks: [
-      { type: "header", data: { text: "Milestone v" + milestone_version + ": " + milestone_name, level: 1 } },
-      { type: "paragraph", data: { text: milestone_goal } },
-      { type: "header", data: { text: "Target Features", level: 2 } },
-      { type: "list", data: { style: "unordered", items: milestone_features } },
-      { type: "header", data: { text: "Phases", level: 2 } },
-      { type: "paragraph", data: { text: "See linked Task Lists for phase details." } }
-    ]
-  },
-  relation_type: "Related"
-})
-
-mosic_add_tag_to_document("M Page", overview_page.name, GSD_MANAGED_TAG)
-mosic.pages["milestone-" + milestone_version + "-overview"] = overview_page.name
-```
-
-### Step 10.5: Create Requirements Page
-
-```
-IF REQUIREMENTS.md was created:
-  req_page = mosic_create_entity_page("MProject", PROJECT_ID, {
-    workspace_id: workspace_id,
-    title: "Milestone v" + milestone_version + " Requirements",
-    page_type: "Spec",
-    icon: mosic.page_icons.requirements,
-    status: "Published",
-    content: convert_to_editorjs(REQUIREMENTS.md content),
-    relation_type: "Related"
+FOR each phase in roadmap:
+  # Create phase tag
+  phase_tag = mosic_create_document("M Tag", {
+    workspace_id: WORKSPACE_ID,
+    title: "phase-" + phase.number,
+    color: "#3B82F6"
   })
 
-  mosic_batch_add_tags_to_document("M Page", req_page.name, [
-    GSD_MANAGED_TAG,
-    mosic.tags.requirements
-  ])
-
-  mosic.pages["milestone-" + milestone_version + "-requirements"] = req_page.name
-```
-
-### Step 10.6: Create Task Lists for Each Phase
-
-```
-FOR each phase in ROADMAP.md:
-  # Create phase tag if not exists
-  phase_tag = mosic_search_tags({ workspace_id, query: "phase-" + phase_num })
-  IF phase_tag.length == 0:
-    phase_tag = mosic_create_document("M Tag", {
-      workspace_id: workspace_id,
-      name: "phase-" + phase_num,
-      color: "blue"
-    })
-
-  # Create MTask List for phase
+  # Create MTask List
   task_list = mosic_create_document("MTask List", {
-    workspace_id: workspace_id,
+    workspace_id: WORKSPACE_ID,
     project: PROJECT_ID,
-    title: "Phase " + phase_num + ": " + phase_name,
-    description: phase_goal,
+    title: "Phase " + phase.number + ": " + phase.name,
+    description: phase.goal,
     icon: "lucide:layers",
-    color: "slate",
+    color: "#64748B",
     status: "Backlog",
-    prefix: "P" + phase_num
+    prefix: "P" + phase.number
   })
 
   # Tag the task list
@@ -798,58 +271,61 @@ FOR each phase in ROADMAP.md:
   ])
 
   # Create Depends relation to previous phase
-  IF prev_phase_task_list:
+  IF prev_task_list:
     mosic_create_document("M Relation", {
-      workspace_id: workspace_id,
+      workspace_id: WORKSPACE_ID,
       source_doctype: "MTask List",
       source_name: task_list.name,
       target_doctype: "MTask List",
-      target_name: prev_phase_task_list,
+      target_name: prev_task_list,
       relation_type: "Depends"
     })
 
   # Store mapping
-  mosic.task_lists["phase-" + phase_num] = task_list.name
-  mosic.tags.phase_tags["phase-" + phase_num] = phase_tag.name
-  prev_phase_task_list = task_list.name
+  config.mosic.task_lists["phase-" + phase.number] = task_list.name
+  config.mosic.tags.phase_tags["phase-" + phase.number] = phase_tag.name
+  prev_task_list = task_list.name
 ```
 
-### Step 10.7: Update config.json with Mappings
+**Present roadmap and get approval** before continuing.
 
-```bash
-# Update config.json with:
-# mosic.project_id
-# mosic.task_lists["phase-NN"] for each phase
-# mosic.pages["milestone-X.Y-overview"]
-# mosic.pages["milestone-X.Y-requirements"]
-# mosic.tags.phase_tags["phase-NN"]
-# mosic.last_sync = current timestamp
+## Phase 10: Update config.json
+
+```json
+{
+  "mosic": {
+    "project_id": "[PROJECT_ID]",
+    "workspace_id": "[WORKSPACE_ID]",
+    "task_lists": {
+      "phase-6": "[task_list_id]",
+      "phase-7": "[task_list_id]",
+      "phase-8": "[task_list_id]"
+    },
+    "pages": {
+      "milestone-v1.1-overview": "[page_id]",
+      "milestone-v1.1-requirements": "[page_id]",
+      "milestone-v1.1-research-summary": "[page_id]"
+    },
+    "tags": {
+      "gsd_managed": "[tag_id]",
+      "requirements": "[tag_id]",
+      "research": "[tag_id]",
+      "phase_tags": {
+        "phase-6": "[tag_id]",
+        "phase-7": "[tag_id]"
+      }
+    },
+    "last_sync": "[timestamp]"
+  },
+  "session": {
+    "current_milestone": "v1.1",
+    "milestone_name": "[name]",
+    "status": "ready",
+    "starting_phase": 6,
+    "last_activity": "[timestamp]"
+  }
+}
 ```
-
-Display:
-```
-✓ Milestone synced to Mosic
-
-  Project: https://mosic.pro/app/MProject/[PROJECT_ID]
-  Phases: [N] task lists created
-  Pages: Overview + Requirements
-
-  Phase Structure:
-  ├─ Phase [N]: [name]
-  ├─ Phase [N+1]: [name] → depends on Phase [N]
-  └─ Phase [N+2]: [name] → depends on Phase [N+1]
-```
-
-**Error handling:**
-
-```
-IF mosic sync fails:
-  - Log warning: "Mosic sync failed: [error]. Milestone created locally."
-  - Add to mosic.pending_sync array for retry
-  - Continue to completion step (don't block)
-```
-
-**If mosic.enabled = false:** Skip to Phase 11.
 
 ## Phase 11: Done
 
@@ -862,15 +338,12 @@ Present completion with next steps:
 
 **Milestone v[X.Y]: [Name]**
 
-| Artifact       | Location                    |
-|----------------|-----------------------------|
-| Project        | `.planning/PROJECT.md`      |
-| Research       | `.planning/research/`       |
-| Requirements   | `.planning/REQUIREMENTS.md` |
-| Roadmap        | `.planning/ROADMAP.md`      |
-[IF mosic.enabled:]
-| Mosic Project  | https://mosic.pro/app/MProject/[PROJECT_ID] |
-[END IF]
+| Artifact       | Location                                    |
+|----------------|---------------------------------------------|
+| Project        | https://mosic.pro/app/MProject/[PROJECT_ID] |
+| Overview       | https://mosic.pro/app/page/[overview_id]    |
+| Requirements   | https://mosic.pro/app/page/[requirements_id]|
+| Research       | https://mosic.pro/app/page/[research_id]    |
 
 **[N] phases** | **[X] requirements** | Ready to build ✓
 
@@ -878,7 +351,7 @@ Present completion with next steps:
 
 ## ▶ Next Up
 
-**Phase [N]: [Phase Name]** — [Goal from ROADMAP.md]
+**Phase [N]: [Phase Name]** — [Goal]
 
 `/gsd:discuss-phase [N]` — gather context and clarify approach
 
@@ -894,28 +367,27 @@ Present completion with next steps:
 
 </process>
 
-<success_criteria>
-- [ ] PROJECT.md updated with Current Milestone section
-- [ ] STATE.md reset for new milestone
-- [ ] MILESTONE-CONTEXT.md consumed and deleted (if existed)
-- [ ] Research completed (if selected) — 4 parallel agents spawned, milestone-aware
-- [ ] Requirements gathered (from research or conversation)
-- [ ] User scoped each category
-- [ ] REQUIREMENTS.md created with REQ-IDs
-- [ ] gsd-roadmapper spawned with phase numbering context
-- [ ] Roadmap files written immediately (not draft)
-- [ ] User feedback incorporated (if any)
-- [ ] ROADMAP.md created with phases continuing from previous milestone
-- [ ] All commits made (if planning docs committed)
-- [ ] Mosic sync (if enabled):
-  - [ ] MProject created or updated with milestone info
-  - [ ] Overview page created for milestone
-  - [ ] Requirements page created (if REQUIREMENTS.md exists)
-  - [ ] MTask Lists created for each phase
-  - [ ] Depends relations created between phases
-  - [ ] Tags applied (gsd-managed, phase-NN)
-  - [ ] config.json updated with all mappings
-- [ ] User knows next step is `/gsd:discuss-phase [N]`
+<error_handling>
+```
+IF mosic operation fails:
+  - Display warning: "Mosic operation failed: [error]. Retrying..."
+  - Implement retry with exponential backoff
+  - After 3 failures, add to config.mosic.pending_sync
+  - Continue if possible (don't block)
+```
+</error_handling>
 
-**Atomic commits:** Each phase commits its artifacts immediately. If context is lost, artifacts persist.
+<success_criteria>
+- [ ] Project context loaded from Mosic
+- [ ] Milestone goals gathered from user
+- [ ] MProject updated with milestone info
+- [ ] Milestone overview page created
+- [ ] Research completed (if selected) — pages created in Mosic
+- [ ] Requirements gathered and page created
+- [ ] Roadmapper spawned with phase numbering context
+- [ ] MTask Lists created for each phase
+- [ ] Depends relations created between phases
+- [ ] Tags applied (gsd-managed, phase-NN)
+- [ ] config.json updated with all mappings
+- [ ] User knows next step is `/gsd:discuss-phase [N]`
 </success_criteria>

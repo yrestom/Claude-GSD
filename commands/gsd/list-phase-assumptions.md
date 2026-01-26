@@ -9,6 +9,7 @@ allowed-tools:
   - Grep
   - Glob
   - ToolSearch
+  - mcp__mosic_pro__*
 ---
 
 <objective>
@@ -17,7 +18,9 @@ Analyze a phase and present Claude's assumptions about technical approach, imple
 Purpose: Help users see what Claude thinks BEFORE planning begins - enabling course correction early when assumptions are wrong.
 Output: Conversational output only (no file creation) - ends with "What do you think?" prompt
 
-Optionally syncs assumptions as page content to Mosic for team visibility.
+Optionally syncs assumptions as M Page content to Mosic for team visibility.
+
+**Mosic-only architecture:** Phase context loaded from MTask List, assumptions optionally saved as M Page.
 </objective>
 
 <execution_context>
@@ -27,132 +30,126 @@ Optionally syncs assumptions as page content to Mosic for team visibility.
 <context>
 Phase number: $ARGUMENTS (required)
 
-**Load project state first:**
-@.planning/STATE.md
-
-**Load roadmap:**
-@.planning/ROADMAP.md
+Load from Mosic MCP:
+- config.json → workspace_id, project_id
+- mosic_get_project(project_id, { include_task_lists: true }) → phases
+- mosic_get_task_list(task_list_id) → phase details
+- mosic_get_entity_pages("MTask List", task_list_id) → phase documentation
 </context>
 
 <process>
-1. Validate phase number argument (error if missing or invalid)
-2. Check if phase exists in roadmap
-3. Follow list-phase-assumptions.md workflow:
-   - Analyze roadmap description
-   - Surface assumptions about: technical approach, implementation order, scope, risks, dependencies
-   - Present assumptions clearly
-   - Prompt "What do you think?"
-4. Gather feedback and offer next steps
-5. Optionally sync assumptions to Mosic
+
+## 1. Load Session Context
+
+```bash
+WORKSPACE_ID=$(cat config.json 2>/dev/null | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat config.json 2>/dev/null | jq -r ".mosic.project_id")
+```
+
+If config.json missing:
+```
+No active GSD session. Run /gsd:new-project first.
+```
+Exit.
+
+## 2. Validate Phase Argument
+
+```
+IF $ARGUMENTS is empty:
+  ERROR: Phase number required.
+  Usage: /gsd:list-phase-assumptions <phase-number>
+  Example: /gsd:list-phase-assumptions 3
+  Exit.
+```
+
+## 3. Load Phase from Mosic
+
+```
+# Get project with task lists
+project = mosic_get_project(PROJECT_ID, { include_task_lists: true })
+
+# Find the specified phase
+phase_task_list = project.task_lists.find(tl =>
+  tl.title.includes("Phase " + phase_number)
+)
+
+IF !phase_task_list:
+  ERROR: Phase {phase_number} not found in project.
+  Available phases: [list phase titles]
+  Exit.
+
+# Get phase details
+phase = mosic_get_task_list(phase_task_list.name, {
+  include_tasks: true
+})
+
+# Get any existing phase documentation
+phase_pages = mosic_get_entity_pages("MTask List", phase_task_list.name, {
+  content_format: "markdown"
+})
+```
+
+## 4. Analyze Phase and Surface Assumptions
+
+Follow list-phase-assumptions.md workflow:
+- Analyze phase description from task list
+- Surface assumptions about: technical approach, implementation order, scope, risks, dependencies
+- Present assumptions clearly
+- Prompt "What do you think?"
+
+## 5. Gather Feedback
+
+Wait for user feedback on assumptions.
+
+## 6. Offer Next Steps
+
+```
+Based on your feedback, what would you like to do?
+
+1. Proceed to planning (/gsd:plan-phase {phase_number})
+2. Save assumptions to Mosic for reference
+3. Discuss further
+4. Update phase description with clarifications
+```
+
 </process>
 
 <mosic_sync>
-**Sync assumptions to Mosic (optional, after feedback gathered):**
+**Save assumptions to Mosic (optional, after feedback gathered):**
 
-After presenting assumptions and gathering feedback, check if user wants to preserve:
-
-```
-Would you like to save these assumptions to Mosic for team reference?
-- Yes: Create assumptions page linked to phase
-- No: Continue without saving
-```
-
-**If user chooses to save AND mosic.enabled = true:**
-
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PHASE_NUM}\"]")
-```
-
-### Create Assumptions Page
+**If user chooses to save:**
 
 ```
-# Load Mosic tools
-ToolSearch("mosic page create")
+assumptions_content = build_assumptions_content({
+  phase: phase.title,
+  phase_number: phase_number,
+  technical_approach: [assumptions list],
+  implementation_order: [ordered list],
+  scope_boundaries: [in/out scope],
+  risk_areas: [risks list],
+  dependencies: [dependencies list],
+  user_feedback: [feedback notes]
+})
 
-IF TASK_LIST_ID is not null:
-  # Create assumptions page as phase documentation
-  assumptions_page = mosic_create_entity_page("MTask List", TASK_LIST_ID, {
-    workspace_id: WORKSPACE_ID,
-    title: "Phase " + PHASE_NUM + " Assumptions",
-    page_type: "Document",
-    icon: "lucide:lightbulb",
-    status: "Draft",
-    content: {
-      blocks: [
-        {
-          type: "header",
-          data: { text: "Claude's Assumptions for Phase " + PHASE_NUM, level: 1 }
-        },
-        {
-          type: "paragraph",
-          data: { text: "These assumptions were surfaced before planning began. Review and correct as needed." }
-        },
-        {
-          type: "header",
-          data: { text: "Technical Approach", level: 2 }
-        },
-        {
-          type: "list",
-          data: { items: [technical_approach_assumptions], style: "unordered" }
-        },
-        {
-          type: "header",
-          data: { text: "Implementation Order", level: 2 }
-        },
-        {
-          type: "list",
-          data: { items: [implementation_order_assumptions], style: "ordered" }
-        },
-        {
-          type: "header",
-          data: { text: "Scope Boundaries", level: 2 }
-        },
-        {
-          type: "list",
-          data: { items: [scope_assumptions], style: "unordered" }
-        },
-        {
-          type: "header",
-          data: { text: "Risk Areas", level: 2 }
-        },
-        {
-          type: "list",
-          data: { items: [risk_assumptions], style: "unordered" }
-        },
-        {
-          type: "header",
-          data: { text: "Dependencies", level: 2 }
-        },
-        {
-          type: "list",
-          data: { items: [dependency_assumptions], style: "unordered" }
-        },
-        {
-          type: "header",
-          data: { text: "User Feedback", level: 2 }
-        },
-        {
-          type: "paragraph",
-          data: { text: "[To be added after discussion]" }
-        }
-      ]
-    },
-    relation_type: "Related"
-  })
+# Create assumptions page linked to phase task list
+assumptions_page = mosic_create_entity_page("MTask List", phase_task_list.name, {
+  workspace_id: WORKSPACE_ID,
+  title: "Phase " + phase_number + " Assumptions",
+  page_type: "Document",
+  icon: "lucide:lightbulb",
+  status: "Draft",
+  content: assumptions_content,
+  relation_type: "Related"
+})
 
-  # Tag the page
-  GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-  PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PHASE_NUM}\"]")
+# Tag the page
+GSD_MANAGED_TAG = config.mosic.tags.gsd_managed
+PHASE_TAG = config.mosic.tags.phase_tags["phase-" + phase_number]
 
-  mosic_batch_add_tags_to_document("M Page", assumptions_page.name, [
-    GSD_MANAGED_TAG,
-    PHASE_TAG
-  ])
-
-  # Store page ID in config
-  # mosic.pages["phase-" + PHASE_NUM + "-assumptions"] = assumptions_page.name
+mosic_batch_add_tags_to_document("M Page", assumptions_page.name, [
+  GSD_MANAGED_TAG,
+  PHASE_TAG
+])
 ```
 
 Display:
@@ -170,13 +167,14 @@ IF mosic sync fails:
 </mosic_sync>
 
 <success_criteria>
-
-- Phase validated against roadmap
-- Assumptions surfaced across five areas
-- User prompted for feedback
-- User knows next steps (discuss context, plan phase, or correct assumptions)
-- Mosic sync (if user opts in and enabled):
-  - [ ] Assumptions page created and linked to phase
+- [ ] Config loaded from config.json
+- [ ] Phase validated against project task lists in Mosic
+- [ ] Phase details and documentation loaded from Mosic
+- [ ] Assumptions surfaced across five areas
+- [ ] User prompted for feedback
+- [ ] User knows next steps (discuss context, plan phase, or correct assumptions)
+- [ ] Mosic sync (if user opts in):
+  - [ ] Assumptions page created and linked to phase task list
   - [ ] Page tagged appropriately
   - [ ] Page URL provided to user
-  </success_criteria>
+</success_criteria>

@@ -15,8 +15,8 @@ Restore complete project context and resume work seamlessly from previous sessio
 
 Routes to the resume-project workflow which handles:
 
-- STATE.md loading (or reconstruction if missing)
-- Checkpoint detection (.continue-here files)
+- State loading from Mosic (MProject, MTasks)
+- Session context restoration from config.json
 - Incomplete work detection (PLAN without SUMMARY)
 - Mosic cross-session updates check
 - Status presentation
@@ -34,7 +34,7 @@ Routes to the resume-project workflow which handles:
 **Before loading local state, check Mosic for updates made outside this session:**
 
 ```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+MOSIC_ENABLED=$(cat config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
 ```
 
 **If mosic.enabled = true:**
@@ -47,9 +47,9 @@ Display:
 ### Load Mosic Config
 
 ```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
-LAST_SYNC=$(cat .planning/config.json | jq -r ".mosic.last_sync")
+WORKSPACE_ID=$(cat config.json | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat config.json | jq -r ".mosic.project_id")
+LAST_SYNC=$(cat config.json | jq -r ".mosic.last_sync")
 ```
 
 ### Check for External Updates
@@ -113,7 +113,7 @@ IF external_updates.length > 0:
 
   ───────────────────────────────────────────────────────────────
 
-  These updates are informational. Local .planning/ remains source of truth.
+  These updates have been integrated. Mosic is the source of truth.
 
 ELSE:
   ✓ No external updates since last session
