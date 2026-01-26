@@ -1,3 +1,10 @@
+---
+# Mosic Integration (populated when synced with Mosic MCP)
+mosic_page_id: ""
+mosic_workspace_id: ""
+mosic_tags: ["codebase", "integrations", "gsd-managed"]
+---
+
 # External Integrations Template
 
 Template for `.planning/codebase/INTEGRATIONS.md` - captures external service dependencies.

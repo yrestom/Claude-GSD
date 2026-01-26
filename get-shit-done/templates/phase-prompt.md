@@ -22,6 +22,11 @@ files_modified: []          # Files this plan modifies.
 autonomous: true            # false if plan has checkpoints requiring user interaction
 user_setup: []              # Human-required setup Claude cannot automate (see below)
 
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_task_id: ""           # MTask ID for this plan
+mosic_task_list_id: ""      # MTask List (phase) this plan belongs to
+mosic_page_id: ""           # M Page ID for this plan document
+
 # Goal-backward verification (derived during planning, verified after execution)
 must_haves:
   truths: []                # Observable behaviors that must be true for goal achievement

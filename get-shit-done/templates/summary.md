@@ -13,6 +13,11 @@ plan: YY
 subsystem: [primary category: auth, payments, ui, api, database, infra, testing, etc.]
 tags: [searchable tech: jwt, stripe, react, postgres, prisma]
 
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_task_id: ""              # MTask ID this summary is linked to
+mosic_page_id: ""              # M Page ID for this summary document
+mosic_task_list_id: ""         # MTask List (phase) this belongs to
+
 # Dependency graph
 requires:
   - phase: [prior phase this depends on]

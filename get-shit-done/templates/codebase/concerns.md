@@ -1,3 +1,10 @@
+---
+# Mosic Integration (populated when synced with Mosic MCP)
+mosic_page_id: ""
+mosic_workspace_id: ""
+mosic_tags: ["codebase", "concerns", "gsd-managed"]
+---
+
 # Codebase Concerns Template
 
 Template for `.planning/codebase/CONCERNS.md` - captures known issues and areas requiring care.

@@ -29,6 +29,19 @@ goal: {find_root_cause_only | find_and_fix}
 <debug_file>
 Create: .planning/debug/{slug}.md
 </debug_file>
+
+<mosic_context>
+<!-- Mosic integration context - populated when synced -->
+**Mosic Task ID:** {mosic_task_id}
+**Mosic Project ID:** {mosic_project_id}
+
+When creating debug files, include Mosic frontmatter:
+- mosic_page_id: Leave empty (populated on sync)
+- mosic_source_task_id: Task that spawned this debug session
+- mosic_tags: ["debug", "investigation", "gsd-managed"]
+
+Debug sessions will be synced to Mosic as M Pages linked to source tasks.
+</mosic_context>
 ```
 
 ---

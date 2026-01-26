@@ -1,3 +1,10 @@
+---
+# Mosic Integration (populated when synced with Mosic MCP)
+mosic_page_id: ""
+mosic_workspace_id: ""
+mosic_tags: ["codebase", "testing", "gsd-managed"]
+---
+
 # Testing Patterns Template
 
 Template for `.planning/codebase/TESTING.md` - captures test framework and patterns.

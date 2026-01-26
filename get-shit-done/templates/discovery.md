@@ -15,6 +15,11 @@ For deep ecosystem research ("how do experts build this"), use `/gsd:research-ph
 phase: XX-name
 type: discovery
 topic: [discovery-topic]
+
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_page_id: ""              # M Page ID for this discovery document
+mosic_task_list_id: ""         # MTask List (phase) this discovery belongs to
+mosic_tags: ["research", "discovery", "gsd-managed"]  # Tags applied in Mosic
 ---
 
 <session_initialization>

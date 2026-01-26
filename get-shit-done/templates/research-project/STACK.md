@@ -1,3 +1,10 @@
+---
+type: stack
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_page_id: ""
+mosic_tags: ["research-project", "stack", "gsd-managed"]
+---
+
 # Stack Research Template
 
 Template for `.planning/research/STACK.md` — recommended technologies for the project domain.

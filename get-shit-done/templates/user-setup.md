@@ -9,6 +9,13 @@ Template for `.planning/phases/XX-name/{phase}-USER-SETUP.md` - human-required c
 ## File Template
 
 ```markdown
+---
+# Mosic Integration (populated when synced with Mosic)
+mosic_page_id: ""              # M Page ID for this setup doc
+mosic_task_id: ""              # Linked MTask requiring setup
+mosic_tags: ["user-setup", "manual", "gsd-managed"]
+---
+
 # Phase {X}: User Setup Required
 
 **Generated:** [YYYY-MM-DD]

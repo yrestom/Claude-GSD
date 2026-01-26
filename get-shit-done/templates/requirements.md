@@ -5,6 +5,13 @@ Template for `.planning/REQUIREMENTS.md` — checkable requirements that define 
 <template>
 
 ```markdown
+---
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_page_id: ""              # M Page ID for this requirements document
+mosic_project_id: ""           # Parent MProject ID
+mosic_tags: ["requirements", "gsd-managed"]  # Tags applied in Mosic
+---
+
 # Requirements: [Project Name]
 
 **Defined:** [date]

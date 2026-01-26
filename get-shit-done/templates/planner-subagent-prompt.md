@@ -33,6 +33,20 @@ Template for spawning gsd-planner agent. The agent contains all planning experti
 
 </planning_context>
 
+<mosic_context>
+<!-- Mosic integration context - populated when synced -->
+**Mosic Project ID:** {mosic_project_id}
+**Mosic Task List ID:** {mosic_task_list_id}
+**Mosic Workspace ID:** {mosic_workspace_id}
+
+When creating plans, include Mosic frontmatter fields:
+- mosic_task_id: Leave empty (populated on sync)
+- mosic_task_list_id: Use phase task list ID if known
+- mosic_page_id: Leave empty (populated on sync)
+
+Plans will be synced to Mosic as MTasks with linked M Pages.
+</mosic_context>
+
 <downstream_consumer>
 Output consumed by /gsd:execute-phase
 Plans must be executable prompts with:

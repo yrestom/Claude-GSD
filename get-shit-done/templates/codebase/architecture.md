@@ -1,3 +1,10 @@
+---
+# Mosic Integration (populated when synced with Mosic MCP)
+mosic_page_id: ""
+mosic_workspace_id: ""
+mosic_tags: ["codebase", "architecture", "gsd-managed"]
+---
+
 # Architecture Template
 
 Template for `.planning/codebase/ARCHITECTURE.md` - captures conceptual code organization.

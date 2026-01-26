@@ -1,3 +1,10 @@
+---
+# Mosic Integration (populated when synced with Mosic MCP)
+mosic_page_id: ""
+mosic_workspace_id: ""
+mosic_tags: ["codebase", "conventions", "gsd-managed"]
+---
+
 # Coding Conventions Template
 
 Template for `.planning/codebase/CONVENTIONS.md` - captures coding style and patterns.

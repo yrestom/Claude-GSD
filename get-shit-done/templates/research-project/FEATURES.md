@@ -1,3 +1,10 @@
+---
+type: features
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_page_id: ""
+mosic_tags: ["research-project", "features", "gsd-managed"]
+---
+
 # Features Research Template
 
 Template for `.planning/research/FEATURES.md` — feature landscape for the project domain.

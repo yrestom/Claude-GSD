@@ -6,11 +6,21 @@ This template is used by the complete-milestone workflow to create archive files
 
 ## File Template
 
+---
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_milestone_id: ""         # Mosic milestone/release tracking ID
+mosic_page_id: ""              # M Page ID for this milestone archive
+mosic_project_id: ""           # Parent MProject ID
+mosic_archived_task_lists: []  # MTask List IDs archived with this milestone
+mosic_archive_url: ""          # URL to Mosic milestone page
+---
+
 # Milestone v{{VERSION}}: {{MILESTONE_NAME}}
 
 **Status:** ✅ SHIPPED {{DATE}}
 **Phases:** {{PHASE_START}}-{{PHASE_END}}
 **Total Plans:** {{TOTAL_PLANS}}
+**Mosic URL:** {{MOSIC_MILESTONE_URL}}
 
 ## Overview
 

@@ -7,6 +7,15 @@ Template for `.planning/STATE.md` — the project's living memory.
 ## File Template
 
 ```markdown
+---
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_project_id: ""           # MProject document ID
+mosic_workspace_id: ""         # Workspace containing the project
+mosic_page_id: ""              # M Page ID for this state document
+mosic_last_sync: ""            # ISO timestamp of last sync
+mosic_sync_status: "unsynced"  # unsynced | synced | pending | error
+---
+
 # Project State
 
 ## Project Reference
@@ -24,6 +33,15 @@ Status: [Ready to plan / Planning / Ready to execute / In progress / Phase compl
 Last activity: [YYYY-MM-DD] — [What happened]
 
 Progress: [░░░░░░░░░░] 0%
+
+## Mosic Sync Status
+
+**Last sync:** [Never / YYYY-MM-DD HH:MM]
+**Sync status:** [Unsynced / Synced / Pending changes / Error]
+**Pending items:**
+- [None / List of items awaiting sync]
+
+**Project URL:** [Mosic project URL if synced]
 
 ## Performance Metrics
 

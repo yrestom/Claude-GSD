@@ -9,6 +9,11 @@ task: 3
 total_tasks: 7
 status: in_progress
 last_updated: 2025-01-15T14:30:00Z
+
+# Mosic Integration (populated when synced with Mosic)
+mosic_page_id: ""              # M Page ID for continuation context
+mosic_task_id: ""              # Current MTask being executed
+mosic_tags: ["continue", "session", "gsd-managed"]
 ---
 ```
 
@@ -68,6 +73,11 @@ Required YAML frontmatter:
 - `total_tasks`: How many tasks in phase
 - `status`: `in_progress`, `blocked`, `almost_done`
 - `last_updated`: ISO timestamp
+
+Optional Mosic fields (populated when synced):
+- `mosic_page_id`: M Page ID if continuation context synced
+- `mosic_task_id`: Current MTask being executed
+- `mosic_tags`: Tags applied in Mosic
 </yaml_fields>
 
 <guidelines>

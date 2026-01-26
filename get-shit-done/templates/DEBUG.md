@@ -8,10 +8,18 @@ Template for `.planning/debug/[slug].md` — active debug session tracking.
 
 ```markdown
 ---
+slug: ""
+type: debug
 status: gathering | investigating | fixing | verifying | resolved
 trigger: "[verbatim user input]"
 created: [ISO timestamp]
 updated: [ISO timestamp]
+
+# Mosic Integration (populated when synced with Mosic)
+mosic_page_id: ""              # M Page ID for this debug session
+mosic_uat_page_id: ""          # Linked UAT page ID
+mosic_issue_task_id: ""        # Linked issue task ID
+mosic_tags: ["debug", "fix", "gsd-managed"]
 ---
 
 ## Current Focus
@@ -59,11 +67,19 @@ files_changed: []
 
 <section_rules>
 
-**Frontmatter (status, trigger, timestamps):**
+**Frontmatter (identity and status):**
+- `slug`: IMMUTABLE - the debug session identifier
+- `type`: IMMUTABLE - always "debug"
 - `status`: OVERWRITE - reflects current phase
 - `trigger`: IMMUTABLE - verbatim user input, never changes
 - `created`: IMMUTABLE - set once
 - `updated`: OVERWRITE - update on every change
+
+**Frontmatter (Mosic integration):**
+- `mosic_page_id`: OVERWRITE - populated when synced with Mosic
+- `mosic_uat_page_id`: OVERWRITE - linked UAT page ID
+- `mosic_issue_task_id`: OVERWRITE - linked issue task ID
+- `mosic_tags`: OVERWRITE - tags applied in Mosic (default: ["debug", "fix", "gsd-managed"])
 
 **Current Focus:**
 - OVERWRITE entirely on each update

@@ -1,3 +1,10 @@
+---
+# Mosic Integration (populated when synced with Mosic MCP)
+mosic_page_id: ""
+mosic_workspace_id: ""
+mosic_tags: ["codebase", "structure", "gsd-managed"]
+---
+
 # Structure Template
 
 Template for `.planning/codebase/STRUCTURE.md` - captures physical file organization.

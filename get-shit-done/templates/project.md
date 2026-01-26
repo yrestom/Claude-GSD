@@ -5,12 +5,28 @@ Template for `.planning/PROJECT.md` — the living project context document.
 <template>
 
 ```markdown
+---
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_project_id: ""           # MProject document ID
+mosic_workspace_id: ""         # Workspace containing the project
+mosic_space_id: ""             # M Space the project belongs to
+mosic_page_id: ""              # M Page ID for this project document
+mosic_project_url: ""          # URL to Mosic project dashboard
+mosic_sync_enabled: false      # Whether Mosic sync is active
+---
+
 # [Project Name]
 
 ## What This Is
 
 [Current accurate description — 2-3 sentences. What does this product do and who is it for?
 Use the user's language and framing. Update whenever reality drifts from this description.]
+
+## Mosic Integration
+
+**Status:** [Not configured / Configured / Synced]
+**Project URL:** [Mosic project URL if configured]
+**Workspace:** [Workspace name if configured]
 
 ## Core Value
 

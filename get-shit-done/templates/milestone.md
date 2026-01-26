@@ -3,6 +3,14 @@
 Add this entry to `.planning/MILESTONES.md` when completing a milestone:
 
 ```markdown
+---
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_milestone_id: ""         # Mosic milestone/release tracking ID if applicable
+mosic_page_id: ""              # M Page ID for this milestone document
+mosic_project_id: ""           # Parent MProject ID
+mosic_completed_task_lists: [] # MTask List IDs completed in this milestone
+---
+
 ## v[X.Y] [Name] (Shipped: YYYY-MM-DD)
 
 **Delivered:** [One sentence describing what shipped]

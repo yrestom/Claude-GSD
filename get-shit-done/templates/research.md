@@ -9,6 +9,15 @@ Template for `.planning/phases/XX-name/{phase}-RESEARCH.md` - comprehensive ecos
 ## File Template
 
 ```markdown
+---
+phase: XX-name
+type: research
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_page_id: ""              # M Page ID for this research document
+mosic_task_list_id: ""         # MTask List (phase) this research belongs to
+mosic_tags: ["research", "gsd-managed"]  # Tags applied in Mosic
+---
+
 # Phase [X]: [Name] - Research
 
 **Researched:** [date]

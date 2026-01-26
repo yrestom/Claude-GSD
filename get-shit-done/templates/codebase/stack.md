@@ -1,3 +1,10 @@
+---
+# Mosic Integration (populated when synced with Mosic MCP)
+mosic_page_id: ""
+mosic_workspace_id: ""
+mosic_tags: ["codebase", "stack", "gsd-managed"]
+---
+
 # Technology Stack Template
 
 Template for `.planning/codebase/STACK.md` - captures the technology foundation.

@@ -1,3 +1,10 @@
+---
+type: architecture
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_page_id: ""
+mosic_tags: ["research-project", "architecture", "gsd-managed"]
+---
+
 # Architecture Research Template
 
 Template for `.planning/research/ARCHITECTURE.md` — system structure patterns for the project domain.

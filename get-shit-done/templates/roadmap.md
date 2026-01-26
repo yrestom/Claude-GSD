@@ -5,11 +5,29 @@ Template for `.planning/ROADMAP.md`.
 ## Initial Roadmap (v1.0 Greenfield)
 
 ```markdown
+---
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_project_id: ""           # MProject document ID
+mosic_project_url: ""          # URL to Mosic project
+mosic_workspace_id: ""         # Workspace containing the project
+mosic_page_id: ""              # M Page ID for this roadmap document
+
+# Phase to Task List mapping (populated during sync)
+mosic_phases: {}               # Map of phase number to MTask List ID
+# Example:
+# mosic_phases:
+#   "01": "task-list-uuid-1"
+#   "02": "task-list-uuid-2"
+#   "02.1": "task-list-uuid-3"
+---
+
 # Roadmap: [Project Name]
 
 ## Overview
 
 [One paragraph describing the journey from start to finish]
+
+**Mosic Project:** [Link to Mosic project if synced]
 
 ## Phases
 

@@ -1,3 +1,10 @@
+---
+type: pitfalls
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_page_id: ""
+mosic_tags: ["research-project", "pitfalls", "gsd-managed"]
+---
+
 # Pitfalls Research Template
 
 Template for `.planning/research/PITFALLS.md` — common mistakes to avoid in the project domain.

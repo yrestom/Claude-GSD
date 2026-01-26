@@ -13,6 +13,12 @@ phase: XX-name
 source: [list of SUMMARY.md files tested]
 started: [ISO timestamp]
 updated: [ISO timestamp]
+
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_page_id: ""              # M Page ID for this UAT document
+mosic_task_list_id: ""         # MTask List (phase) this UAT belongs to
+mosic_issue_task_ids: []       # MTask IDs for gap issues created from this UAT
+mosic_tags: ["uat", "gsd-managed"]  # Tags applied in Mosic
 ---
 
 ## Current Test

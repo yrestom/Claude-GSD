@@ -15,6 +15,16 @@ Template for `.planning/phases/XX-name/{phase}-CONTEXT.md` - captures implementa
 ## File Template
 
 ```markdown
+---
+phase: XX-name
+type: context
+
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_page_id: ""              # M Page ID for this context document
+mosic_task_list_id: ""         # MTask List (phase) this context belongs to
+mosic_tags: ["context", "gsd-managed"]  # Tags applied in Mosic
+---
+
 # Phase [X]: [Name] - Context
 
 **Gathered:** [date]

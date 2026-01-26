@@ -1,3 +1,10 @@
+---
+type: summary
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_page_id: ""
+mosic_tags: ["research-project", "summary", "gsd-managed"]
+---
+
 # Research Summary Template
 
 Template for `.planning/research/SUMMARY.md` — executive summary of project research with roadmap implications.

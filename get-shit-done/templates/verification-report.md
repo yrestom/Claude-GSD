@@ -12,6 +12,12 @@ phase: XX-name
 verified: YYYY-MM-DDTHH:MM:SSZ
 status: passed | gaps_found | human_needed
 score: N/M must-haves verified
+
+# Mosic Integration (optional - populated when synced with Mosic)
+mosic_page_id: ""              # M Page ID for this verification report
+mosic_task_list_id: ""         # MTask List (phase) this verification belongs to
+mosic_gap_task_ids: []         # MTask IDs created for gaps found
+mosic_tags: ["verification", "gsd-managed"]  # Tags applied in Mosic
 ---
 
 # Phase {X}: {Name} Verification Report
