@@ -96,6 +96,59 @@ fi
 - Flag: "Found interrupted agent"
   </step>
 
+<step name="check_mosic_changes">
+**Check Mosic for cross-session changes (if enabled):**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+### Step 1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
+LAST_SYNC=$(cat .planning/config.json | jq -r ".mosic.last_sync")
+```
+
+### Step 2: Check for Changes Since Last Sync
+
+```
+# Get project with task lists and recent activity
+project = mosic_get_project(project_id, { include_task_lists: true })
+
+# Check notifications for this project
+notifications = mosic_get_document_notifications("MProject", project_id)
+
+# Check for tasks completed outside GSD (in Mosic UI directly)
+FOR each task_list in project.task_lists:
+  tasks = mosic_get_task_list(task_list.name, { include_tasks: true })
+  FOR each task in tasks:
+    IF task.modified > LAST_SYNC AND task.status changed:
+      external_changes.append({
+        type: "task_status",
+        task: task.title,
+        new_status: task.status,
+        modified_by: task.modified_by
+      })
+```
+
+### Step 3: Flag External Changes
+
+```
+IF external_changes.length > 0:
+  MOSIC_CHANGES_DETECTED = true
+  Store external_changes for presentation
+ELSE:
+  MOSIC_CHANGES_DETECTED = false
+```
+
+**If mosic.enabled = false:** Skip Mosic check, set MOSIC_CHANGES_DETECTED = false.
+</step>
+
 <step name="present_status">
 Present complete project status to user:
 
@@ -111,6 +164,12 @@ Present complete project status to user:
 ║                                                               ║
 ║  Last activity: [date] - [what happened]                     ║
 ╚══════════════════════════════════════════════════════════════╝
+
+[If MOSIC_CHANGES_DETECTED:]
+☁️  Mosic changes detected since last session:
+    - [change 1 - e.g., "Task 'Setup auth' marked complete by user@example.com"]
+    - [change 2]
+    Note: Local state may need reconciliation
 
 [If incomplete work found:]
 ⚠️  Incomplete work detected:
@@ -300,6 +359,9 @@ Resume is complete when:
 
 - [ ] STATE.md loaded (or reconstructed)
 - [ ] Incomplete work detected and flagged
+- [ ] Mosic sync check (if enabled):
+  - [ ] Cross-session changes detected
+  - [ ] External task status changes flagged
 - [ ] Clear status presented to user
 - [ ] Contextual next actions offered
 - [ ] User knows exactly where project stands

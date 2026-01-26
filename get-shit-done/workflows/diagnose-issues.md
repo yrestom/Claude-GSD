@@ -174,6 +174,114 @@ git commit -m "docs({phase}): add root causes from diagnosis"
 ```
 </step>
 
+<step name="sync_diagnosis_to_mosic">
+**Sync diagnosis results to Mosic (Deep Integration):**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+### Step 1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+FIX_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.fix")
+PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PHASE_NUM}\"]")
+TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PHASE_NUM}\"]")
+UAT_PAGE_ID=$(cat .planning/config.json | jq -r ".mosic.pages[\"phase-${PHASE_NUM}-uat\"]")
+```
+
+### Step 2: Create Debug Session Pages
+
+```
+FOR each diagnosed_gap:
+  # Create debug session page linked to UAT page
+  debug_page = mosic_create_entity_page("M Page", uat_page_id, {
+    workspace_id: workspace_id,
+    title: "Debug: " + gap.truth.substring(0, 50),
+    page_type: "Document",
+    icon: "lucide:bug",
+    status: "Published",
+    content: convert_debug_to_editorjs(DEBUG-slug.md),
+    relation_type: "Related"
+  })
+
+  # Tag the debug page
+  mosic_batch_add_tags_to_document("M Page", debug_page.name, [
+    GSD_MANAGED_TAG,
+    FIX_TAG,
+    PHASE_TAG
+  ])
+```
+
+### Step 3: Update Issue Tasks with Root Causes
+
+```
+FOR each diagnosed_gap:
+  issue_task_id = mosic.tasks["phase-" + PHASE_NUM + "-fix-" + gap.test]
+
+  IF issue_task_id:
+    # Update task with root cause
+    mosic_update_document("MTask", issue_task_id, {
+      status: "ToDo",  # Unblock now that we have diagnosis
+      description: original_description + "\n\n---\n\n**Root Cause:**\n" +
+        gap.root_cause + "\n\n" +
+        "**Files Involved:**\n" +
+        gap.files.map(f => "- `" + f.path + "`: " + f.issue).join("\n") +
+        "\n\n**Suggested Fix:**\n" + gap.suggested_fix
+    })
+
+    # Add diagnosis comment
+    mosic_create_document("M Comment", {
+      workspace_id: workspace_id,
+      ref_doc: "MTask",
+      ref_name: issue_task_id,
+      content: "🔍 **Root Cause Diagnosed**\n\n" +
+        gap.root_cause + "\n\n" +
+        "[Debug Session](page/" + debug_page.name + ")"
+    })
+
+    # Link debug page to issue task
+    mosic_create_document("M Relation", {
+      workspace_id: workspace_id,
+      source_doctype: "M Page",
+      source_name: debug_page.name,
+      target_doctype: "MTask",
+      target_name: issue_task_id,
+      relation_type: "Related"
+    })
+```
+
+### Step 4: Update UAT Page Status
+
+```
+mosic_update_document("M Page", uat_page_id, {
+  content: updated_content_with_root_causes
+})
+
+mosic_create_document("M Comment", {
+  workspace_id: workspace_id,
+  ref_doc: "M Page",
+  ref_name: uat_page_id,
+  content: "🔍 **Diagnosis Complete**\n\n" +
+    diagnosed_count + " gaps diagnosed.\n" +
+    inconclusive_count + " gaps need manual review.\n\n" +
+    "Ready for fix planning."
+})
+```
+
+**Error handling:**
+```
+IF mosic sync fails:
+  - Log warning, continue
+  - Add to pending_sync
+```
+</step>
+
 <step name="report_results">
 **Report diagnosis results and hand off:**
 
@@ -190,6 +298,7 @@ Display:
 | Delete removes comment | API missing auth header | api/comments.ts |
 
 Debug sessions: ${DEBUG_DIR}/
+[IF mosic.enabled:] Mosic: Synced to UAT page [END IF]
 
 Proceeding to plan fixes...
 ```
@@ -227,5 +336,9 @@ Agents only diagnose—plan-phase --gaps handles fixes (no fix application).
 - [ ] Root causes collected from all agents
 - [ ] UAT.md gaps updated with artifacts and missing
 - [ ] Debug sessions saved to ${DEBUG_DIR}/
+- [ ] Mosic sync (if enabled):
+  - [ ] Debug session pages created linked to UAT page
+  - [ ] Issue tasks updated with root causes
+  - [ ] UAT page updated with diagnosis status
 - [ ] Hand off to verify-work for automatic planning
 </success_criteria>

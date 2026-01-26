@@ -567,6 +567,111 @@ Fill template sections:
 See ~/.claude/get-shit-done/templates/verification-report.md for complete template.
 </step>
 
+<step name="sync_verification_to_mosic">
+**Sync verification results to Mosic (Deep Integration):**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+### Step 1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+VERIFICATION_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.verification")
+PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PHASE_NUM}\"]")
+TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PHASE_NUM}\"]")
+```
+
+### Step 2: Create Verification Page
+
+```
+verification_page = mosic_create_entity_page("MTask List", task_list_id, {
+  workspace_id: workspace_id,
+  title: "Phase " + PHASE_NUM + " Verification Report",
+  page_type: "Document",
+  icon: "lucide:shield-check",
+  status: "Published",
+  content: convert_verification_to_editorjs(VERIFICATION.md),
+  relation_type: "Related"
+})
+
+# Tag the verification page
+mosic_batch_add_tags_to_document("M Page", verification_page.name, [
+  GSD_MANAGED_TAG,
+  VERIFICATION_TAG,
+  PHASE_TAG
+])
+
+# Store page ID
+# mosic.pages["phase-" + PHASE_NUM + "-verification"] = verification_page.name
+```
+
+### Step 3: Update Task List Based on Status
+
+```
+IF status == "passed":
+  mosic_update_document("MTask List", task_list_id, {
+    description: original_description + "\n\n---\n\n✅ **Verification Passed**\n" +
+      "Score: " + score + "/" + total + " must-haves verified"
+  })
+
+  mosic_create_document("M Comment", {
+    workspace_id: workspace_id,
+    ref_doc: "MTask List",
+    ref_name: task_list_id,
+    content: "✅ **Phase Verification Passed**\n\n" +
+      "All must-haves verified. Goal achieved.\n\n" +
+      "See [Verification Report](page/" + verification_page.name + ") for details."
+  })
+
+ELSE IF status == "gaps_found":
+  mosic_update_document("MTask List", task_list_id, {
+    status: "In Review",
+    description: original_description + "\n\n---\n\n⚠️ **Gaps Found**\n" +
+      "Score: " + score + "/" + total + " must-haves verified\n" +
+      "Gaps: " + gap_count + " items need fixing"
+  })
+
+  # Create gap tasks
+  FOR each gap in gaps:
+    gap_task = mosic_create_document("MTask", {
+      workspace_id: workspace_id,
+      task_list: task_list_id,
+      title: "Gap: " + gap.truth.substring(0, 80),
+      description: "**Failed Verification:**\n\n" + gap.details,
+      icon: "lucide:alert-triangle",
+      status: "ToDo",
+      priority: gap.severity == "blocker" ? "Critical" : "High"
+    })
+
+    # Tag gap task
+    mosic_batch_add_tags_to_document("MTask", gap_task.name, [
+      GSD_MANAGED_TAG,
+      mosic.tags.fix,
+      PHASE_TAG
+    ])
+
+ELSE IF status == "human_needed":
+  mosic_update_document("MTask List", task_list_id, {
+    status: "In Review",
+    description: original_description + "\n\n---\n\n🔍 **Human Verification Needed**\n" +
+      human_items.length + " items require manual testing"
+  })
+```
+
+**Error handling:**
+```
+IF mosic sync fails:
+  - Log warning, continue with local operation
+  - Add to pending_sync for retry
+```
+</step>
+
 <step name="return_to_orchestrator">
 **Return results to execute-phase orchestrator.**
 
@@ -578,6 +683,7 @@ See ~/.claude/get-shit-done/templates/verification-report.md for complete templa
 **Status:** {passed | gaps_found | human_needed}
 **Score:** {N}/{M} must-haves verified
 **Report:** .planning/phases/{phase_dir}/{phase}-VERIFICATION.md
+[IF mosic.enabled:] **Mosic:** https://mosic.pro/app/page/{verification_page.name} [END IF]
 
 {If passed:}
 All must-haves verified. Phase goal achieved. Ready to proceed.
@@ -624,5 +730,9 @@ The orchestrator will:
 - [ ] Overall status determined
 - [ ] Fix plans generated (if gaps_found)
 - [ ] VERIFICATION.md created with complete report
+- [ ] Mosic sync (if enabled):
+  - [ ] Verification page created linked to phase task list
+  - [ ] Task list status updated based on verification result
+  - [ ] Gap tasks created for gaps_found status
 - [ ] Results returned to orchestrator
 </success_criteria>

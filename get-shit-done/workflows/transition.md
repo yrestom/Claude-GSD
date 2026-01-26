@@ -390,6 +390,93 @@ Resume file: None
 
 </step>
 
+<step name="sync_transition_to_mosic">
+**Sync phase transition to Mosic (Deep Integration):**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+Display:
+```
+◆ Syncing transition to Mosic...
+```
+
+### Step 1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+COMPLETED_PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${COMPLETED_PHASE}\"]")
+NEXT_PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${NEXT_PHASE}\"]")
+COMPLETED_TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${COMPLETED_PHASE}\"]")
+NEXT_TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${NEXT_PHASE}\"]")
+```
+
+### Step 2: Mark Completed Phase Task List as Complete
+
+```
+mosic_update_document("MTask List", completed_task_list_id, {
+  status: "Completed",
+  description: original_description + "\n\n---\n\n✅ **Phase Complete**\n" +
+    "- Completed: " + format_date(now) + "\n" +
+    "- Plans: " + completed_plans + "/" + total_plans
+})
+```
+
+### Step 3: Update Next Phase Task List to In Progress
+
+```
+IF next_task_list_id:
+  mosic_update_document("MTask List", next_task_list_id, {
+    status: "In Progress"
+  })
+```
+
+### Step 4: Add Transition Comment
+
+```
+mosic_create_document("M Comment", {
+  workspace_id: workspace_id,
+  ref_doc: "MProject",
+  ref_name: project_id,
+  content: "🔄 **Phase Transition**\n\n" +
+    "- Completed: Phase " + COMPLETED_PHASE + " (" + completed_phase_name + ")\n" +
+    "- Starting: Phase " + NEXT_PHASE + " (" + next_phase_name + ")\n\n" +
+    "Requirements validated: " + validated_count + "\n" +
+    "Requirements emerged: " + emerged_count
+})
+```
+
+### Step 5: Update Last Sync Timestamp
+
+```bash
+# Update config.json with sync timestamp
+# mosic.last_sync = "[ISO timestamp now]"
+```
+
+Display:
+```
+✓ Transition synced to Mosic
+  Completed: Phase ${COMPLETED_PHASE} (https://mosic.pro/app/MTask List/[completed_task_list_id])
+  Starting: Phase ${NEXT_PHASE} (https://mosic.pro/app/MTask List/[next_task_list_id])
+```
+
+**Error handling:**
+```
+IF mosic sync fails:
+  - Log warning: "Mosic sync failed: [error]. Transition completed locally."
+  - Add to mosic.pending_sync array
+  - Continue to offer_next_phase (don't block)
+```
+
+**If mosic.enabled = false:** Skip to offer_next_phase step.
+</step>
+
 <step name="offer_next_phase">
 
 **MANDATORY: Verify milestone status before presenting next steps.**
@@ -551,6 +638,10 @@ Transition is complete when:
 - [ ] PROJECT.md evolved (requirements, decisions, description if needed)
 - [ ] STATE.md updated (position, project reference, context, session)
 - [ ] Progress table updated
+- [ ] Mosic sync (if enabled):
+  - [ ] Completed phase task list status updated to "Completed"
+  - [ ] Next phase task list status updated to "In Progress"
+  - [ ] Transition comment added to project
 - [ ] User knows next steps
 
 </success_criteria>

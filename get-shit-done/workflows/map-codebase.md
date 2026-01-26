@@ -263,6 +263,139 @@ EOF
 Continue to offer_next.
 </step>
 
+<step name="sync_codebase_map_to_mosic">
+**Sync codebase map to Mosic (Deep Integration):**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+Display:
+```
+◆ Syncing codebase map to Mosic...
+```
+
+### Step 1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+```
+
+### Step 2: Create Architecture Page Linked to Project
+
+```
+architecture_page = mosic_create_entity_page("MProject", project_id, {
+  workspace_id: workspace_id,
+  title: "Codebase Architecture",
+  page_type: "Spec",
+  icon: "lucide:layers",
+  status: "Published",
+  content: convert_markdown_to_editorjs(ARCHITECTURE.md + "\n\n---\n\n" + STRUCTURE.md),
+  relation_type: "Related"
+})
+
+# Tag the page
+mosic_batch_add_tags_to_document("M Page", architecture_page.name, [
+  GSD_MANAGED_TAG,
+  "codebase"
+])
+```
+
+### Step 3: Create Tech Stack Page Linked to Project
+
+```
+stack_page = mosic_create_entity_page("MProject", project_id, {
+  workspace_id: workspace_id,
+  title: "Tech Stack & Integrations",
+  page_type: "Spec",
+  icon: "lucide:code-2",
+  status: "Published",
+  content: convert_markdown_to_editorjs(STACK.md + "\n\n---\n\n" + INTEGRATIONS.md),
+  relation_type: "Related"
+})
+
+# Tag the page
+mosic_batch_add_tags_to_document("M Page", stack_page.name, [
+  GSD_MANAGED_TAG,
+  "codebase"
+])
+```
+
+### Step 4: Create Conventions Page
+
+```
+conventions_page = mosic_create_entity_page("MProject", project_id, {
+  workspace_id: workspace_id,
+  title: "Code Conventions & Testing",
+  page_type: "Spec",
+  icon: "lucide:book-open",
+  status: "Published",
+  content: convert_markdown_to_editorjs(CONVENTIONS.md + "\n\n---\n\n" + TESTING.md),
+  relation_type: "Related"
+})
+
+# Tag the page
+mosic_batch_add_tags_to_document("M Page", conventions_page.name, [
+  GSD_MANAGED_TAG,
+  "codebase"
+])
+```
+
+### Step 5: Create Concerns Page
+
+```
+concerns_page = mosic_create_entity_page("MProject", project_id, {
+  workspace_id: workspace_id,
+  title: "Technical Concerns & Debt",
+  page_type: "Document",
+  icon: "lucide:alert-triangle",
+  status: "Published",
+  content: convert_markdown_to_editorjs(CONCERNS.md),
+  relation_type: "Related"
+})
+
+# Tag the page
+mosic_batch_add_tags_to_document("M Page", concerns_page.name, [
+  GSD_MANAGED_TAG,
+  "codebase"
+])
+```
+
+### Step 6: Store Page IDs
+
+```bash
+# Update config.json with page IDs
+# mosic.pages["codebase-architecture"] = architecture_page.name
+# mosic.pages["codebase-stack"] = stack_page.name
+# mosic.pages["codebase-conventions"] = conventions_page.name
+# mosic.pages["codebase-concerns"] = concerns_page.name
+```
+
+Display:
+```
+✓ Codebase map synced to Mosic
+  Architecture: https://mosic.pro/app/page/[architecture_page.name]
+  Tech Stack: https://mosic.pro/app/page/[stack_page.name]
+  Conventions: https://mosic.pro/app/page/[conventions_page.name]
+  Concerns: https://mosic.pro/app/page/[concerns_page.name]
+```
+
+**Error handling:**
+```
+IF mosic sync fails:
+  - Log warning: "Mosic sync failed: [error]. Codebase map saved locally."
+  - Add to mosic.pending_sync array
+  - Continue to offer_next (don't block)
+```
+
+**If mosic.enabled = false:** Skip to offer_next step.
+</step>
+
 <step name="offer_next">
 Present completion summary and next steps.
 
@@ -285,6 +418,13 @@ Created .planning/codebase/:
 - INTEGRATIONS.md ([N] lines) - External services and APIs
 - CONCERNS.md ([N] lines) - Technical debt and issues
 
+[IF mosic.enabled:]
+Mosic Pages:
+- Architecture & Structure: https://mosic.pro/app/page/[id]
+- Tech Stack & Integrations: https://mosic.pro/app/page/[id]
+- Conventions & Testing: https://mosic.pro/app/page/[id]
+- Technical Concerns: https://mosic.pro/app/page/[id]
+[END IF]
 
 ---
 
@@ -317,6 +457,11 @@ End workflow.
 - Agents write documents directly (orchestrator doesn't receive document contents)
 - Read agent output files to collect confirmations
 - All 7 codebase documents exist
+- Mosic sync (if enabled):
+  - [ ] Architecture & Structure page created linked to project
+  - [ ] Tech Stack & Integrations page created linked to project
+  - [ ] Conventions & Testing page created linked to project
+  - [ ] Technical Concerns page created linked to project
 - Clear completion summary with line counts
 - User offered clear next steps in GSD style
 </success_criteria>

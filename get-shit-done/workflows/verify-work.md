@@ -321,6 +321,136 @@ git add ".planning/phases/XX-name/{phase}-UAT.md"
 git commit -m "test({phase}): complete UAT - {passed} passed, {issues} issues"
 ```
 
+Proceed to `sync_uat_to_mosic`.
+</step>
+
+<step name="sync_uat_to_mosic">
+**Sync UAT to Mosic (Deep Integration):**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+Display:
+```
+◆ Syncing UAT to Mosic...
+```
+
+### Step 1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+UAT_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.uat")
+FIX_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.fix")
+PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PHASE_NUM}\"]")
+TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PHASE_NUM}\"]")
+```
+
+### Step 2: Create UAT Page Linked to Phase Task List
+
+```
+uat_page = mosic_create_entity_page("MTask List", task_list_id, {
+  workspace_id: workspace_id,
+  title: "Phase " + PHASE_NUM + " UAT Results",
+  page_type: "Document",
+  icon: "lucide:clipboard-check",
+  status: "Published",
+  content: convert_uat_to_editorjs(UAT.md content),
+  relation_type: "Related"
+})
+
+# Tag the UAT page
+mosic_batch_add_tags_to_document("M Page", uat_page.name, [
+  GSD_MANAGED_TAG,
+  UAT_TAG,
+  PHASE_TAG
+])
+
+# Store page ID
+# mosic.pages["phase-" + PHASE_NUM + "-uat"] = uat_page.name
+```
+
+### Step 3: Create Issue Tasks for Each Failed Test
+
+```
+IF issues > 0:
+  FOR each issue in issues_list:
+    issue_task = mosic_create_document("MTask", {
+      workspace_id: workspace_id,
+      task_list: task_list_id,
+      title: "Fix: " + issue.truth.substring(0, 80),
+      description: "**Failed UAT Test:** " + issue.test + "\n\n" +
+        "**Expected:**\n" + issue.expected + "\n\n" +
+        "**Reported:**\n" + issue.reported + "\n\n" +
+        "**Severity:** " + issue.severity,
+      icon: "lucide:alert-circle",
+      status: "Blocked",  # Blocked until diagnosed
+      priority: severity_to_priority(issue.severity)
+    })
+
+    # Tag the issue task
+    mosic_batch_add_tags_to_document("MTask", issue_task.name, [
+      GSD_MANAGED_TAG,
+      FIX_TAG,
+      PHASE_TAG
+    ])
+
+    # Link issue task to UAT page
+    mosic_create_document("M Relation", {
+      workspace_id: workspace_id,
+      source_doctype: "MTask",
+      source_name: issue_task.name,
+      target_doctype: "M Page",
+      target_name: uat_page.name,
+      relation_type: "Related"
+    })
+
+    # Store task ID
+    # mosic.tasks["phase-" + PHASE_NUM + "-fix-" + issue.test] = issue_task.name
+```
+
+### Step 4: Add UAT Summary Comment
+
+```
+mosic_create_document("M Comment", {
+  workspace_id: workspace_id,
+  ref_doc: "MTask List",
+  ref_name: task_list_id,
+  content: "📋 **UAT Complete**\n\n" +
+    "| Result | Count |\n" +
+    "|--------|-------|\n" +
+    "| Passed | " + passed_count + " |\n" +
+    "| Issues | " + issues_count + " |\n" +
+    "| Skipped | " + skipped_count + " |\n\n" +
+    "[UAT Results](page/" + uat_page.name + ")"
+})
+```
+
+Display:
+```
+✓ UAT synced to Mosic
+  Page: https://mosic.pro/app/page/[uat_page.name]
+  [IF issues > 0:] Issues: [issues_count] tasks created [END IF]
+```
+
+**Error handling:**
+```
+IF mosic sync fails:
+  - Log warning: "Mosic sync failed: [error]. UAT saved locally."
+  - Add to mosic.pending_sync array
+  - Continue (don't block)
+```
+
+**If mosic.enabled = false:** Skip Mosic sync.
+
+Proceed to present_summary.
+</step>
+
+<step name="present_summary">
 Present summary:
 ```
 ## UAT Complete: Phase {phase}
@@ -330,6 +460,10 @@ Present summary:
 | Passed | {N}   |
 | Issues | {N}   |
 | Skipped| {N}   |
+
+[IF mosic.enabled:]
+Mosic: UAT page synced, {issues_count} issue tasks created
+[END IF]
 
 [If issues > 0:]
 ### Issues Found
@@ -588,6 +722,11 @@ Default to **major** if unclear. User can correct if needed.
 - [ ] Severity inferred from description (never asked)
 - [ ] Batched writes: on issue, every 5 passes, or completion
 - [ ] Committed on completion
+- [ ] Mosic sync (if enabled):
+  - [ ] UAT page created linked to phase task list
+  - [ ] Issue tasks created for failed tests (status: Blocked)
+  - [ ] Issue tasks linked to UAT page
+  - [ ] UAT summary comment added
 - [ ] If issues: parallel debug agents diagnose root causes
 - [ ] If issues: gsd-planner creates fix plans (gap_closure mode)
 - [ ] If issues: gsd-plan-checker verifies fix plans

@@ -264,6 +264,99 @@ NOTE: DISCOVERY.md is NOT committed separately. It will be committed with phase 
 
 </process>
 
+<step name="sync_discovery_to_mosic">
+**Sync discovery to Mosic (if enabled):**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true AND Level 2-3 (DISCOVERY.md created):**
+
+Display:
+```
+◆ Syncing discovery to Mosic...
+```
+
+### Step 1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+RESEARCH_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.research")
+PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PADDED_PHASE}\"]")
+TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PADDED_PHASE}\"]")
+```
+
+### Step 2: Create Research Page Linked to Phase Task List
+
+```
+discovery_page = mosic_create_entity_page("MTask List", task_list_id, {
+  workspace_id: workspace_id,
+  title: "Phase " + PADDED_PHASE + " Discovery",
+  page_type: "Document",
+  icon: "lucide:search",
+  status: "Published",
+  content: convert_discovery_to_editorjs(DISCOVERY.md content),
+  relation_type: "Related"
+})
+
+# Tag the discovery page
+mosic_batch_add_tags_to_document("M Page", discovery_page.name, [
+  GSD_MANAGED_TAG,
+  RESEARCH_TAG,
+  PHASE_TAG
+])
+
+# Store page ID
+# mosic.pages["phase-" + PADDED_PHASE + "-discovery"] = discovery_page.name
+```
+
+### Step 3: Update Task List with Discovery Summary
+
+```
+# Extract recommendation from discovery
+recommendation = extract_recommendation_from_discovery(DISCOVERY.md)
+
+mosic_update_document("MTask List", task_list_id, {
+  description: original_description + "\n\n---\n\n**Discovery Summary:**\n" +
+    "Confidence: " + CONFIDENCE_LEVEL + "\n" +
+    "Recommendation: " + recommendation
+})
+```
+
+### Step 4: Add Discovery Comment
+
+```
+mosic_create_document("M Comment", {
+  workspace_id: workspace_id,
+  ref_doc: "MTask List",
+  ref_name: task_list_id,
+  content: "🔍 **Discovery Complete**\n\n" +
+    "Depth: Level " + LEVEL + "\n" +
+    "Confidence: " + CONFIDENCE_LEVEL + "\n\n" +
+    "[Full Discovery](page/" + discovery_page.name + ")"
+})
+```
+
+Display:
+```
+✓ Discovery synced to Mosic
+  Page: https://mosic.pro/app/page/[discovery_page.name]
+```
+
+**Error handling:**
+```
+IF mosic sync fails:
+  - Log warning: "Mosic sync failed: [error]. Discovery saved locally."
+  - Add to mosic.pending_sync array
+  - Continue (don't block)
+```
+
+**If mosic.enabled = false OR Level 1:** Skip Mosic sync.
+</step>
+
 <success_criteria>
 **Level 1 (Quick Verify):**
 - Context7 consulted for library/topic
@@ -275,6 +368,10 @@ NOTE: DISCOVERY.md is NOT committed separately. It will be committed with phase 
 - WebSearch findings cross-verified
 - DISCOVERY.md created with recommendation
 - Confidence level MEDIUM or higher
+- Mosic sync (if enabled):
+  - [ ] Discovery page created linked to phase task list
+  - [ ] Task list updated with discovery summary
+  - [ ] Discovery comment added
 - Ready to inform PLAN.md creation
 
 **Level 3 (Deep Dive):**
@@ -285,5 +382,9 @@ NOTE: DISCOVERY.md is NOT committed separately. It will be committed with phase 
 - Quality report with source attribution
 - If LOW confidence findings → validation checkpoints defined
 - Confidence gate passed
+- Mosic sync (if enabled):
+  - [ ] Discovery page created linked to phase task list
+  - [ ] Task list updated with discovery summary
+  - [ ] Discovery comment added
 - Ready to inform PLAN.md creation
 </success_criteria>

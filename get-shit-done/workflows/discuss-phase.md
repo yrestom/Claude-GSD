@@ -390,6 +390,99 @@ Created: .planning/phases/${PADDED_PHASE}-${SLUG}/${PADDED_PHASE}-CONTEXT.md
 ```
 </step>
 
+<step name="sync_context_to_mosic">
+**Sync context to Mosic (Deep Integration):**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+Display:
+```
+◆ Syncing context to Mosic...
+```
+
+### Step 1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PADDED_PHASE}\"]")
+TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PADDED_PHASE}\"]")
+```
+
+### Step 2: Create Context Page Linked to Phase Task List
+
+```
+context_page = mosic_create_entity_page("MTask List", task_list_id, {
+  workspace_id: workspace_id,
+  title: "Phase " + PADDED_PHASE + " Context & Decisions",
+  page_type: "Document",
+  icon: "lucide:message-square",
+  status: "Published",
+  content: convert_context_to_editorjs(CONTEXT.md content),
+  relation_type: "Related"
+})
+
+# Tag the context page
+mosic_batch_add_tags_to_document("M Page", context_page.name, [
+  GSD_MANAGED_TAG,
+  PHASE_TAG
+])
+
+# Store page ID
+# mosic.pages["phase-" + PADDED_PHASE + "-context"] = context_page.name
+```
+
+### Step 3: Update Task List Description with Key Decisions
+
+```
+# Extract key decisions for summary
+key_decisions = extract_decisions_from_context(CONTEXT.md)
+
+# Update task list description to reference decisions
+mosic_update_document("MTask List", task_list_id, {
+  description: original_description + "\n\n---\n\n**Key Decisions:**\n" +
+    key_decisions.map(d => "- " + d).join("\n") +
+    "\n\n[Full context: Phase Context & Decisions page]"
+})
+```
+
+### Step 4: Add Comment Summarizing Discussion
+
+```
+mosic_create_document("M Comment", {
+  workspace_id: workspace_id,
+  ref_doc: "MTask List",
+  ref_name: task_list_id,
+  content: "📝 **Context Gathered**\n\n" +
+    "Implementation decisions documented via `/gsd:discuss-phase`.\n\n" +
+    "**Areas Discussed:**\n" +
+    DISCUSSED_AREAS.map(a => "- " + a).join("\n") +
+    "\n\n**Status:** Ready for planning"
+})
+```
+
+Display:
+```
+✓ Context synced to Mosic
+  Page: https://mosic.pro/app/page/[context_page.name]
+```
+
+**Error handling:**
+```
+IF mosic sync fails:
+  - Log warning: "Mosic sync failed: [error]. Context saved locally."
+  - Add to mosic.pending_sync array
+  - Continue to git operations (don't block)
+```
+
+**If mosic.enabled = false:** Skip to git_commit step.
+</step>
+
 <step name="git_commit">
 Commit phase context:
 
@@ -429,5 +522,9 @@ Confirm: "Committed: docs(${PADDED_PHASE}): capture phase context"
 - Scope creep redirected to deferred ideas
 - CONTEXT.md captures actual decisions, not vague vision
 - Deferred ideas preserved for future phases
+- Mosic sync (if enabled):
+  - [ ] Context page created linked to phase task list
+  - [ ] Key decisions added to task list description
+  - [ ] Discussion comment added
 - User knows next steps
 </success_criteria>

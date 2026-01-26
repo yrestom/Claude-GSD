@@ -168,11 +168,94 @@ If "Re-examine": Return to analyze_phase with updated understanding
 
 </process>
 
+<step name="sync_assumptions_to_mosic">
+**Sync assumptions to Mosic (optional, if significant corrections made):**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true AND user provided significant corrections:**
+
+Display:
+```
+◆ Syncing assumptions to Mosic...
+```
+
+### Step 1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PADDED_PHASE}\"]")
+TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PADDED_PHASE}\"]")
+```
+
+### Step 2: Create Assumptions Page (if corrections provided)
+
+```
+assumptions_page = mosic_create_entity_page("MTask List", task_list_id, {
+  workspace_id: workspace_id,
+  title: "Phase " + PADDED_PHASE + " Assumptions & Corrections",
+  page_type: "Document",
+  icon: "lucide:lightbulb",
+  status: "Published",
+  content: {
+    blocks: [
+      {
+        type: "header",
+        data: { text: "Initial Assumptions", level: 2 }
+      },
+      // Technical approach, implementation order, scope, risks, dependencies
+      {
+        type: "header",
+        data: { text: "User Corrections", level: 2 }
+      },
+      // Corrections provided by user
+    ]
+  },
+  relation_type: "Related"
+})
+
+# Tag the page
+mosic_batch_add_tags_to_document("M Page", assumptions_page.name, [
+  GSD_MANAGED_TAG,
+  PHASE_TAG
+])
+```
+
+### Step 3: Add Comment to Task List
+
+```
+mosic_create_document("M Comment", {
+  workspace_id: workspace_id,
+  ref_doc: "MTask List",
+  ref_name: task_list_id,
+  content: "💡 **Assumptions Reviewed**\n\n" +
+    "Key corrections:\n" +
+    corrections.map(c => "- " + c).join("\n") +
+    "\n\n[Full assumptions](page/" + assumptions_page.name + ")"
+})
+```
+
+Display:
+```
+✓ Assumptions synced to Mosic
+  Page: https://mosic.pro/app/page/[assumptions_page.name]
+```
+
+**If mosic.enabled = false OR no corrections:** Skip Mosic sync.
+</step>
+
 <success_criteria>
 - Phase number validated against roadmap
 - Assumptions surfaced across five areas: technical approach, implementation order, scope, risks, dependencies
 - Confidence levels marked where appropriate
 - "What do you think?" prompt presented
 - User feedback acknowledged
+- Mosic sync (if enabled and corrections provided):
+  - [ ] Assumptions page created linked to phase task list
+  - [ ] Comment added with key corrections
 - Clear next steps offered
 </success_criteria>

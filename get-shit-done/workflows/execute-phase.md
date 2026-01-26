@@ -510,7 +510,7 @@ If `COMMIT_PLANNING_DOCS=false` (set in load_project_state):
 - Skip all git operations for .planning/ files
 - Planning docs exist locally but are gitignored
 - Log: "Skipping planning docs commit (commit_docs: false)"
-- Proceed to offer_next step
+- Proceed to sync_phase_to_mosic step
 
 If `COMMIT_PLANNING_DOCS=true` (default):
 - Continue with git operations below
@@ -521,6 +521,140 @@ git add .planning/ROADMAP.md .planning/STATE.md .planning/phases/{phase_dir}/*-V
 git add .planning/REQUIREMENTS.md  # if updated
 git commit -m "docs(phase-{X}): complete phase execution"
 ```
+</step>
+
+<step name="sync_phase_to_mosic">
+**Sync phase execution to Mosic (Deep Integration):**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+Display:
+```
+◆ Syncing phase execution to Mosic...
+```
+
+### Step 1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PHASE_NUM}\"]")
+TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PHASE_NUM}\"]")
+```
+
+### Step 2: Update Task List Status
+
+```
+# Mark phase task list as complete
+mosic_update_document("MTask List", task_list_id, {
+  status: "Completed",
+  description: original_description + "\n\n---\n\n✅ **Phase Complete**\n" +
+    "- Plans: " + completed_plans + "/" + total_plans + "\n" +
+    "- Completed: " + format_date(now)
+})
+```
+
+### Step 3: Update All Plan Tasks to Completed
+
+```
+FOR each plan_task_id in phase_tasks:
+  IF task.status != "Completed":
+    mosic_update_document("MTask", plan_task_id, {
+      status: "Completed"
+    })
+```
+
+### Step 4: Create Phase Summary Page
+
+```
+phase_summary_page = mosic_create_entity_page("MTask List", task_list_id, {
+  workspace_id: workspace_id,
+  title: "Phase " + PHASE_NUM + " Execution Summary",
+  page_type: "Document",
+  icon: "lucide:check-circle",
+  status: "Published",
+  content: {
+    blocks: [
+      {
+        type: "header",
+        data: { text: "Phase " + PHASE_NUM + " Complete", level: 1 }
+      },
+      {
+        type: "paragraph",
+        data: { text: "**Waves executed:** " + WAVE_COUNT }
+      },
+      {
+        type: "paragraph",
+        data: { text: "**Plans completed:** " + completed_plans + "/" + total_plans }
+      },
+      {
+        type: "header",
+        data: { text: "Wave Summary", level: 2 }
+      },
+      {
+        type: "table",
+        data: {
+          content: wave_summary_table
+        }
+      },
+      {
+        type: "header",
+        data: { text: "Verification", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: "Status: " + verification_status + "\nScore: " + verification_score }
+      }
+    ]
+  },
+  relation_type: "Related"
+})
+
+# Tag the summary page
+mosic_batch_add_tags_to_document("M Page", phase_summary_page.name, [
+  GSD_MANAGED_TAG,
+  PHASE_TAG,
+  "summary"
+])
+```
+
+### Step 5: Add Phase Completion Comment
+
+```
+mosic_create_document("M Comment", {
+  workspace_id: workspace_id,
+  ref_doc: "MTask List",
+  ref_name: task_list_id,
+  content: "✅ **Phase Execution Complete**\n\n" +
+    "- Waves: " + WAVE_COUNT + "\n" +
+    "- Plans: " + completed_plans + "/" + total_plans + "\n" +
+    "- Verification: " + verification_status + "\n\n" +
+    "[Execution Summary](page/" + phase_summary_page.name + ")"
+})
+```
+
+Display:
+```
+✓ Phase synced to Mosic
+  Task List: https://mosic.pro/app/MTask List/[task_list_id]
+  Summary: https://mosic.pro/app/page/[phase_summary_page.name]
+```
+
+**Error handling:**
+```
+IF mosic sync fails:
+  - Log warning: "Mosic sync failed: [error]. Phase completed locally."
+  - Add to mosic.pending_sync array
+  - Continue to offer_next (don't block)
+```
+
+**If mosic.enabled = false:** Skip to offer_next step.
 </step>
 
 <step name="offer_next">

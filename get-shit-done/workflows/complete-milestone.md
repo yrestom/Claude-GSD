@@ -611,6 +611,195 @@ git push origin v[X.Y]
 
 </step>
 
+<step name="sync_milestone_to_mosic">
+
+**Sync milestone completion to Mosic (Deep Integration):**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+Display:
+```
+◆ Syncing milestone completion to Mosic...
+```
+
+### Step 1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+```
+
+### Step 2: Update Project Status
+
+```
+# Update project to completed status
+mosic_update_document("MProject", project_id, {
+  status: "Completed",
+  actual_end_date: "[ISO timestamp now]",
+  description: original_description + "\n\n---\n\n✅ **Milestone " + VERSION + " Complete**\n" +
+    "- Shipped: " + format_date(now) + "\n" +
+    "- Phases: " + PHASE_COUNT + "\n" +
+    "- Plans: " + PLAN_COUNT + "\n"
+})
+
+# Add completion comment
+mosic_create_document("M Comment", {
+  workspace_id: workspace_id,
+  ref_doc: "MProject",
+  ref_name: project_id,
+  content: "🎉 **Milestone " + VERSION + " Complete**\n\n" +
+    "**Delivered:** " + MILESTONE_DESCRIPTION + "\n\n" +
+    "**Stats:**\n" +
+    "- " + PHASE_COUNT + " phases completed\n" +
+    "- " + PLAN_COUNT + " plans executed\n" +
+    "- " + TASK_COUNT + " tasks total\n" +
+    "- " + DAYS + " days from start to ship\n\n" +
+    "**Git Tag:** `" + VERSION + "`"
+})
+```
+
+### Step 3: Mark All Phase Task Lists Complete
+
+```
+# Get all task lists for this project
+task_lists = mosic_get_project(project_id, { include_task_lists: true }).task_lists
+
+FOR each task_list in task_lists:
+  IF task_list.status != "Completed":
+    mosic_update_document("MTask List", task_list.name, {
+      status: "Completed",
+      description: task_list.description + "\n\n---\n✅ Completed in " + VERSION
+    })
+```
+
+### Step 4: Create Milestone Summary Page
+
+```
+# Create comprehensive milestone summary page
+milestone_page = mosic_create_entity_page("MProject", project_id, {
+  workspace_id: workspace_id,
+  title: VERSION + " Milestone Summary",
+  page_type: "Document",
+  icon: "lucide:trophy",
+  status: "Published",
+  content: {
+    blocks: [
+      {
+        type: "header",
+        data: { text: VERSION + " " + MILESTONE_NAME, level: 1 }
+      },
+      {
+        type: "paragraph",
+        data: { text: "**Shipped:** " + format_date(now) }
+      },
+      {
+        type: "header",
+        data: { text: "Delivered", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: MILESTONE_DESCRIPTION }
+      },
+      {
+        type: "header",
+        data: { text: "Key Accomplishments", level: 2 }
+      },
+      {
+        type: "list",
+        data: {
+          style: "unordered",
+          items: KEY_ACCOMPLISHMENTS.map(a => a)
+        }
+      },
+      {
+        type: "header",
+        data: { text: "Statistics", level: 2 }
+      },
+      {
+        type: "table",
+        data: {
+          content: [
+            ["Metric", "Value"],
+            ["Phases", PHASE_COUNT],
+            ["Plans", PLAN_COUNT],
+            ["Tasks", TASK_COUNT],
+            ["Duration", DAYS + " days"],
+            ["Git Range", FIRST_COMMIT + " → " + LAST_COMMIT]
+          ]
+        }
+      },
+      {
+        type: "header",
+        data: { text: "What's Next", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: WHATS_NEXT }
+      }
+    ]
+  },
+  relation_type: "Related"
+})
+
+# Tag the milestone page
+mosic_batch_add_tags_to_document("M Page", milestone_page.name, [
+  GSD_MANAGED_TAG,
+  VERSION.replace(".", "-")  # e.g., "v1-0" tag
+])
+
+# Store page ID
+# mosic.pages["milestone-" + VERSION] = milestone_page.name
+```
+
+### Step 5: Create Relations Between Milestone Page and Phase Summaries
+
+```
+# Link milestone page to all phase summary pages
+FOR each phase_num in milestone_phases:
+  summary_page_id = mosic.pages["phase-" + phase_num + "-summary"]
+
+  IF summary_page_id:
+    mosic_create_document("M Relation", {
+      workspace_id: workspace_id,
+      source_doctype: "M Page",
+      source_name: milestone_page.name,
+      target_doctype: "M Page",
+      target_name: summary_page_id,
+      relation_type: "Related"
+    })
+```
+
+### Step 6: Update Last Sync Timestamp
+
+```bash
+# Update config.json with sync timestamp
+# mosic.last_sync = "[ISO timestamp now]"
+```
+
+Display:
+```
+✓ Milestone synced to Mosic
+  Project: https://mosic.pro/app/Project/[project_id]
+  Summary: https://mosic.pro/app/page/[milestone_page.name]
+```
+
+**Error handling:**
+```
+IF mosic sync fails:
+  - Log warning: "Mosic sync failed: [error]. Milestone completed locally."
+  - Add to mosic.pending_sync array
+  - Continue to git operations (don't block)
+```
+
+**If mosic.enabled = false:** Skip to git_commit_milestone step.
+</step>
+
 <step name="git_commit_milestone">
 
 Commit milestone completion including archive files and deletions.
@@ -749,6 +938,12 @@ Milestone completion is successful when:
 - [ ] Requirements archive created (milestones/v[X.Y]-REQUIREMENTS.md)
 - [ ] REQUIREMENTS.md deleted (fresh for next milestone)
 - [ ] STATE.md updated with fresh project reference
+- [ ] Mosic sync (if enabled):
+  - [ ] Project status updated to "Completed"
+  - [ ] All phase task lists marked complete
+  - [ ] Milestone summary page created with accomplishments
+  - [ ] Relations created between milestone page and phase summaries
+  - [ ] Completion comment added to project
 - [ ] Git tag created (v[X.Y])
 - [ ] Milestone commit made (includes archive files and deletion)
 - [ ] User knows next step (/gsd:new-milestone)

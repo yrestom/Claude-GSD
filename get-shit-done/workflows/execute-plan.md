@@ -1631,6 +1631,108 @@ git commit --amend --no-edit  # Include in metadata commit
 Skip this step.
 </step>
 
+<step name="sync_plan_to_mosic">
+**Sync plan execution to Mosic (if enabled):**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+Display:
+```
+◆ Syncing plan execution to Mosic...
+```
+
+### Step 1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PADDED_PHASE}\"]")
+TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PADDED_PHASE}\"]")
+PLAN_TASK_ID=$(cat .planning/config.json | jq -r ".mosic.tasks[\"phase-${PADDED_PHASE}-plan-${PLAN_NUM}\"]")
+```
+
+### Step 2: Update Plan Task Status
+
+```
+# Mark plan task as complete
+mosic_update_document("MTask", plan_task_id, {
+  status: "Completed",
+  description: original_description + "\n\n---\n\n✅ **Completed**\n" +
+    "- Tasks: " + completed_tasks + "/" + total_tasks + "\n" +
+    "- Duration: " + DURATION + "\n" +
+    "- Commits: " + commit_count
+})
+
+# Mark any subtask checklist items as complete
+FOR each checklist_item in plan_task.checklists:
+  IF checklist_item.title matches completed task:
+    mosic_update_document("MTask Check Item", checklist_item.name, {
+      is_checked: true
+    })
+```
+
+### Step 3: Create Plan Summary Page
+
+```
+plan_summary_page = mosic_create_entity_page("MTask", plan_task_id, {
+  workspace_id: workspace_id,
+  title: "Plan " + PADDED_PHASE + "-" + PLAN_NUM + " Summary",
+  page_type: "Document",
+  icon: "lucide:file-check",
+  status: "Published",
+  content: convert_summary_to_editorjs(SUMMARY.md content),
+  relation_type: "Related"
+})
+
+# Tag the summary page
+mosic_batch_add_tags_to_document("M Page", plan_summary_page.name, [
+  GSD_MANAGED_TAG,
+  PHASE_TAG,
+  "summary"
+])
+
+# Store page ID
+# mosic.pages["phase-" + PADDED_PHASE + "-plan-" + PLAN_NUM + "-summary"] = plan_summary_page.name
+```
+
+### Step 4: Add Completion Comment
+
+```
+mosic_create_document("M Comment", {
+  workspace_id: workspace_id,
+  ref_doc: "MTask",
+  ref_name: plan_task_id,
+  content: "✅ **Plan Complete**\n\n" +
+    "- Duration: " + DURATION + "\n" +
+    "- Tasks: " + completed_tasks + "/" + total_tasks + "\n" +
+    "- Deviations: " + deviation_count + "\n\n" +
+    "[Summary](page/" + plan_summary_page.name + ")"
+})
+```
+
+Display:
+```
+✓ Plan synced to Mosic
+  Task: https://mosic.pro/app/MTask/[plan_task_id]
+  Summary: https://mosic.pro/app/page/[plan_summary_page.name]
+```
+
+**Error handling:**
+```
+IF mosic sync fails:
+  - Log warning: "Mosic sync failed: [error]. Plan completed locally."
+  - Add to mosic.pending_sync array
+  - Continue to offer_next (don't block)
+```
+
+**If mosic.enabled = false:** Skip to offer_next step.
+</step>
+
 <step name="offer_next">
 **MANDATORY: Verify remaining work before presenting next steps.**
 
@@ -1840,5 +1942,10 @@ All {Y} plans finished.
 - STATE.md updated (position, decisions, issues, session)
 - ROADMAP.md updated
 - If codebase map exists: map updated with execution changes (or skipped if no significant changes)
+- Mosic sync (if enabled):
+  - [ ] Plan task status updated to "Completed"
+  - [ ] Checklist items marked complete
+  - [ ] Plan summary page created linked to task
+  - [ ] Completion comment added
 - If USER-SETUP.md created: prominently surfaced in completion output
   </success_criteria>
