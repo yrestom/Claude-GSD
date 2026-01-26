@@ -325,11 +325,15 @@ or skip research and plan directly:
 IF mosic sync fails:
   Display: "Mosic sync failed: {error}"
 
-  # Save context locally as backup
-  Write context to /tmp/phase-{PHASE}-context.md
+  # Display content directly (no local file backup)
+  Display: "---"
+  Display: "Context content that failed to sync:"
+  Display: "---"
+  Display: {context_content}
+  Display: "---"
 
-  Display: "Context saved to /tmp/phase-{PHASE}-context.md"
-  Display: "Retry with /gsd:sync-mosic or copy content manually"
+  Display: "To retry: /gsd:discuss-phase {PHASE}"
+  Display: "The content above can be manually copied to Mosic if needed."
 ```
 </error_handling>
 

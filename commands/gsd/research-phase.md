@@ -355,22 +355,15 @@ Key findings:
 IF mosic operation fails:
   Display: "Mosic sync failed: {error}"
 
-  # Save research locally as backup
-  Write research to /tmp/phase-{PHASE}-research.md
+  # Display content directly (no local file backup)
+  Display: "---"
+  Display: "Research content that failed to sync:"
+  Display: "---"
+  Display: {research_findings}
+  Display: "---"
 
-  Display: "Research saved to /tmp/phase-{PHASE}-research.md"
-  Display: "Retry with /gsd:sync-mosic or copy content manually"
-
-  # Add to pending sync
-  config.mosic.pending_sync = config.mosic.pending_sync or []
-  config.mosic.pending_sync.push({
-    type: "research_page",
-    phase: PHASE,
-    content_path: "/tmp/phase-" + PHASE + "-research.md",
-    timestamp: now
-  })
-
-  write config.json
+  Display: "To retry: /gsd:research-phase {PHASE}"
+  Display: "The content above can be manually copied to Mosic if needed."
 ```
 </error_handling>
 
