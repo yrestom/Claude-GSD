@@ -1,6 +1,6 @@
 ---
 name: gsd:plan-phase
-description: Create detailed execution plan for a phase (PLAN.md) with verification loop
+description: Create detailed execution plans for a phase in Mosic (Mosic-native)
 argument-hint: "[phase] [--research] [--skip-research] [--gaps] [--skip-verify]"
 agent: gsd-planner
 allowed-tools:
@@ -11,6 +11,8 @@ allowed-tools:
   - Grep
   - Task
   - WebFetch
+  - ToolSearch
+  - mcp__mosic_pro__*
   - mcp__context7__*
 ---
 
@@ -19,262 +21,318 @@ allowed-tools:
 </execution_context>
 
 <objective>
-Create executable phase prompts (PLAN.md files) for a roadmap phase with integrated research and verification.
+Create executable plans as MTasks in Mosic with linked plan pages.
 
-**Default flow:** Research (if needed) → Plan → Verify → Done
+**Default flow:** Research (if needed) -> Plan -> Verify -> Done
 
-**Orchestrator role:** Parse arguments, validate phase, research domain (unless skipped or exists), spawn gsd-planner agent, verify plans with gsd-plan-checker, iterate until plans pass or max iterations reached, present results.
+**Orchestrator role:** Parse arguments, validate phase, research domain (unless skipped), spawn gsd-planner agent, verify plans, iterate until plans pass, sync all to Mosic.
 
-**Why subagents:** Research and planning burn context fast. Verification uses fresh context. User sees the flow between agents in main context.
+**Architecture:** All state in Mosic. Plans become MTasks with plan pages. Research becomes M Pages linked to phase. config.json stores entity IDs for session context.
 </objective>
 
 <context>
 Phase number: $ARGUMENTS (optional - auto-detects next unplanned phase if not provided)
 
 **Flags:**
-- `--research` — Force re-research even if RESEARCH.md exists
-- `--skip-research` — Skip research entirely, go straight to planning
-- `--gaps` — Gap closure mode (reads VERIFICATION.md, skips research)
-- `--skip-verify` — Skip planner → checker verification loop
-
-Normalize phase input in step 2 before any directory lookups.
+- `--research` - Force re-research even if research page exists
+- `--skip-research` - Skip research entirely, go straight to planning
+- `--gaps` - Gap closure mode (reads verification page, skips research)
+- `--skip-verify` - Skip planner -> checker verification loop
 </context>
 
 <process>
 
-## 1. Validate Environment and Resolve Model Profile
+## 1. Load Config and Validate
 
 ```bash
-ls .planning/ 2>/dev/null
+CONFIG=$(cat config.json 2>/dev/null)
 ```
 
-**If not found:** Error - user should run `/gsd:new-project` first.
+If missing: Error - run `/gsd:new-project` first.
 
-**Resolve model profile for agent spawning:**
-
-```bash
-MODEL_PROFILE=$(cat .planning/config.json 2>/dev/null | grep -o '"model_profile"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || echo "balanced")
+Extract Mosic config:
+```
+workspace_id = config.mosic.workspace_id
+project_id = config.mosic.project_id
 ```
 
-Default to "balanced" if not set.
+**Resolve model profile:**
+```
+model_profile = config.model_profile or "balanced"
 
-**Model lookup table:**
-
+Model lookup:
 | Agent | quality | balanced | budget |
 |-------|---------|----------|--------|
 | gsd-phase-researcher | opus | sonnet | haiku |
 | gsd-planner | opus | opus | sonnet |
 | gsd-plan-checker | sonnet | sonnet | haiku |
+```
 
-Store resolved models for use in Task calls below.
-
-## 2. Parse and Normalize Arguments
+## 2. Parse Arguments and Normalize Phase
 
 Extract from $ARGUMENTS:
-
 - Phase number (integer or decimal like `2.1`)
-- `--research` flag to force re-research
-- `--skip-research` flag to skip research
-- `--gaps` flag for gap closure mode
-- `--skip-verify` flag to bypass verification loop
+- `--research`, `--skip-research`, `--gaps`, `--skip-verify` flags
 
-**If no phase number:** Detect next unplanned phase from roadmap.
+**If no phase number:** Auto-detect next unplanned phase from Mosic.
 
-**Normalize phase to zero-padded format:**
-
-```bash
-# Normalize phase number (8 → 08, but preserve decimals like 2.1 → 02.1)
-if [[ "$PHASE" =~ ^[0-9]+$ ]]; then
-  PHASE=$(printf "%02d" "$PHASE")
-elif [[ "$PHASE" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
-  PHASE=$(printf "%02d.%s" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}")
-fi
+**Normalize:**
+```
+IF PHASE is integer: PHASE = printf("%02d", PHASE)
+ELIF PHASE has decimal: PHASE = printf("%02d.%s", integer_part, decimal_part)
 ```
 
-**Check for existing research and plans:**
+## 3. Load Phase from Mosic
 
-```bash
-ls .planning/phases/${PHASE}-*/*-RESEARCH.md 2>/dev/null
-ls .planning/phases/${PHASE}-*/*-PLAN.md 2>/dev/null
+```
+# Get task_list_id from config
+phase_key = "phase-" + PHASE
+task_list_id = config.mosic.task_lists[phase_key]
+
+IF not task_list_id:
+  ERROR: Phase {PHASE} not found in config. Run /gsd:add-phase first.
+
+# Load phase with tasks
+phase = mosic_get_task_list(task_list_id, {
+  include_tasks: true
+})
+
+# Load phase pages
+phase_pages = mosic_get_entity_pages("MTask List", task_list_id, {
+  include_subtree: false
+})
+
+# Check for existing pages
+research_page = phase_pages.find(p => p.title contains "Research")
+context_page = phase_pages.find(p => p.title contains "Context")
+existing_plan_tasks = phase.tasks.filter(t => t.title starts with "Plan")
 ```
 
-## 3. Validate Phase
-
-```bash
-grep -A5 "Phase ${PHASE}:" .planning/ROADMAP.md 2>/dev/null
+Display:
+```
+Loading Phase {PHASE}: {phase.title}
+- Existing plans: {existing_plan_tasks.length}
+- Research: {research_page ? "Found" : "None"}
+- Context: {context_page ? "Found" : "None"}
 ```
 
-**If not found:** Error with available phases. **If found:** Extract phase number, name, description.
+## 4. Validate Phase Exists in Project
 
-## 4. Ensure Phase Directory Exists
+```
+project = mosic_get_project(project_id, {
+  include_task_lists: true
+})
 
-```bash
-# PHASE is already normalized (08, 02.1, etc.) from step 2
-PHASE_DIR=$(ls -d .planning/phases/${PHASE}-* 2>/dev/null | head -1)
-if [ -z "$PHASE_DIR" ]; then
-  # Create phase directory from roadmap name
-  PHASE_NAME=$(grep "Phase ${PHASE}:" .planning/ROADMAP.md | sed 's/.*Phase [0-9]*: //' | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
-  mkdir -p ".planning/phases/${PHASE}-${PHASE_NAME}"
-  PHASE_DIR=".planning/phases/${PHASE}-${PHASE_NAME}"
-fi
+phase_exists = project.task_lists.find(tl => tl.name == task_list_id)
+
+IF not phase_exists:
+  ERROR: Phase task list {task_list_id} not found in project.
 ```
 
 ## 5. Handle Research
 
-**If `--gaps` flag:** Skip research (gap closure uses VERIFICATION.md instead).
+**If `--gaps` flag:** Skip research (gap closure uses verification page).
 
 **If `--skip-research` flag:** Skip to step 6.
 
 **Check config for research setting:**
-
-```bash
-WORKFLOW_RESEARCH=$(cat .planning/config.json 2>/dev/null | grep -o '"research"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "true")
+```
+workflow_research = config.workflow.research (default: true)
 ```
 
 **If `workflow.research` is `false` AND `--research` flag NOT set:** Skip to step 6.
 
-**Otherwise:**
+**Check for existing research page:**
 
-Check for existing research:
-
-```bash
-ls "${PHASE_DIR}"/*-RESEARCH.md 2>/dev/null
+```
+IF research_page AND not --research flag:
+  # Load research content for planner
+  research_content = mosic_get_page(research_page.name, {
+    content_format: "markdown"
+  })
+  Display: "Using existing research page: {research_page.title}"
+  Skip to step 6
 ```
 
-**If RESEARCH.md exists AND `--research` flag NOT set:**
-- Display: `Using existing research: ${PHASE_DIR}/${PHASE}-RESEARCH.md`
-- Skip to step 6
+**If no research page OR `--research` flag set:**
 
-**If RESEARCH.md missing OR `--research` flag set:**
-
-Display stage banner:
+Display:
 ```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► RESEARCHING PHASE {X}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-------------------------------------------
+ GSD > RESEARCHING PHASE {PHASE}
+-------------------------------------------
 
-◆ Spawning researcher...
+Spawning researcher...
 ```
-
-Proceed to spawn researcher
 
 ### Spawn gsd-phase-researcher
 
-Gather context for research prompt:
+Gather context for research:
 
-```bash
-# Get phase description from roadmap
-PHASE_DESC=$(grep -A3 "Phase ${PHASE}:" .planning/ROADMAP.md)
+```
+# Load context page content if exists
+context_content = ""
+IF context_page:
+  context_content = mosic_get_page(context_page.name, {
+    content_format: "markdown"
+  }).content
 
-# Get requirements if they exist
-REQUIREMENTS=$(cat .planning/REQUIREMENTS.md 2>/dev/null | grep -A100 "## Requirements" | head -50)
-
-# Get prior decisions from STATE.md
-DECISIONS=$(grep -A20 "### Decisions Made" .planning/STATE.md 2>/dev/null)
-
-# Get phase context if exists
-PHASE_CONTEXT=$(cat "${PHASE_DIR}"/*-CONTEXT.md 2>/dev/null)
+# Get requirements page content
+requirements_page_id = config.mosic.pages.requirements
+requirements_content = ""
+IF requirements_page_id:
+  requirements_content = mosic_get_page(requirements_page_id, {
+    content_format: "markdown"
+  }).content
 ```
 
-Fill research prompt and spawn:
+Fill research prompt:
 
 ```markdown
 <objective>
-Research how to implement Phase {phase_number}: {phase_name}
+Research how to implement Phase {PHASE}: {phase.title}
 
 Answer: "What do I need to know to PLAN this phase well?"
 </objective>
 
 <context>
 **Phase description:**
-{phase_description}
+{phase.description}
 
 **Requirements (if any):**
-{requirements}
-
-**Prior decisions:**
-{decisions}
+{requirements_content}
 
 **Phase context (if any):**
-{phase_context}
+{context_content}
 </context>
 
 <output>
-Write research findings to: {phase_dir}/{phase}-RESEARCH.md
+Return research findings as structured markdown. The orchestrator will create the Mosic page.
 </output>
 ```
 
 ```
 Task(
-  prompt="First, read ~/.claude/agents/gsd-phase-researcher.md for your role and instructions.\n\n" + research_prompt,
+  prompt="First, read ~/.claude/agents/gsd-phase-researcher.md for your role.\n\n" + research_prompt,
   subagent_type="general-purpose",
   model="{researcher_model}",
-  description="Research Phase {phase}"
+  description="Research Phase {PHASE}"
 )
 ```
 
-### Handle Researcher Return
+### Create Research Page in Mosic
 
-**`## RESEARCH COMPLETE`:**
-- Display: `Research complete. Proceeding to planning...`
-- Continue to step 6
+After researcher returns with `## RESEARCH COMPLETE`:
 
-**`## RESEARCH BLOCKED`:**
-- Display blocker information
-- Offer: 1) Provide more context, 2) Skip research and plan anyway, 3) Abort
-- Wait for user response
+```
+# Create or update research page
+IF research_page:
+  mosic_update_document("M Page", research_page.name, {
+    content: convert_to_editorjs(research_findings),
+    status: "Published"
+  })
+  research_page_id = research_page.name
+ELSE:
+  new_research_page = mosic_create_entity_page("MTask List", task_list_id, {
+    workspace_id: workspace_id,
+    title: "Phase " + PHASE + " Research",
+    page_type: "Document",
+    icon: config.mosic.page_icons.research,
+    status: "Published",
+    content: convert_to_editorjs(research_findings),
+    relation_type: "Related"
+  })
+  research_page_id = new_research_page.name
+
+  # Tag research page
+  mosic_batch_add_tags_to_document("M Page", research_page_id, [
+    config.mosic.tags.gsd_managed,
+    config.mosic.tags.research,
+    config.mosic.tags.phase_tags[phase_key]
+  ])
+
+# Update config
+config.mosic.pages["phase-" + PHASE + "-research"] = research_page_id
+write config.json
+```
 
 ## 6. Check Existing Plans
 
-```bash
-ls "${PHASE_DIR}"/*-PLAN.md 2>/dev/null
+```
+IF existing_plan_tasks.length > 0:
+  Display: "Found {existing_plan_tasks.length} existing plan(s)"
+
+  Offer:
+  1) Continue planning (add more plans)
+  2) View existing plans
+  3) Replan from scratch (will archive existing)
+
+  Wait for response.
+
+  IF replan:
+    # Archive existing plan tasks
+    FOR each task in existing_plan_tasks:
+      mosic_update_document("MTask", task.name, {
+        is_archived: true
+      })
 ```
 
-**If exists:** Offer: 1) Continue planning (add more plans), 2) View existing, 3) Replan from scratch. Wait for response.
+## 7. Load Context for Planner
 
-## 7. Read Context Files
+Load all relevant pages from Mosic:
 
-Read and store context file contents for the planner agent. The `@` syntax does not work across Task() boundaries - content must be inlined.
+```
+# Research content (loaded above or load now)
+IF not research_content AND research_page:
+  research_content = mosic_get_page(research_page.name, {
+    content_format: "markdown"
+  }).content
 
-```bash
-# Read required files
-STATE_CONTENT=$(cat .planning/STATE.md)
-ROADMAP_CONTENT=$(cat .planning/ROADMAP.md)
+# Context content (loaded above or load now)
+IF not context_content AND context_page:
+  context_content = mosic_get_page(context_page.name, {
+    content_format: "markdown"
+  }).content
 
-# Read optional files (empty string if missing)
-REQUIREMENTS_CONTENT=$(cat .planning/REQUIREMENTS.md 2>/dev/null)
-CONTEXT_CONTENT=$(cat "${PHASE_DIR}"/*-CONTEXT.md 2>/dev/null)
-RESEARCH_CONTENT=$(cat "${PHASE_DIR}"/*-RESEARCH.md 2>/dev/null)
+# Requirements
+requirements_content = mosic_get_page(config.mosic.pages.requirements, {
+  content_format: "markdown"
+}).content if config.mosic.pages.requirements
 
-# Gap closure files (only if --gaps mode)
-VERIFICATION_CONTENT=$(cat "${PHASE_DIR}"/*-VERIFICATION.md 2>/dev/null)
-UAT_CONTENT=$(cat "${PHASE_DIR}"/*-UAT.md 2>/dev/null)
+# Roadmap
+roadmap_content = mosic_get_page(config.mosic.pages.roadmap, {
+  content_format: "markdown"
+}).content if config.mosic.pages.roadmap
+
+# Gap closure (if --gaps mode)
+verification_content = ""
+IF --gaps:
+  verification_page = phase_pages.find(p => p.title contains "Verification")
+  IF verification_page:
+    verification_content = mosic_get_page(verification_page.name, {
+      content_format: "markdown"
+    }).content
 ```
 
 ## 8. Spawn gsd-planner Agent
 
-Display stage banner:
+Display:
 ```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► PLANNING PHASE {X}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-------------------------------------------
+ GSD > PLANNING PHASE {PHASE}
+-------------------------------------------
 
-◆ Spawning planner...
+Spawning planner...
 ```
-
-Fill prompt with inlined content and spawn:
 
 ```markdown
 <planning_context>
 
-**Phase:** {phase_number}
+**Phase:** {PHASE}
 **Mode:** {standard | gap_closure}
 
-**Project State:**
-{state_content}
-
-**Roadmap:**
-{roadmap_content}
+**Phase Goal:**
+{phase.description}
 
 **Requirements (if exists):**
 {requirements_content}
@@ -287,88 +345,155 @@ Fill prompt with inlined content and spawn:
 
 **Gap Closure (if --gaps mode):**
 {verification_content}
-{uat_content}
 
 </planning_context>
 
 <downstream_consumer>
 Output consumed by /gsd:execute-phase
-Plans must be executable prompts with:
-
-- Frontmatter (wave, depends_on, files_modified, autonomous)
-- Tasks in XML format
+Plans must include:
+- Structured task breakdown
+- Dependencies between tasks
+- Wave assignments for parallel execution
 - Verification criteria
 - must_haves for goal-backward verification
 </downstream_consumer>
 
-<quality_gate>
-Before returning PLANNING COMPLETE:
+<output_format>
+Return plans as structured markdown with:
+- Plan number (01, 02, etc.)
+- Objective
+- Wave assignment
+- Dependencies (depends_on)
+- Tasks with specific actions
+- Verification criteria
+- must_haves list
 
-- [ ] PLAN.md files created in phase directory
-- [ ] Each plan has valid frontmatter
-- [ ] Tasks are specific and actionable
-- [ ] Dependencies correctly identified
-- [ ] Waves assigned for parallel execution
-- [ ] must_haves derived from phase goal
-</quality_gate>
+The orchestrator will create MTasks and M Pages in Mosic.
+</output_format>
 ```
 
 ```
 Task(
-  prompt="First, read ~/.claude/agents/gsd-planner.md for your role and instructions.\n\n" + filled_prompt,
+  prompt="First, read ~/.claude/agents/gsd-planner.md for your role.\n\n" + planner_prompt,
   subagent_type="general-purpose",
   model="{planner_model}",
-  description="Plan Phase {phase}"
+  description="Plan Phase {PHASE}"
 )
 ```
 
-## 9. Handle Planner Return
+## 9. Handle Planner Return and Create Mosic Entities
 
-Parse planner output:
+Parse planner output for `## PLANNING COMPLETE`:
 
-**`## PLANNING COMPLETE`:**
-- Display: `Planner created {N} plan(s). Files on disk.`
-- If `--skip-verify`: Skip to step 13
-- Check config: `WORKFLOW_PLAN_CHECK=$(cat .planning/config.json 2>/dev/null | grep -o '"plan_check"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "true")`
-- If `workflow.plan_check` is `false`: Skip to step 13
-- Otherwise: Proceed to step 10
+**For each plan in output:**
 
-**`## CHECKPOINT REACHED`:**
-- Present to user, get response, spawn continuation (see step 12)
+```
+# Determine plan number
+plan_number = printf("%02d", plan_index + 1)
 
-**`## PLANNING INCONCLUSIVE`:**
-- Show what was attempted
-- Offer: Add context, Retry, Manual
-- Wait for user response
+# Create MTask for this plan
+plan_task = mosic_create_document("MTask", {
+  workspace: workspace_id,
+  task_list: task_list_id,
+  title: "Plan " + plan_number + ": " + plan_objective.substring(0, 100),
+  description: plan_summary_markdown,
+  icon: "lucide:file-code",
+  status: "ToDo",
+  priority: (wave == 1) ? "High" : "Normal"
+})
 
-## 10. Spawn gsd-plan-checker Agent
+plan_task_id = plan_task.name
+
+# Create Plan page linked to task
+plan_page = mosic_create_entity_page("MTask", plan_task_id, {
+  workspace_id: workspace_id,
+  title: "Execution Plan",
+  page_type: "Spec",
+  icon: config.mosic.page_icons.plan,
+  status: "Published",
+  content: convert_to_editorjs(full_plan_content),
+  relation_type: "Related"
+})
+
+# Tag the task and page
+mosic_batch_add_tags_to_document("MTask", plan_task_id, [
+  config.mosic.tags.gsd_managed,
+  config.mosic.tags.plan,
+  config.mosic.tags.phase_tags[phase_key]
+])
+
+mosic_batch_add_tags_to_document("M Page", plan_page.name, [
+  config.mosic.tags.gsd_managed,
+  config.mosic.tags.plan,
+  config.mosic.tags.phase_tags[phase_key]
+])
+
+# Create checklist items for plan tasks
+FOR each task_item in plan.tasks:
+  mosic_create_document("MTask CheckList", {
+    workspace: workspace_id,
+    task: plan_task_id,
+    title: task_item.name,
+    done: false
+  })
+
+# Store in config
+config.mosic.tasks["phase-" + PHASE + "-plan-" + plan_number] = plan_task_id
+config.mosic.pages["phase-" + PHASE + "-plan-" + plan_number] = plan_page.name
+```
+
+**Create task dependencies:**
+
+```
+FOR each plan with depends_on:
+  FOR each dependency in depends_on:
+    dep_task_id = config.mosic.tasks["phase-" + PHASE + "-plan-" + dependency]
+    IF dep_task_id:
+      mosic_create_document("M Relation", {
+        workspace: workspace_id,
+        source_doctype: "MTask",
+        source_name: plan_task_id,
+        target_doctype: "MTask",
+        target_name: dep_task_id,
+        relation_type: "Depends"
+      })
+```
+
+## 10. Verification Loop (unless --skip-verify)
+
+**Check config:**
+```
+workflow_plan_check = config.workflow.plan_check (default: true)
+IF workflow_plan_check == false OR --skip-verify: Skip to step 11
+```
 
 Display:
 ```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► VERIFYING PLANS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-------------------------------------------
+ GSD > VERIFYING PLANS
+-------------------------------------------
 
-◆ Spawning plan checker...
+Spawning plan checker...
 ```
 
-Read plans and requirements for the checker:
+**Spawn gsd-plan-checker:**
 
-```bash
-# Read all plans in phase directory
-PLANS_CONTENT=$(cat "${PHASE_DIR}"/*-PLAN.md 2>/dev/null)
-
-# Read requirements (reuse from step 7 if available)
-REQUIREMENTS_CONTENT=$(cat .planning/REQUIREMENTS.md 2>/dev/null)
 ```
-
-Fill checker prompt with inlined content and spawn:
+# Load all plan pages content
+plans_content = ""
+FOR each plan_task in created_plan_tasks:
+  plan_page_id = config.mosic.pages["phase-" + PHASE + "-plan-" + plan.number]
+  plan_content = mosic_get_page(plan_page_id, {
+    content_format: "markdown"
+  }).content
+  plans_content += "\n\n---\n\n" + plan_content
+```
 
 ```markdown
 <verification_context>
 
-**Phase:** {phase_number}
-**Phase Goal:** {goal from ROADMAP}
+**Phase:** {PHASE}
+**Phase Goal:** {phase.description}
 
 **Plans to verify:**
 {plans_content}
@@ -380,8 +505,8 @@ Fill checker prompt with inlined content and spawn:
 
 <expected_output>
 Return one of:
-- ## VERIFICATION PASSED — all checks pass
-- ## ISSUES FOUND — structured issue list
+- ## VERIFICATION PASSED - all checks pass
+- ## ISSUES FOUND - structured issue list
 </expected_output>
 ```
 
@@ -390,331 +515,38 @@ Task(
   prompt=checker_prompt,
   subagent_type="gsd-plan-checker",
   model="{checker_model}",
-  description="Verify Phase {phase} plans"
+  description="Verify Phase {PHASE} plans"
 )
 ```
 
-## 11. Handle Checker Return
+**Handle checker return:**
 
-**If `## VERIFICATION PASSED`:**
-- Display: `Plans verified. Ready for execution.`
-- Proceed to step 13
+IF `## VERIFICATION PASSED`: Proceed to step 11
 
-**If `## ISSUES FOUND`:**
-- Display: `Checker found issues:`
-- List issues from checker output
-- Check iteration count
-- Proceed to step 12
+IF `## ISSUES FOUND`:
+- Display issues
+- If iteration_count < 3: Spawn planner with revision prompt
+- After revision: Update plan pages in Mosic, re-verify
+- If iteration_count >= 3: Offer force proceed, guidance, or abandon
 
-## 12. Revision Loop (Max 3 Iterations)
-
-Track: `iteration_count` (starts at 1 after initial plan + check)
-
-**If iteration_count < 3:**
-
-Display: `Sending back to planner for revision... (iteration {N}/3)`
-
-Read current plans for revision context:
-
-```bash
-PLANS_CONTENT=$(cat "${PHASE_DIR}"/*-PLAN.md 2>/dev/null)
-```
-
-Spawn gsd-planner with revision prompt:
-
-```markdown
-<revision_context>
-
-**Phase:** {phase_number}
-**Mode:** revision
-
-**Existing plans:**
-{plans_content}
-
-**Checker issues:**
-{structured_issues_from_checker}
-
-</revision_context>
-
-<instructions>
-Make targeted updates to address checker issues.
-Do NOT replan from scratch unless issues are fundamental.
-Return what changed.
-</instructions>
-```
+## 11. Update Config and Finalize
 
 ```
-Task(
-  prompt="First, read ~/.claude/agents/gsd-planner.md for your role and instructions.\n\n" + revision_prompt,
-  subagent_type="general-purpose",
-  model="{planner_model}",
-  description="Revise Phase {phase} plans"
-)
+config.mosic.session.last_action = "plan-phase"
+config.mosic.session.active_phase = task_list_id
+config.mosic.session.last_updated = "[ISO timestamp]"
+
+write config.json
 ```
 
-- After planner returns → spawn checker again (step 10)
-- Increment iteration_count
-
-**If iteration_count >= 3:**
-
-Display: `Max iterations reached. {N} issues remain:`
-- List remaining issues
-
-Offer options:
-1. Force proceed (execute despite issues)
-2. Provide guidance (user gives direction, retry)
-3. Abandon (exit planning)
-
-Wait for user response.
-
-## 13. Sync Plans to Mosic (Deep Integration)
-
-**Check if Mosic is enabled:**
-
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true:**
-
-Display:
-```
-◆ Syncing plans to Mosic...
-```
-
-### Step 13.1: Get Phase Context from Mosic
-
-```bash
-# Get task_list_id for this phase
-TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PHASE}\"]")
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-
-# Get tag IDs from config
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-PLAN_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.plan")
-PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PHASE}\"]")
-```
-
-### Step 13.2: Check for Existing Tasks in Mosic
+## 12. Present Final Status
 
 ```
-# Search for existing tasks in this phase's task list
-existing_tasks = mosic_search_tasks({
-  workspace_id: workspace_id,
-  task_list_id: task_list_id,
-  status__in: ["Backlog", "ToDo", "In Progress"]
-})
+-------------------------------------------
+ GSD > PHASE {PHASE} PLANNED
+-------------------------------------------
 
-# Build mapping of existing plan tasks
-existing_plan_map = {}
-FOR each task in existing_tasks:
-  IF task.title matches "Plan {NN}:" pattern:
-    existing_plan_map[plan_number] = task.name
-```
-
-### Step 13.3: Create/Update MTasks for Each Plan
-
-```
-FOR each PLAN.md in ${PHASE_DIR}:
-  # Extract plan metadata from frontmatter
-  plan_number = extract from filename (e.g., "01" from "01-PLAN.md")
-  plan_objective = extract from <objective> section
-  plan_wave = extract from frontmatter "wave:"
-  plan_autonomous = extract from frontmatter "autonomous:"
-  plan_depends_on = extract from frontmatter "depends_on:"
-  plan_files_modified = extract from frontmatter "files_modified:"
-
-  # Check if task already exists
-  existing_task_id = existing_plan_map[plan_number]
-
-  IF existing_task_id:
-    # Update existing task
-    mosic_update_document("MTask", existing_task_id, {
-      description: "[Updated plan summary with wave, files, etc.]",
-      status: "ToDo"
-    })
-    task_id = existing_task_id
-  ELSE:
-    # Create new MTask with rich metadata
-    task = mosic_create_document("MTask", {
-      workspace_id: workspace_id,
-      task_list: task_list_id,
-      title: "Plan " + plan_number + ": " + plan_objective.substring(0, 100),
-      description: build_task_description(plan),
-      icon: "lucide:file-code",
-      status: "ToDo",
-      priority: determine_priority(plan_wave),  # Wave 1 = High, later waves = Normal
-      start_date: null,
-      due_date: null
-    })
-    task_id = task.name
-```
-
-### Step 13.4: Create Plan Page with Proper Type
-
-```
-  # Create Plan page (type: Spec) linked to task
-  plan_page = mosic_create_entity_page("MTask", task_id, {
-    workspace_id: workspace_id,
-    title: "Execution Plan",
-    page_type: "Spec",  # Plans are specifications
-    icon: mosic.page_icons.plan,  # "lucide:file-code"
-    status: "Published",
-    content: convert_to_editorjs(PLAN.md content),
-    relation_type: "Related"
-  })
-
-  # Tag the page with appropriate tags
-  mosic_batch_add_tags_to_document("M Page", plan_page.name, [
-    GSD_MANAGED_TAG,
-    PLAN_TAG,
-    PHASE_TAG
-  ])
-
-  # Store page ID
-  mosic.pages["phase-" + PHASE + "-plan-" + plan_number] = plan_page.name
-```
-
-### Step 13.5: Create Task Dependencies (Depends Relations)
-
-```
-  # Create Depends relations based on plan.depends_on
-  IF plan_depends_on AND plan_depends_on != "none":
-    FOR each dependency in plan_depends_on:
-      dep_task_id = mosic.tasks["phase-" + PHASE + "-plan-" + dependency]
-      IF dep_task_id:
-        mosic_create_document("M Relation", {
-          workspace_id: workspace_id,
-          source_doctype: "MTask",
-          source_name: task_id,
-          target_doctype: "MTask",
-          target_name: dep_task_id,
-          relation_type: "Depends"
-        })
-
-  # Tag the task
-  mosic_batch_add_tags_to_document("MTask", task_id, [
-    GSD_MANAGED_TAG,
-    PLAN_TAG,
-    PHASE_TAG
-  ])
-
-  # Store task ID in config and update PLAN.md frontmatter
-  mosic.tasks["phase-" + PHASE + "-plan-" + plan_number] = task_id
-
-  # Update PLAN.md frontmatter with mosic_task_id
-  Add to PLAN.md frontmatter: mosic_task_id: task_id
-```
-
-### Step 13.6: Create Checklist Items for Plan Tasks
-
-```
-  # Extract tasks from PLAN.md and create checklists
-  plan_tasks = extract_tasks_from_plan(PLAN.md)
-
-  # Initialize checklist storage for this plan
-  checklist_ids = {}
-
-  FOR each task in plan_tasks:
-    checklist = mosic_create_document("MTask CheckList", {
-      workspace_id: workspace_id,
-      task: task_id,
-      title: task.name,
-      done: false
-    })
-
-    # Store checklist ID mapped to task name for execute-phase lookup
-    checklist_ids[task.name] = checklist.name
-
-  # Store checklist IDs in config.json for later lookup by execute-phase
-  mosic.checklists = mosic.checklists or {}
-  mosic.checklists["phase-" + PHASE + "-plan-" + plan_number] = checklist_ids
-```
-
-### Step 13.7: Update Research Page (if exists)
-
-```
-  IF ${PHASE_DIR}/${PHASE}-RESEARCH.md exists:
-    # Create or update Research page linked to phase
-    research_page = mosic_create_entity_page("MTask List", task_list_id, {
-      workspace_id: workspace_id,
-      title: "Phase Research",
-      page_type: "Document",  # Research is documentation
-      icon: mosic.page_icons.research,  # "lucide:search"
-      status: "Published",
-      content: convert_to_editorjs(RESEARCH.md content),
-      relation_type: "Related"
-    })
-
-    mosic_batch_add_tags_to_document("M Page", research_page.name, [
-      GSD_MANAGED_TAG,
-      mosic.tags.research,
-      PHASE_TAG
-    ])
-
-    # Store page ID
-    mosic.pages["phase-" + PHASE + "-research"] = research_page.name
-```
-
-### Step 13.8: Update config.json with All Mappings
-
-```json
-{
-  "mosic": {
-    "tasks": {
-      "phase-01-plan-01": "task_id_1",
-      "phase-01-plan-02": "task_id_2"
-    },
-    "pages": {
-      "phase-01-plan-01": "page_id_1",
-      "phase-01-plan-02": "page_id_2",
-      "phase-01-research": "research_page_id"
-    },
-    "last_sync": "[ISO timestamp]"
-  }
-}
-```
-
-Display:
-```
-✓ Plans synced to Mosic
-
-  Task List: https://mosic.pro/app/MTask%20List/[task_list_id]
-  Tasks: [N] created/updated
-  Pages: [M] plan pages + research page
-  Relations: [R] dependency links
-
-  Plan Structure:
-  ├─ Plan 01: [objective] (Wave 1)
-  ├─ Plan 02: [objective] (Wave 1)
-  └─ Plan 03: [objective] (Wave 2) → depends on 01, 02
-```
-
-**Error handling:**
-
-```
-IF mosic sync fails:
-  - Display warning: "Mosic plan sync failed: [error]. Plans created locally."
-  - Add failed items to mosic.pending_sync array
-  - Continue to step 14 (don't block)
-```
-
-**If mosic.enabled = false:** Skip to step 14.
-
-## 14. Present Final Status
-
-Route to `<offer_next>`.
-
-</process>
-
-<offer_next>
-Output this markdown directly (not as a code block):
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► PHASE {X} PLANNED ✓
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**Phase {X}: {Name}** — {N} plan(s) in {M} wave(s)
+**Phase {PHASE}: {phase.title}** - {N} plan(s) in {M} wave(s)
 
 | Wave | Plans | What it builds |
 |------|-------|----------------|
@@ -724,41 +556,51 @@ Output this markdown directly (not as a code block):
 Research: {Completed | Used existing | Skipped}
 Verification: {Passed | Passed with override | Skipped}
 
-───────────────────────────────────────────────────────────────
+Mosic Links:
+- Task List: https://mosic.pro/app/MTask%20List/{task_list_id}
+- Plans: {N} tasks with linked pages
 
-## ▶ Next Up
+---
 
-**Execute Phase {X}** — run all {N} plans
+## Next Up
 
-/gsd:execute-phase {X}
+**Execute Phase {PHASE}** - run all {N} plans
 
-<sub>/clear first → fresh context window</sub>
+`/gsd:execute-phase {PHASE}`
 
-───────────────────────────────────────────────────────────────
+<sub>`/clear` first -> fresh context window</sub>
+
+---
 
 **Also available:**
-- cat .planning/phases/{phase-dir}/*-PLAN.md — review plans
-- /gsd:plan-phase {X} --research — re-research first
+- View plans in Mosic
+- `/gsd:plan-phase {PHASE} --research` - re-research first
 
-───────────────────────────────────────────────────────────────
-</offer_next>
+---
+```
+
+</process>
+
+<error_handling>
+```
+IF mosic operation fails during plan creation:
+  - Log warning with error message
+  - Store partial state in config.mosic.pending_sync
+  - Continue with remaining plans
+  - Display: "Some plans may need manual sync. Check /gsd:progress"
+```
+</error_handling>
 
 <success_criteria>
-- [ ] .planning/ directory validated
-- [ ] Phase validated against roadmap
-- [ ] Phase directory created if needed
-- [ ] Research completed (unless --skip-research or --gaps or exists)
-- [ ] gsd-phase-researcher spawned if research needed
-- [ ] Existing plans checked
-- [ ] gsd-planner spawned with context (including RESEARCH.md if available)
-- [ ] Plans created (PLANNING COMPLETE or CHECKPOINT handled)
-- [ ] gsd-plan-checker spawned (unless --skip-verify)
-- [ ] Verification passed OR user override OR max iterations with user decision
-- [ ] Mosic sync (if enabled):
-  - [ ] MTasks created for each plan
-  - [ ] Plan pages attached to tasks
-  - [ ] Tags applied (gsd-managed, plan, phase-NN)
-  - [ ] Task IDs stored in config.json
-- [ ] User sees status between agent spawns
-- [ ] User knows next steps (execute or review)
+- [ ] Phase loaded from Mosic
+- [ ] Research completed (unless skipped) and page created/updated
+- [ ] gsd-planner spawned with full context from Mosic
+- [ ] Plans created as MTasks linked to phase task list
+- [ ] Plan pages created and linked to plan tasks
+- [ ] Checklist items created for each plan task
+- [ ] Task dependencies created as M Relations
+- [ ] Tags applied (gsd-managed, plan, phase-NN)
+- [ ] Verification passed (unless skipped)
+- [ ] config.json updated with all entity IDs
+- [ ] User sees Mosic URLs and next steps
 </success_criteria>

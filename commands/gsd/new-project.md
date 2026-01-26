@@ -1,27 +1,33 @@
 ---
 name: gsd:new-project
-description: Initialize a new project with deep context gathering and PROJECT.md
+description: Initialize a new project directly in Mosic MCP - single source of truth
 allowed-tools:
   - Read
   - Bash
   - Write
   - Task
   - AskUserQuestion
+  - mcp__mosic_pro__*
 ---
 
 <objective>
 
 Initialize a new project through unified flow: questioning → research (optional) → requirements → roadmap.
 
+**CRITICAL: Mosic is the ONLY storage.** All project data lives in Mosic. The only local file is `config.json` for session context and Mosic entity ID references.
+
 This is the most leveraged moment in any project. Deep questioning here means better plans, better execution, better outcomes. One command takes you from idea to ready-for-planning.
 
-**Creates:**
-- `.planning/PROJECT.md` — project context
-- `.planning/config.json` — workflow preferences
-- `.planning/research/` — domain research (optional)
-- `.planning/REQUIREMENTS.md` — scoped requirements
-- `.planning/ROADMAP.md` — phase structure
-- `.planning/STATE.md` — project memory
+**Creates in Mosic:**
+- MProject — project entity with metadata
+- M Page "Project Overview" — project context (replaces PROJECT.md)
+- M Page "Requirements" — scoped requirements (replaces REQUIREMENTS.md)
+- M Page "Roadmap" — phase structure (replaces ROADMAP.md)
+- M Pages for research — domain research (optional, replaces .planning/research/)
+- MTask Lists — one per phase (replaces STATE.md tracking)
+
+**Creates locally:**
+- `config.json` — session context with Mosic entity IDs
 
 **After this command:** Run `/gsd:plan-phase 1` to start execution.
 
@@ -38,16 +44,44 @@ This is the most leveraged moment in any project. Deep questioning here means be
 
 <process>
 
-## Phase 1: Setup
+## Phase 1: Setup and Mosic Validation
 
 **MANDATORY FIRST STEP — Execute these checks before ANY user interaction:**
 
-1. **Abort if project exists:**
+1. **Check for existing project (via config.json):**
    ```bash
-   [ -f .planning/PROJECT.md ] && echo "ERROR: Project already initialized. Use /gsd:progress" && exit 1
+   if [ -f config.json ]; then
+     EXISTING_PROJECT_ID=$(cat config.json 2>/dev/null | grep -o '"project_id"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"')
+     if [ -n "$EXISTING_PROJECT_ID" ]; then
+       echo "ERROR: Project already initialized (Mosic project: $EXISTING_PROJECT_ID). Use /gsd:progress"
+       exit 1
+     fi
+   fi
    ```
 
-2. **Initialize git repo in THIS directory** (required even if inside a parent repo):
+2. **Verify Mosic MCP is available:**
+   ```bash
+   if [ -f .mcp.json ]; then
+     MOSIC_AVAILABLE=$(grep -l "mosic" .mcp.json 2>/dev/null && echo "yes" || echo "no")
+   else
+     MOSIC_AVAILABLE="no"
+   fi
+   echo "Mosic MCP available: $MOSIC_AVAILABLE"
+   ```
+
+   **If Mosic NOT available:**
+   Display error and abort:
+   ```
+   ERROR: Mosic MCP not configured.
+
+   This command requires Mosic MCP as the primary storage backend.
+   Please configure .mcp.json with mosic_pro server first.
+
+   See: https://mosic.pro/docs/mcp-setup
+   ```
+   Exit command.
+
+3. **Initialize git repo in THIS directory** (required even if inside a parent repo):
    ```bash
    if [ -d .git ] || [ -f .git ]; then
        echo "Git repo exists in current directory"
@@ -57,22 +91,20 @@ This is the most leveraged moment in any project. Deep questioning here means be
    fi
    ```
 
-3. **Detect existing code (brownfield detection):**
+4. **Detect existing code (brownfield detection):**
    ```bash
    CODE_FILES=$(find . -name "*.ts" -o -name "*.js" -o -name "*.py" -o -name "*.go" -o -name "*.rs" -o -name "*.swift" -o -name "*.java" 2>/dev/null | grep -v node_modules | grep -v .git | head -20)
    HAS_PACKAGE=$([ -f package.json ] || [ -f requirements.txt ] || [ -f Cargo.toml ] || [ -f go.mod ] || [ -f Package.swift ] && echo "yes")
-   HAS_CODEBASE_MAP=$([ -d .planning/codebase ] && echo "yes")
    ```
 
    **You MUST run all bash commands above using the Bash tool before proceeding.**
 
 ## Phase 2: Brownfield Offer
 
-**If existing code detected and .planning/codebase/ doesn't exist:**
+**If existing code detected:**
 
 Check the results from setup step:
 - If `CODE_FILES` is non-empty OR `HAS_PACKAGE` is "yes"
-- AND `HAS_CODEBASE_MAP` is NOT "yes"
 
 Use AskUserQuestion:
 - header: "Existing Code"
@@ -89,7 +121,7 @@ Exit command.
 
 **If "Skip mapping":** Continue to Phase 3.
 
-**If no existing code detected OR codebase already mapped:** Continue to Phase 3.
+**If no existing code detected:** Continue to Phase 3.
 
 ## Phase 3: Deep Questioning
 
@@ -133,139 +165,34 @@ As you go, mentally check the context checklist from `questioning.md`. If gaps r
 
 **Decision gate:**
 
-When you could write a clear PROJECT.md, use AskUserQuestion:
+When you could write a clear project overview, use AskUserQuestion:
 
 - header: "Ready?"
-- question: "I think I understand what you're after. Ready to create PROJECT.md?"
+- question: "I think I understand what you're after. Ready to create the project in Mosic?"
 - options:
-  - "Create PROJECT.md" — Let's move forward
+  - "Create project" — Let's move forward
   - "Keep exploring" — I want to share more / ask me more
 
 If "Keep exploring" — ask what they want to add, or identify gaps and probe naturally.
 
-Loop until "Create PROJECT.md" selected.
+Loop until "Create project" selected.
 
-## Phase 4: Write PROJECT.md
+## Phase 4: Create MProject and Overview Page in Mosic
 
-Synthesize all context into `.planning/PROJECT.md` using the template from `templates/project.md`.
+**Display stage banner:**
 
-**For greenfield projects:**
-
-Initialize requirements as hypotheses:
-
-```markdown
-## Requirements
-
-### Validated
-
-(None yet — ship to validate)
-
-### Active
-
-- [ ] [Requirement 1]
-- [ ] [Requirement 2]
-- [ ] [Requirement 3]
-
-### Out of Scope
-
-- [Exclusion 1] — [why]
-- [Exclusion 2] — [why]
-```
-
-All Active requirements are hypotheses until shipped and validated.
-
-**For brownfield projects (codebase map exists):**
-
-Infer Validated requirements from existing code:
-
-1. Read `.planning/codebase/ARCHITECTURE.md` and `STACK.md`
-2. Identify what the codebase already does
-3. These become the initial Validated set
-
-```markdown
-## Requirements
-
-### Validated
-
-- ✓ [Existing capability 1] — existing
-- ✓ [Existing capability 2] — existing
-- ✓ [Existing capability 3] — existing
-
-### Active
-
-- [ ] [New requirement 1]
-- [ ] [New requirement 2]
-
-### Out of Scope
-
-- [Exclusion 1] — [why]
-```
-
-**Key Decisions:**
-
-Initialize with any decisions made during questioning:
-
-```markdown
-## Key Decisions
-
-| Decision | Rationale | Outcome |
-|----------|-----------|---------|
-| [Choice from questioning] | [Why] | — Pending |
-```
-
-**Last updated footer:**
-
-```markdown
----
-*Last updated: [date] after initialization*
-```
-
-Do not compress. Capture everything gathered.
-
-**Commit PROJECT.md:**
-
-```bash
-mkdir -p .planning
-git add .planning/PROJECT.md
-git commit -m "$(cat <<'EOF'
-docs: initialize project
-
-[One-liner from PROJECT.md What This Is section]
-EOF
-)"
-```
-
-## Phase 4.5: Mosic Project Setup (Deep Integration)
-
-**Check for Mosic MCP availability:**
-
-```bash
-# Check if .mcp.json exists and contains mosic.pro server
-if [ -f .mcp.json ]; then
-  MOSIC_AVAILABLE=$(grep -l "mosic.pro" .mcp.json 2>/dev/null && echo "yes" || echo "no")
-else
-  MOSIC_AVAILABLE="no"
-fi
-```
-
-**If Mosic available:**
-
-Display:
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► MOSIC INTEGRATION
+ GSD ► CREATING PROJECT IN MOSIC
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Mosic MCP detected. Setting up project sync...
 ```
 
-### Step 1: Resolve Workspace and Space
+### Step 1: Resolve Workspace
 
-**Get workspace_id from CLAUDE.md or .mcp.json:**
+**Get workspace_id from CLAUDE.md or list available:**
 ```
 # Check CLAUDE.md for documented workspace_id first
 workspace_id = extract from CLAUDE.md "Workspace ID:" line
-space_id = extract from CLAUDE.md "Space ID:" line (optional)
 
 # If not found, list available workspaces
 IF workspace_id is null:
@@ -323,14 +250,13 @@ Use AskUserQuestion:
   - "Link & Sync" — Link to existing, sync missing elements only (Recommended)
   - "Link & Reset" — Link to existing, archive old content, start fresh
   - "Create New" — Create separate Mosic project
-  - "Skip Mosic" — Don't sync to Mosic
 
 **If "Link & Sync" (Intelligent Merge):**
 ```
 # Detect what exists vs what's missing
 existing_elements = {
   has_overview: existing_pages.find(p => p.title.includes("Overview")),
-  has_requirements: existing_pages.find(p => p.page_type == "Spec" && p.title.includes("Requirements")),
+  has_requirements: existing_pages.find(p => p.title.includes("Requirements")),
   has_roadmap: existing_pages.find(p => p.title.includes("Roadmap")),
   phase_lists: existing.task_lists.filter(tl => tl.title.includes("Phase"))
 }
@@ -393,7 +319,7 @@ FOR each required_tag:
 # Store tag IDs in config.json mosic.tags section
 ```
 
-### Step 5: Create/Update MProject
+### Step 5: Create MProject
 
 **If creating new project:**
 ```
@@ -401,14 +327,14 @@ project = mosic_create_document("MProject", {
   workspace_id: workspace_id,
   space: space_id,  # Optional: place in specific space
   title: "[project_name]",
-  description: "[from PROJECT.md 'What This Is' section]",
-  prefix: "GSD",
+  description: "[from questioning - core value / what this is]",
+  prefix: "[derived from project name, e.g., 'GSD']",
   icon: "lucide:rocket",
   color: "#10B981",
   status: "Backlog",
   priority: "Normal",
   start_date: "[today]",
-  target_date: "[estimated based on phase count, optional]"
+  target_date: "[estimated based on scope, optional]"
 })
 
 project_id = project.name
@@ -419,9 +345,19 @@ project_id = project.name
 mosic_add_tag_to_document("MProject", project_id, tag_ids["gsd-managed"])
 ```
 
-### Step 6: Create Project Documentation Pages with Proper Types
+### Step 6: Create Project Overview Page
 
-**Create Overview page (type: Document):**
+**Synthesize questioning into Overview page content:**
+
+Content should include (from templates/project.md structure):
+- What This Is (one-liner)
+- Core Value (the ONE thing)
+- Why It Matters (problem being solved)
+- Who It's For (target user)
+- Constraints (budget, timeline, tech)
+- Key Decisions (from questioning)
+- Requirements section (initialized as hypotheses)
+
 ```
 overview_page = mosic_create_entity_page("MProject", project_id, {
   workspace_id: workspace_id,
@@ -429,7 +365,7 @@ overview_page = mosic_create_entity_page("MProject", project_id, {
   page_type: "Document",
   icon: "lucide:book-open",
   status: "Published",
-  content: "[PROJECT.md content in Editor.js format]",
+  content: "[PROJECT.md-style content in Editor.js format]",
   relation_type: "Related"
 })
 
@@ -438,92 +374,39 @@ mosic_batch_add_tags_to_document("M Page", overview_page.name, [
 ])
 ```
 
-**Create Requirements page (type: Spec):**
-```
-IF .planning/REQUIREMENTS.md will be created:
-  # Placeholder - will be populated in Phase 7
-  mosic.pages.requirements = "pending"
+**For greenfield projects:**
+
+Initialize requirements section as hypotheses in the Overview page:
+
+```markdown
+## Requirements
+
+### Validated
+(None yet — ship to validate)
+
+### Active
+- [ ] [Requirement 1]
+- [ ] [Requirement 2]
+- [ ] [Requirement 3]
+
+### Out of Scope
+- [Exclusion 1] — [why]
+- [Exclusion 2] — [why]
 ```
 
-### Step 7: Update config.json with Full Mosic State
+**For brownfield projects (existing codebase):**
 
-```json
-{
-  "mosic": {
-    "enabled": true,
-    "workspace_id": "[workspace_id]",
-    "space_id": "[space_id or null]",
-    "project_id": "[project_id]",
-    "sync_on_commit": true,
-    "auto_detect": true,
-    "task_lists": {},
-    "tasks": {},
-    "pages": {
-      "overview": "[overview_page_id]",
-      "requirements": null,
-      "roadmap": null
-    },
-    "tags": {
-      "gsd_managed": "[tag_id]",
-      "requirements": "[tag_id]",
-      "research": "[tag_id]",
-      "plan": "[tag_id]",
-      "summary": "[tag_id]",
-      "verification": "[tag_id]",
-      "uat": "[tag_id]",
-      "quick": "[tag_id]",
-      "fix": "[tag_id]",
-      "phase_tags": {}
-    },
-    "page_types": {
-      "overview": "Document",
-      "requirements": "Spec",
-      "roadmap": "Spec",
-      "research": "Document",
-      "plan": "Spec",
-      "summary": "Document",
-      "verification": "Document",
-      "uat": "Document"
-    },
-    "page_icons": {
-      "overview": "lucide:book-open",
-      "requirements": "lucide:list-checks",
-      "roadmap": "lucide:map",
-      "research": "lucide:search",
-      "plan": "lucide:file-code",
-      "summary": "lucide:check-circle",
-      "verification": "lucide:shield-check",
-      "uat": "lucide:user-check"
-    },
-    "pending_sync": [],
-    "last_sync": "[ISO timestamp]"
-  }
-}
-```
+Infer Validated requirements from existing code analysis.
 
 Display:
 ```
-✓ Mosic project configured
-  Project: https://mosic.pro/app/Project/[project_id]
-  Tags: [N] GSD tags ready
-  Pages: Overview created
+✓ MProject created: [project_name]
+  URL: https://mosic.pro/app/Project/[project_id]
+✓ Overview page created
+  URL: https://mosic.pro/app/page/[overview_page_id]
 ```
 
-**Error handling:**
-
-```
-IF mosic sync fails:
-  - Display warning: "Mosic sync failed: [error]. Continuing with local-only mode."
-  - Set mosic.enabled = false in config.json
-  - Add to mosic.pending_sync for retry
-  - Continue to Phase 5 (don't block project creation)
-```
-
-**If Mosic not available or "Skip Mosic" selected:**
-- Ensure `mosic.enabled = false` in config.json
-- Continue to Phase 5
-
-## Phase 5: Workflow Preferences
+## Phase 5: Workflow Preferences (config.json)
 
 **Round 1 — Core workflow settings (4 questions):**
 
@@ -559,11 +442,11 @@ questions: [
   },
   {
     header: "Git Tracking",
-    question: "Commit planning docs to git?",
+    question: "Commit config.json to git?",
     multiSelect: false,
     options: [
-      { label: "Yes (Recommended)", description: "Planning docs tracked in version control" },
-      { label: "No", description: "Keep .planning/ local-only (add to .gitignore)" }
+      { label: "Yes (Recommended)", description: "Session config tracked in version control" },
+      { label: "No", description: "Keep config.json local-only (add to .gitignore)" }
     ]
   }
 ]
@@ -623,7 +506,7 @@ questions: [
 ]
 ```
 
-Create `.planning/config.json` with all settings:
+**Create config.json with all settings:**
 
 ```json
 {
@@ -636,28 +519,52 @@ Create `.planning/config.json` with all settings:
     "research": true|false,
     "plan_check": true|false,
     "verifier": true|false
+  },
+  "mosic": {
+    "workspace_id": "[workspace_id]",
+    "space_id": "[space_id or null]",
+    "project_id": "[project_id]",
+    "project_url": "https://mosic.pro/app/Project/[project_id]",
+    "task_lists": {},
+    "tasks": {},
+    "pages": {
+      "overview": "[overview_page_id]",
+      "requirements": null,
+      "roadmap": null,
+      "research": {}
+    },
+    "tags": {
+      "gsd_managed": "[tag_id]",
+      "requirements": "[tag_id]",
+      "research": "[tag_id]",
+      "plan": "[tag_id]",
+      "summary": "[tag_id]",
+      "verification": "[tag_id]",
+      "uat": "[tag_id]",
+      "quick": "[tag_id]",
+      "fix": "[tag_id]",
+      "phase_tags": {}
+    },
+    "last_sync": "[ISO timestamp]"
   }
 }
 ```
 
 **If commit_docs = No:**
 - Set `commit_docs: false` in config.json
-- Add `.planning/` to `.gitignore` (create if needed)
+- Add `config.json` to `.gitignore` (create if needed)
 
 **If commit_docs = Yes:**
-- No additional gitignore entries needed
-
-**Commit config.json:**
+- Commit config.json:
 
 ```bash
-git add .planning/config.json
+git add config.json
 git commit -m "$(cat <<'EOF'
-chore: add project config
+chore: initialize GSD project config
 
 Mode: [chosen mode]
 Depth: [chosen depth]
-Parallelization: [enabled/disabled]
-Workflow agents: research=[on/off], plan_check=[on/off], verifier=[on/off]
+Mosic project: [project_id]
 EOF
 )"
 ```
@@ -669,7 +576,7 @@ EOF
 Read model profile for agent spawning:
 
 ```bash
-MODEL_PROFILE=$(cat .planning/config.json 2>/dev/null | grep -o '"model_profile"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || echo "balanced")
+MODEL_PROFILE=$(cat config.json 2>/dev/null | grep -o '"model_profile"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || echo "balanced")
 ```
 
 Default to "balanced" if not set.
@@ -704,15 +611,10 @@ Display stage banner:
 Researching [domain] ecosystem...
 ```
 
-Create research directory:
-```bash
-mkdir -p .planning/research
-```
-
 **Determine milestone context:**
 
 Check if this is greenfield or subsequent milestone:
-- If no "Validated" requirements in PROJECT.md → Greenfield (building from scratch)
+- If no "Validated" requirements in Overview page → Greenfield (building from scratch)
 - If "Validated" requirements exist → Subsequent milestone (adding to existing app)
 
 Display spawning indicator:
@@ -724,7 +626,11 @@ Display spawning indicator:
   → Pitfalls research
 ```
 
-Spawn 4 parallel gsd-project-researcher agents with rich context:
+Spawn 4 parallel gsd-project-researcher agents with rich context.
+
+**IMPORTANT: Research output goes to Mosic pages, NOT local files.**
+
+Each researcher should create their output as a Mosic page linked to the project:
 
 ```
 Task(prompt="First, read ~/.claude/agents/gsd-project-researcher.md for your role and instructions.
@@ -735,9 +641,6 @@ Project Research — Stack dimension for [domain].
 
 <milestone_context>
 [greenfield OR subsequent]
-
-Greenfield: Research the standard stack for building [domain] from scratch.
-Subsequent: Research what's needed to add [target features] to an existing [domain] app. Don't re-research the existing system.
 </milestone_context>
 
 <question>
@@ -745,25 +648,28 @@ What's the standard 2025 stack for [domain]?
 </question>
 
 <project_context>
-[PROJECT.md summary - core value, constraints, what they're building]
+[Project overview summary - core value, constraints, what they're building]
+Mosic project_id: [project_id]
+Mosic workspace_id: [workspace_id]
 </project_context>
 
 <downstream_consumer>
-Your STACK.md feeds into roadmap creation. Be prescriptive:
+Your research feeds into roadmap creation. Be prescriptive:
 - Specific libraries with versions
 - Clear rationale for each choice
 - What NOT to use and why
 </downstream_consumer>
 
-<quality_gate>
-- [ ] Versions are current (verify with Context7/official docs, not training data)
-- [ ] Rationale explains WHY, not just WHAT
-- [ ] Confidence levels assigned to each recommendation
-</quality_gate>
-
 <output>
-Write to: .planning/research/STACK.md
-Use template: ~/.claude/get-shit-done/templates/research-project/STACK.md
+Create Mosic page using mosic_create_entity_page:
+- entity_doctype: 'MProject'
+- entity_name: [project_id]
+- title: 'Research: Stack'
+- page_type: 'Document'
+- icon: 'lucide:layers'
+- Add tags: gsd-managed, research
+
+Return the page_id when done.
 </output>
 ", subagent_type="general-purpose", model="{researcher_model}", description="Stack research")
 
@@ -775,9 +681,6 @@ Project Research — Features dimension for [domain].
 
 <milestone_context>
 [greenfield OR subsequent]
-
-Greenfield: What features do [domain] products have? What's table stakes vs differentiating?
-Subsequent: How do [target features] typically work? What's expected behavior?
 </milestone_context>
 
 <question>
@@ -785,25 +688,21 @@ What features do [domain] products have? What's table stakes vs differentiating?
 </question>
 
 <project_context>
-[PROJECT.md summary]
+[Project overview summary]
+Mosic project_id: [project_id]
+Mosic workspace_id: [workspace_id]
 </project_context>
 
-<downstream_consumer>
-Your FEATURES.md feeds into requirements definition. Categorize clearly:
-- Table stakes (must have or users leave)
-- Differentiators (competitive advantage)
-- Anti-features (things to deliberately NOT build)
-</downstream_consumer>
-
-<quality_gate>
-- [ ] Categories are clear (table stakes vs differentiators vs anti-features)
-- [ ] Complexity noted for each feature
-- [ ] Dependencies between features identified
-</quality_gate>
-
 <output>
-Write to: .planning/research/FEATURES.md
-Use template: ~/.claude/get-shit-done/templates/research-project/FEATURES.md
+Create Mosic page using mosic_create_entity_page:
+- entity_doctype: 'MProject'
+- entity_name: [project_id]
+- title: 'Research: Features'
+- page_type: 'Document'
+- icon: 'lucide:list-checks'
+- Add tags: gsd-managed, research
+
+Return the page_id when done.
 </output>
 ", subagent_type="general-purpose", model="{researcher_model}", description="Features research")
 
@@ -815,9 +714,6 @@ Project Research — Architecture dimension for [domain].
 
 <milestone_context>
 [greenfield OR subsequent]
-
-Greenfield: How are [domain] systems typically structured? What are major components?
-Subsequent: How do [target features] integrate with existing [domain] architecture?
 </milestone_context>
 
 <question>
@@ -825,25 +721,21 @@ How are [domain] systems typically structured? What are major components?
 </question>
 
 <project_context>
-[PROJECT.md summary]
+[Project overview summary]
+Mosic project_id: [project_id]
+Mosic workspace_id: [workspace_id]
 </project_context>
 
-<downstream_consumer>
-Your ARCHITECTURE.md informs phase structure in roadmap. Include:
-- Component boundaries (what talks to what)
-- Data flow (how information moves)
-- Suggested build order (dependencies between components)
-</downstream_consumer>
-
-<quality_gate>
-- [ ] Components clearly defined with boundaries
-- [ ] Data flow direction explicit
-- [ ] Build order implications noted
-</quality_gate>
-
 <output>
-Write to: .planning/research/ARCHITECTURE.md
-Use template: ~/.claude/get-shit-done/templates/research-project/ARCHITECTURE.md
+Create Mosic page using mosic_create_entity_page:
+- entity_doctype: 'MProject'
+- entity_name: [project_id]
+- title: 'Research: Architecture'
+- page_type: 'Document'
+- icon: 'lucide:git-branch'
+- Add tags: gsd-managed, research
+
+Return the page_id when done.
 </output>
 ", subagent_type="general-purpose", model="{researcher_model}", description="Architecture research")
 
@@ -855,9 +747,6 @@ Project Research — Pitfalls dimension for [domain].
 
 <milestone_context>
 [greenfield OR subsequent]
-
-Greenfield: What do [domain] projects commonly get wrong? Critical mistakes?
-Subsequent: What are common mistakes when adding [target features] to [domain]?
 </milestone_context>
 
 <question>
@@ -865,71 +754,94 @@ What do [domain] projects commonly get wrong? Critical mistakes?
 </question>
 
 <project_context>
-[PROJECT.md summary]
+[Project overview summary]
+Mosic project_id: [project_id]
+Mosic workspace_id: [workspace_id]
 </project_context>
 
-<downstream_consumer>
-Your PITFALLS.md prevents mistakes in roadmap/planning. For each pitfall:
-- Warning signs (how to detect early)
-- Prevention strategy (how to avoid)
-- Which phase should address it
-</downstream_consumer>
-
-<quality_gate>
-- [ ] Pitfalls are specific to this domain (not generic advice)
-- [ ] Prevention strategies are actionable
-- [ ] Phase mapping included where relevant
-</quality_gate>
-
 <output>
-Write to: .planning/research/PITFALLS.md
-Use template: ~/.claude/get-shit-done/templates/research-project/PITFALLS.md
+Create Mosic page using mosic_create_entity_page:
+- entity_doctype: 'MProject'
+- entity_name: [project_id]
+- title: 'Research: Pitfalls'
+- page_type: 'Document'
+- icon: 'lucide:alert-triangle'
+- Add tags: gsd-managed, research
+
+Return the page_id when done.
 </output>
 ", subagent_type="general-purpose", model="{researcher_model}", description="Pitfalls research")
 ```
 
-After all 4 agents complete, spawn synthesizer to create SUMMARY.md:
+After all 4 agents complete, spawn synthesizer to create Research Summary page:
 
 ```
 Task(prompt="
 <task>
-Synthesize research outputs into SUMMARY.md.
+Synthesize research outputs into a Research Summary page in Mosic.
 </task>
 
-<research_files>
-Read these files:
-- .planning/research/STACK.md
-- .planning/research/FEATURES.md
-- .planning/research/ARCHITECTURE.md
-- .planning/research/PITFALLS.md
-</research_files>
+<research_pages>
+Fetch these pages from Mosic using mosic_get_entity_pages('MProject', '[project_id]'):
+- Research: Stack
+- Research: Features
+- Research: Architecture
+- Research: Pitfalls
+
+Use content_format: 'markdown' for efficient retrieval.
+</research_pages>
 
 <output>
-Write to: .planning/research/SUMMARY.md
-Use template: ~/.claude/get-shit-done/templates/research-project/SUMMARY.md
-Commit after writing.
+Create Mosic page using mosic_create_entity_page:
+- entity_doctype: 'MProject'
+- entity_name: [project_id]
+- title: 'Research: Summary'
+- page_type: 'Document'
+- icon: 'lucide:file-text'
+- Add tags: gsd-managed, research
+
+Synthesize key findings from all research pages.
+Return the page_id when done.
 </output>
 ", subagent_type="gsd-research-synthesizer", model="{synthesizer_model}", description="Synthesize research")
+```
+
+**Update config.json with research page IDs:**
+
+```json
+{
+  "mosic": {
+    "pages": {
+      "research": {
+        "stack": "[stack_page_id]",
+        "features": "[features_page_id]",
+        "architecture": "[architecture_page_id]",
+        "pitfalls": "[pitfalls_page_id]",
+        "summary": "[summary_page_id]"
+      }
+    }
+  }
+}
 ```
 
 Display research complete banner and key findings:
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► RESEARCH COMPLETE ✓
+ GSD ► RESEARCH COMPLETE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ## Key Findings
 
-**Stack:** [from SUMMARY.md]
-**Table Stakes:** [from SUMMARY.md]
-**Watch Out For:** [from SUMMARY.md]
+**Stack:** [from Summary page]
+**Table Stakes:** [from Summary page]
+**Watch Out For:** [from Summary page]
 
-Files: `.planning/research/`
+Research pages: https://mosic.pro/app/Project/[project_id] (see Pages tab)
 ```
 
 **If "Skip research":** Continue to Phase 7.
 
-## Phase 7: Define Requirements
+## Phase 7: Define Requirements (Mosic Page)
 
 Display stage banner:
 ```
@@ -938,14 +850,22 @@ Display stage banner:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-**Load context:**
+**Load context from Mosic:**
 
-Read PROJECT.md and extract:
+Fetch Overview page and extract:
 - Core value (the ONE thing that must work)
 - Stated constraints (budget, timeline, tech limitations)
 - Any explicit scope boundaries
 
-**If research exists:** Read research/FEATURES.md and extract feature categories.
+```
+overview = mosic_get_page(overview_page_id, { content_format: 'markdown' })
+```
+
+**If research exists:** Fetch Research: Features page for feature categories.
+
+```
+features_page = mosic_get_page(features_page_id, { content_format: 'markdown' })
+```
 
 **Present features by category:**
 
@@ -1010,11 +930,28 @@ Use AskUserQuestion:
 
 **Validate core value:**
 
-Cross-check requirements against Core Value from PROJECT.md. If gaps detected, surface them.
+Cross-check requirements against Core Value from Overview page. If gaps detected, surface them.
 
-**Generate REQUIREMENTS.md:**
+**Create Requirements page in Mosic:**
 
-Create `.planning/REQUIREMENTS.md` with:
+```
+requirements_page = mosic_create_entity_page("MProject", project_id, {
+  workspace_id: workspace_id,
+  title: "Requirements Specification",
+  page_type: "Spec",
+  icon: "lucide:list-checks",
+  status: "Published",
+  content: "[REQUIREMENTS.md-style content in Editor.js format]",
+  relation_type: "Related"
+})
+
+mosic_batch_add_tags_to_document("M Page", requirements_page.name, [
+  tag_ids["gsd-managed"],
+  tag_ids["requirements"]
+])
+```
+
+**Requirements page content structure:**
 - v1 Requirements grouped by category (checkboxes, REQ-IDs)
 - v2 Requirements (deferred)
 - Out of Scope (explicit exclusions with reasoning)
@@ -1029,10 +966,6 @@ Good requirements are:
 - **User-centric:** "User can X" (not "System does Y")
 - **Atomic:** One capability per requirement (not "User can login and manage profile")
 - **Independent:** Minimal dependencies on other requirements
-
-Reject vague requirements. Push for specificity:
-- "Handle authentication" → "User can log in with email/password and stay logged in across sessions"
-- "Support sharing" → "User can share post via link that opens in recipient's browser"
 
 **Present full requirements list:**
 
@@ -1059,20 +992,33 @@ Does this capture what you're building? (yes / adjust)
 
 If "adjust": Return to scoping.
 
-**Commit requirements:**
+**Update config.json:**
+
+```json
+{
+  "mosic": {
+    "pages": {
+      "requirements": "[requirements_page_id]"
+    }
+  }
+}
+```
+
+**Commit config.json update (if commit_docs = true):**
 
 ```bash
-git add .planning/REQUIREMENTS.md
+git add config.json
 git commit -m "$(cat <<'EOF'
-docs: define v1 requirements
+docs: add requirements to Mosic
 
 [X] requirements across [N] categories
 [Y] requirements deferred to v2
+Page: https://mosic.pro/app/page/[requirements_page_id]
 EOF
 )"
 ```
 
-## Phase 8: Create Roadmap
+## Phase 8: Create Roadmap (Mosic Task Lists + Pages)
 
 Display stage banner:
 ```
@@ -1089,51 +1035,108 @@ Spawn gsd-roadmapper agent with context:
 Task(prompt="
 <planning_context>
 
-**Project:**
-@.planning/PROJECT.md
+**Project Overview (from Mosic):**
+Fetch using: mosic_get_page('[overview_page_id]', { content_format: 'markdown' })
 
-**Requirements:**
-@.planning/REQUIREMENTS.md
+**Requirements (from Mosic):**
+Fetch using: mosic_get_page('[requirements_page_id]', { content_format: 'markdown' })
 
-**Research (if exists):**
-@.planning/research/SUMMARY.md
+**Research Summary (from Mosic, if exists):**
+Fetch using: mosic_get_page('[research_summary_page_id]', { content_format: 'markdown' })
 
 **Config:**
-@.planning/config.json
+- workspace_id: [workspace_id]
+- project_id: [project_id]
+- depth: [quick|standard|comprehensive]
+- tag_ids: [tag_ids object]
 
 </planning_context>
 
 <instructions>
-Create roadmap:
+Create roadmap DIRECTLY IN MOSIC:
+
 1. Derive phases from requirements (don't impose structure)
 2. Map every v1 requirement to exactly one phase
 3. Derive 2-5 success criteria per phase (observable user behaviors)
 4. Validate 100% coverage
-5. Write files immediately (ROADMAP.md, STATE.md, update REQUIREMENTS.md traceability)
-6. Return ROADMAP CREATED with summary
 
-Write files first, then return. This ensures artifacts persist even if context is lost.
+For EACH phase:
+a) Create phase-specific tag:
+   mosic_create_document('M Tag', {
+     workspace_id,
+     title: 'phase-NN',
+     color: [gradient color],
+     description: 'Phase NN: [name]'
+   })
+
+b) Create MTask List:
+   mosic_create_document('MTask List', {
+     workspace_id,
+     project: project_id,
+     title: 'Phase NN: [name]',
+     description: '[goal]\n\nSuccess Criteria:\n- [criterion 1]\n- [criterion 2]',
+     prefix: 'PNN',
+     status: 'Open'
+   })
+
+c) Tag the task list with gsd-managed and phase-NN
+
+d) Create phase overview page linked to task list:
+   mosic_create_entity_page('MTask List', task_list_id, {...})
+
+e) Create Depends relations between phases if dependencies exist
+
+5. Create Roadmap page linked to project with full roadmap overview:
+   mosic_create_entity_page('MProject', project_id, {
+     title: 'Project Roadmap',
+     page_type: 'Spec',
+     icon: 'lucide:map',
+     content: [roadmap overview with all phases, requirements mapping, success criteria]
+   })
+
+6. Update Requirements page with traceability (which REQ maps to which phase)
+
+7. Return JSON with all created IDs:
+{
+  "status": "ROADMAP_CREATED",
+  "roadmap_page_id": "...",
+  "phases": [
+    {
+      "number": 1,
+      "name": "...",
+      "task_list_id": "...",
+      "tag_id": "...",
+      "overview_page_id": "...",
+      "requirements": ["AUTH-01", "AUTH-02"],
+      "success_criteria": ["...", "..."]
+    }
+  ]
+}
 </instructions>
 ", subagent_type="gsd-roadmapper", model="{roadmapper_model}", description="Create roadmap")
 ```
 
 **Handle roadmapper return:**
 
-**If `## ROADMAP BLOCKED`:**
+**If error or blocked:**
 - Present blocker information
 - Work with user to resolve
 - Re-spawn when resolved
 
-**If `## ROADMAP CREATED`:**
+**If `ROADMAP_CREATED`:**
 
-Read the created ROADMAP.md and present it nicely inline:
+Fetch the created Roadmap page and present it nicely inline:
+
+```
+roadmap = mosic_get_page(roadmap_page_id, { content_format: 'markdown' })
+```
 
 ```
 ---
 
 ## Proposed Roadmap
 
-**[N] phases** | **[X] requirements mapped** | All v1 requirements covered ✓
+**[N] phases** | **[X] requirements mapped** | All v1 requirements covered
 
 | # | Phase | Goal | Requirements | Success Criteria |
 |---|-------|------|--------------|------------------|
@@ -1164,45 +1167,57 @@ Success criteria:
 ---
 ```
 
-**CRITICAL: Ask for approval before committing:**
+**CRITICAL: Ask for approval:**
 
 Use AskUserQuestion:
 - header: "Roadmap"
 - question: "Does this roadmap structure work for you?"
 - options:
-  - "Approve" — Commit and continue
+  - "Approve" — Continue
   - "Adjust phases" — Tell me what to change
-  - "Review full file" — Show raw ROADMAP.md
+  - "Review in Mosic" — Open roadmap page in browser
 
-**If "Approve":** Continue to commit.
+**If "Approve":** Continue to finalization.
 
 **If "Adjust phases":**
 - Get user's adjustment notes
-- Re-spawn roadmapper with revision context:
-  ```
-  Task(prompt="
-  <revision>
-  User feedback on roadmap:
-  [user's notes]
-
-  Current ROADMAP.md: @.planning/ROADMAP.md
-
-  Update the roadmap based on feedback. Edit files in place.
-  Return ROADMAP REVISED with changes made.
-  </revision>
-  ", subagent_type="gsd-roadmapper", model="{roadmapper_model}", description="Revise roadmap")
-  ```
+- Re-spawn roadmapper with revision context
 - Present revised roadmap
 - Loop until user approves
 
-**If "Review full file":** Display raw `cat .planning/ROADMAP.md`, then re-ask.
+**If "Review in Mosic":**
+Display URL: `https://mosic.pro/app/page/[roadmap_page_id]`
+Then re-ask.
 
-**Commit roadmap (after approval):**
+**Update config.json with full mappings:**
+
+```json
+{
+  "mosic": {
+    "pages": {
+      "roadmap": "[roadmap_page_id]"
+    },
+    "task_lists": {
+      "phase-01": "[task_list_id]",
+      "phase-02": "[task_list_id]"
+    },
+    "tags": {
+      "phase_tags": {
+        "phase-01": "[tag_id]",
+        "phase-02": "[tag_id]"
+      }
+    },
+    "last_sync": "[ISO timestamp]"
+  }
+}
+```
+
+**Commit config.json (if commit_docs = true):**
 
 ```bash
-git add .planning/ROADMAP.md .planning/STATE.md .planning/REQUIREMENTS.md
+git add config.json
 git commit -m "$(cat <<'EOF'
-docs: create roadmap ([N] phases)
+docs: create roadmap in Mosic ([N] phases)
 
 Phases:
 1. [phase-name]: [requirements covered]
@@ -1210,233 +1225,47 @@ Phases:
 ...
 
 All v1 requirements mapped to phases.
+Project: https://mosic.pro/app/Project/[project_id]
 EOF
 )"
 ```
 
-## Phase 8.5: Sync Roadmap to Mosic (Full Structure)
-
-**Check if Mosic is enabled:**
-
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true:**
-
-Display:
-```
-◆ Syncing roadmap structure to Mosic...
-```
-
-### Step 1: Create Requirements Page (type: Spec)
-
-```
-requirements_page = mosic_create_entity_page("MProject", project_id, {
-  workspace_id: workspace_id,
-  title: "Requirements Specification",
-  page_type: "Spec",
-  icon: "lucide:list-checks",
-  status: "Published",
-  content: "[REQUIREMENTS.md content in Editor.js format]",
-  relation_type: "Related"
-})
-
-mosic_batch_add_tags_to_document("M Page", requirements_page.name, [
-  tag_ids["gsd-managed"],
-  tag_ids["requirements"]
-])
-
-# Update config.json
-mosic.pages.requirements = requirements_page.name
-```
-
-### Step 2: Create Roadmap Page (type: Spec)
-
-```
-roadmap_page = mosic_create_entity_page("MProject", project_id, {
-  workspace_id: workspace_id,
-  title: "Project Roadmap",
-  page_type: "Spec",
-  icon: "lucide:map",
-  status: "Published",
-  content: "[ROADMAP.md content in Editor.js format]",
-  relation_type: "Related"
-})
-
-mosic_batch_add_tags_to_document("M Page", roadmap_page.name, [
-  tag_ids["gsd-managed"]
-])
-
-# Update config.json
-mosic.pages.roadmap = roadmap_page.name
-```
-
-### Step 3: Parse and Create Phase Structure
-
-Extract all phases from ROADMAP.md with:
-- Phase number (NN)
-- Phase name
-- Phase goal
-- Success criteria
-- Mapped requirements (REQ-IDs)
-
-### Step 4: Create MTask Lists for Each Phase
-
-```
-FOR each phase in ROADMAP.md:
-  # Create phase-specific tag first (for filtering)
-  phase_tag_title = "phase-" + phase.number
-  phase_tag = mosic_create_document("M Tag", {
-    workspace_id: workspace_id,
-    title: phase_tag_title,
-    color: "[generate gradient color based on phase number]",
-    description: "Phase " + phase.number + ": " + phase.name
-  })
-
-  # Store tag ID
-  mosic.tags.phase_tags["phase-" + phase.number] = phase_tag.name
-
-  # Create MTask List for this phase with rich metadata
-  task_list = mosic_create_document("MTask List", {
-    workspace_id: workspace_id,
-    project: project_id,
-    title: "Phase " + phase.number + ": " + phase.name,
-    description: "[phase.goal]\n\n**Success Criteria:**\n" + phase.success_criteria.join("\n- "),
-    icon: "lucide:folder-kanban",
-    color: "[phase color]",
-    prefix: "P" + phase.number,
-    status: "Open"
-  })
-
-  # Tag the task list
-  mosic_batch_add_tags_to_document("MTask List", task_list.name, [
-    tag_ids["gsd-managed"],
-    phase_tag.name
-  ])
-
-  # Store mapping in config.json
-  mosic.task_lists["phase-" + phase.number] = task_list.name
-
-  # Create Depends relations between phases
-  IF phase.depends_on:
-    FOR each dependency in phase.depends_on:
-      dep_list_id = mosic.task_lists["phase-" + dependency]
-      IF dep_list_id:
-        mosic_create_document("M Relation", {
-          workspace_id: workspace_id,
-          source_doctype: "MTask List",
-          source_name: task_list.name,
-          target_doctype: "MTask List",
-          target_name: dep_list_id,
-          relation_type: "Depends"
-        })
-```
-
-### Step 5: Create Phase Documentation Pages
-
-```
-FOR each phase:
-  # Create phase overview page linked to task list
-  phase_page = mosic_create_entity_page("MTask List", task_list.name, {
-    workspace_id: workspace_id,
-    title: "Phase " + phase.number + " Overview",
-    page_type: "Document",
-    icon: "lucide:book-open",
-    status: "Draft",
-    content: "[Phase overview: goal, success criteria, requirements mapping]",
-    relation_type: "Related"
-  })
-
-  mosic_batch_add_tags_to_document("M Page", phase_page.name, [
-    tag_ids["gsd-managed"],
-    mosic.tags.phase_tags["phase-" + phase.number]
-  ])
-
-  # Store page ID
-  mosic.pages["phase-" + phase.number + "-overview"] = phase_page.name
-```
-
-### Step 6: Link Requirements to Phases (Traceability)
-
-```
-# Create relations from Requirements page to relevant phase task lists
-FOR each phase:
-  FOR each req_id in phase.requirements:
-    # Create Related relation for traceability
-    mosic_create_document("M Relation", {
-      workspace_id: workspace_id,
-      source_doctype: "M Page",
-      source_name: requirements_page.name,
-      target_doctype: "MTask List",
-      target_name: mosic.task_lists["phase-" + phase.number],
-      relation_type: "Related"
-    })
-```
-
-### Step 7: Update config.json with Full Mappings
-
-Write updated config.json with all IDs stored:
-- `mosic.task_lists`: phase-to-task-list mappings
-- `mosic.pages`: all page IDs
-- `mosic.tags.phase_tags`: phase-specific tag IDs
-
-Display:
-```
-✓ Roadmap synced to Mosic
-
-  Project: https://mosic.pro/app/Project/[project_id]
-  Phases: [N] task lists created
-  Pages: Overview, Requirements, Roadmap + [N] phase pages
-  Relations: [M] dependency links established
-
-  Phase Structure:
-  ├─ Phase 01: [name] (P01-*)
-  ├─ Phase 02: [name] (P02-*) → depends on P01
-  └─ Phase 03: [name] (P03-*) → depends on P02
-```
-
-**Error handling:**
-
-```
-IF mosic sync fails:
-  - Display warning: "Mosic roadmap sync failed: [error]. Local roadmap committed."
-  - Add failed items to mosic.pending_sync array
-  - Continue to Phase 10 (don't block)
-```
-
-**If mosic.enabled = false:** Skip to Phase 10.
-
-## Phase 10: Done
+## Phase 9: Done
 
 Present completion with next steps:
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► PROJECT INITIALIZED ✓
+ GSD ► PROJECT INITIALIZED
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 **[Project Name]**
 
-| Artifact       | Location                    |
-|----------------|-----------------------------|
-| Project        | `.planning/PROJECT.md`      |
-| Config         | `.planning/config.json`     |
-| Research       | `.planning/research/`       |
-| Requirements   | `.planning/REQUIREMENTS.md` |
-| Roadmap        | `.planning/ROADMAP.md`      |
+| Artifact       | Mosic URL                                    |
+|----------------|----------------------------------------------|
+| Project        | https://mosic.pro/app/Project/[project_id]   |
+| Overview       | https://mosic.pro/app/page/[overview_id]     |
+| Requirements   | https://mosic.pro/app/page/[requirements_id] |
+| Roadmap        | https://mosic.pro/app/page/[roadmap_id]      |
+| Research       | [N] pages (see project pages)                |
 
-**[N] phases** | **[X] requirements** | Ready to build ✓
+**[N] phases** | **[X] requirements** | Ready to build
 
-[IF mosic.enabled:]
-**Mosic:** https://mosic.pro/app/Project/[project_id]
-[END IF]
+**Local:** `config.json` (session context with Mosic IDs)
 
 ───────────────────────────────────────────────────────────────
 
-## ▶ Next Up
+## Phase Structure in Mosic
 
-**Phase 1: [Phase Name]** — [Goal from ROADMAP.md]
+├─ Phase 01: [name] (P01-*)
+├─ Phase 02: [name] (P02-*) → depends on P01
+└─ Phase 03: [name] (P03-*) → depends on P02
+
+───────────────────────────────────────────────────────────────
+
+## Next Up
+
+**Phase 1: [Phase Name]** — [Goal from Roadmap]
 
 /gsd:discuss-phase 1 — gather context and clarify approach
 
@@ -1454,46 +1283,51 @@ Present completion with next steps:
 
 <output>
 
-- `.planning/PROJECT.md`
-- `.planning/config.json`
-- `.planning/research/` (if research selected)
-  - `STACK.md`
-  - `FEATURES.md`
-  - `ARCHITECTURE.md`
-  - `PITFALLS.md`
-  - `SUMMARY.md`
-- `.planning/REQUIREMENTS.md`
-- `.planning/ROADMAP.md`
-- `.planning/STATE.md`
+**Mosic (primary storage):**
+- MProject with metadata
+- M Page "Project Overview"
+- M Page "Requirements Specification"
+- M Page "Project Roadmap"
+- M Pages for research (if selected)
+  - Research: Stack
+  - Research: Features
+  - Research: Architecture
+  - Research: Pitfalls
+  - Research: Summary
+- MTask Lists (one per phase)
+- M Tags (gsd-managed, requirements, research, plan, summary, phase-NN)
+
+**Local (session context only):**
+- `config.json` — Mosic entity IDs and workflow preferences
 
 </output>
 
 <success_criteria>
 
-- [ ] .planning/ directory created
+- [ ] Mosic MCP availability verified
 - [ ] Git repo initialized
 - [ ] Brownfield detection completed
 - [ ] Deep questioning completed (threads followed, not rushed)
-- [ ] PROJECT.md captures full context → **committed**
-- [ ] config.json has workflow mode, depth, parallelization → **committed**
-- [ ] Research completed (if selected) — 4 parallel agents spawned → **committed**
+- [ ] MProject created in Mosic
+- [ ] GSD tags created/verified in Mosic
+- [ ] Overview page created in Mosic (replaces PROJECT.md)
+- [ ] config.json created with workflow settings and Mosic IDs
+- [ ] Research completed in Mosic (if selected) — 4 parallel agents spawned → pages created
 - [ ] Requirements gathered (from research or conversation)
 - [ ] User scoped each category (v1/v2/out of scope)
-- [ ] REQUIREMENTS.md created with REQ-IDs → **committed**
+- [ ] Requirements page created in Mosic with REQ-IDs
 - [ ] gsd-roadmapper spawned with context
-- [ ] Roadmap files written immediately (not draft)
-- [ ] User feedback incorporated (if any)
-- [ ] ROADMAP.md created with phases, requirement mappings, success criteria
-- [ ] STATE.md initialized
-- [ ] REQUIREMENTS.md traceability updated
-- [ ] Mosic integration (if .mcp.json with mosic.pro detected):
-  - [ ] MProject created or linked
-  - [ ] Overview page created
+- [ ] Roadmap created directly in Mosic:
+  - [ ] Roadmap page with full overview
   - [ ] MTask Lists created for each phase
-  - [ ] Tags applied (gsd-managed, phase-NN)
-  - [ ] config.json updated with mosic.project_id and task_lists
+  - [ ] Phase tags created (phase-01, phase-02, etc.)
+  - [ ] Phase overview pages linked to task lists
+  - [ ] Depends relations between phases (if dependencies)
+  - [ ] Requirements page updated with traceability
+- [ ] config.json updated with all Mosic IDs
+- [ ] config.json committed (if commit_docs = true)
 - [ ] User knows next step is `/gsd:discuss-phase 1`
 
-**Atomic commits:** Each phase commits its artifacts immediately. If context is lost, artifacts persist.
+**Single source of truth:** All project data lives in Mosic. config.json only stores references.
 
 </success_criteria>

@@ -1,6 +1,6 @@
 ---
 name: gsd:debug
-description: Systematic debugging with persistent state across context resets
+description: Systematic debugging with Mosic for session tracking and documentation
 argument-hint: [issue description]
 allowed-tools:
   - Read
@@ -8,42 +8,46 @@ allowed-tools:
   - Bash
   - Task
   - AskUserQuestion
+  - ToolSearch
   - mcp__mosic_pro__*
 ---
 
 <objective>
-Debug issues using scientific method with subagent isolation.
+Debug issues using scientific method with subagent isolation and Mosic for persistent session tracking.
 
 **Orchestrator role:** Gather symptoms, spawn gsd-debugger agent, handle checkpoints, spawn continuations.
 
 **Why subagent:** Investigation burns context fast (reading files, forming hypotheses, testing). Fresh 200k context per investigation. Main context stays lean for user interaction.
+
+**Why Mosic:** Debug sessions persist across context resets, issues are tracked as tasks, and debug reports become searchable documentation.
 </objective>
 
 <context>
 User's issue: $ARGUMENTS
 
-Check for active sessions:
-```bash
-ls .planning/debug/*.md 2>/dev/null | grep -v resolved | head -5
-```
-
-Check Mosic enabled:
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
+**Config file:** config.json (local file with Mosic entity IDs)
 </context>
 
 <process>
 
-## 0. Resolve Model Profile
-
-Read model profile for agent spawning:
+## Step 0: Load Configuration and Mosic Tools
 
 ```bash
-MODEL_PROFILE=$(cat .planning/config.json 2>/dev/null | grep -o '"model_profile"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || echo "balanced")
+# Load config.json
+CONFIG=$(cat config.json 2>/dev/null || echo '{}')
+WORKSPACE_ID=$(echo "$CONFIG" | jq -r '.mosic.workspace_id // empty')
+PROJECT_ID=$(echo "$CONFIG" | jq -r '.mosic.project_id // empty')
 ```
 
-Default to "balanced" if not set.
+Load Mosic tools:
+```
+ToolSearch("mosic task page entity create search")
+```
+
+Resolve model profile:
+```bash
+MODEL_PROFILE=$(echo "$CONFIG" | jq -r '.model_profile // "balanced"')
+```
 
 **Model lookup table:**
 
@@ -51,104 +55,184 @@ Default to "balanced" if not set.
 |-------|---------|----------|--------|
 | gsd-debugger | opus | sonnet | sonnet |
 
-Store resolved model for use in Task calls below.
+---
 
-## 1. Check Active Sessions
+## Step 1: Check for Active Debug Sessions in Mosic
 
-If active sessions exist AND no $ARGUMENTS:
-- List sessions with status, hypothesis, next action
-- User picks number to resume OR describes new issue
+```
+# Search for active debug tasks (In Progress status with fix tag)
+active_sessions = mosic_search_tasks({
+  workspace_id: WORKSPACE_ID,
+  status__in: ["In Progress", "Blocked"],
+  include_tags: true
+})
 
-If $ARGUMENTS provided OR user describes new issue:
-- Continue to symptom gathering
+# Filter to debug sessions (have "fix" tag)
+debug_sessions = active_sessions.filter(t =>
+  t.tags && t.tags.includes(config.mosic.tags.fix) &&
+  t.title.startsWith("Debug:")
+)
 
-## 2. Gather Symptoms (if new issue)
+IF debug_sessions.length > 0 AND $ARGUMENTS is empty:
+  DISPLAY: "Active debug sessions found:"
+  FOR each session in debug_sessions:
+    # Get latest comment for status
+    comments = mosic_get_document_comments("MTask", session.name, { limit: 1 })
+    last_status = comments[0]?.content || "No updates"
+
+    DISPLAY:
+    """
+    [{index}] {session.identifier}: {session.title}
+        Status: {session.status}
+        Last update: {last_status.substring(0, 100)}...
+    """
+
+  PROMPT: "Enter number to resume, or describe new issue:"
+
+  IF user_response is number:
+    # Resume existing session
+    RESUME_SESSION = debug_sessions[user_response - 1]
+    GOTO Step 5 (spawn continuation)
+  ELSE:
+    # New issue description
+    $ARGUMENTS = user_response
+```
+
+---
+
+## Step 2: Gather Symptoms (if new issue)
 
 Use AskUserQuestion for each:
 
+```
 1. **Expected behavior** - What should happen?
+   AskUserQuestion(
+     header: "Debug: Expected Behavior",
+     question: "What should happen when things work correctly?"
+   )
+   EXPECTED = response
+
 2. **Actual behavior** - What happens instead?
-3. **Error messages** - Any errors? (paste or describe)
-4. **Timeline** - When did this start? Ever worked?
-5. **Reproduction** - How do you trigger it?
+   AskUserQuestion(
+     header: "Debug: Actual Behavior",
+     question: "What actually happens? Include any error messages."
+   )
+   ACTUAL = response
 
-After all gathered, confirm ready to investigate.
+3. **Timeline** - When did this start?
+   AskUserQuestion(
+     header: "Debug: Timeline",
+     question: "When did this start? Did it ever work?"
+   )
+   TIMELINE = response
 
-## 2.5 Create Debug Session in Mosic (if enabled)
+4. **Reproduction** - How do you trigger it?
+   AskUserQuestion(
+     header: "Debug: Reproduction",
+     question: "How do you reproduce this issue? Steps if known."
+   )
+   REPRODUCTION = response
+```
 
-**If Mosic enabled:**
-
+Generate slug:
 ```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-FIX_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.fix")
+slug=$(echo "$ARGUMENTS" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//' | cut -c1-40)
 ```
 
-### Create Debug Task
+---
+
+## Step 3: Create Debug Task in Mosic
 
 ```
+# Find or create Debug task list
+DEBUG_LIST_ID = config.mosic.task_lists["debug"]
+
+IF DEBUG_LIST_ID is null:
+  # Search for existing Debug list
+  existing = mosic_search({
+    workspace_id: WORKSPACE_ID,
+    query: "Debug Sessions",
+    doctypes: ["MTask List"]
+  })
+
+  IF existing.results.length > 0:
+    DEBUG_LIST_ID = existing.results[0].name
+  ELSE:
+    # Create Debug task list
+    debug_list = mosic_create_document("MTask List", {
+      workspace_id: WORKSPACE_ID,
+      project: PROJECT_ID,  # Optional - may be null
+      title: "Debug Sessions",
+      description: "Issues being investigated via `/gsd:debug`",
+      icon: "lucide:bug",
+      color: "red",
+      status: "In Progress",
+      prefix: "DBG"
+    })
+    DEBUG_LIST_ID = debug_list.name
+
+    mosic_batch_add_tags_to_document("MTask List", DEBUG_LIST_ID, [
+      config.mosic.tags.gsd_managed,
+      config.mosic.tags.fix
+    ])
+
+  config.mosic.task_lists["debug"] = DEBUG_LIST_ID
+  write config.json
+
+# Create debug task
 debug_task = mosic_create_document("MTask", {
   workspace_id: WORKSPACE_ID,
-  project: PROJECT_ID,
+  task_list: DEBUG_LIST_ID,
   title: "Debug: " + slug,
-  description: "## Symptoms\n\n**Expected:** " + expected + "\n\n**Actual:** " + actual + "\n\n**Errors:** " + errors + "\n\n**Timeline:** " + timeline + "\n\n**Reproduction:** " + reproduction,
+  description: build_symptom_description({
+    trigger: $ARGUMENTS,
+    expected: EXPECTED,
+    actual: ACTUAL,
+    timeline: TIMELINE,
+    reproduction: REPRODUCTION
+  }),
   icon: "lucide:bug",
   status: "In Progress",
-  priority: "High"
+  priority: "High",
+  start_date: ISO_TIMESTAMP
 })
 
-debug_task_id = debug_task.name
-```
+DEBUG_TASK_ID = debug_task.name
 
-### Tag the Task
-
-```
-mosic_batch_add_tags_to_document("MTask", debug_task_id, [
-  GSD_MANAGED_TAG,
-  FIX_TAG
+# Tag the task
+mosic_batch_add_tags_to_document("MTask", DEBUG_TASK_ID, [
+  config.mosic.tags.gsd_managed,
+  config.mosic.tags.fix
 ])
+
+DISPLAY:
+"""
+Debug session created: https://mosic.pro/app/MTask/{DEBUG_TASK_ID}
+
+Issue: {$ARGUMENTS}
+"""
 ```
 
-### Store in Debug File
+---
 
-Add to `.planning/debug/{slug}.md` frontmatter:
-```yaml
-mosic_task_id: [debug_task_id]
-```
-
-Display:
-```
-✓ Debug session created in Mosic
-  Task: https://mosic.pro/app/MTask/[debug_task_id]
-```
-
-**Error handling:**
+## Step 4: Spawn gsd-debugger Agent
 
 ```
-IF mosic sync fails:
-  - Display warning: "Mosic sync failed: [error]. Continuing with local debug session."
-  - Add to mosic.pending_sync array
-  - Continue (don't block debugging)
-```
-
-## 3. Spawn gsd-debugger Agent
-
-Fill prompt and spawn:
-
-```markdown
+Task(
+  prompt="
 <objective>
-Investigate issue: {slug}
+Investigate issue: " + slug + "
 
-**Summary:** {trigger}
+**Summary:** " + $ARGUMENTS + "
+**Debug Task ID:** " + DEBUG_TASK_ID + "
+**Workspace ID:** " + WORKSPACE_ID + "
 </objective>
 
 <symptoms>
-expected: {expected}
-actual: {actual}
-errors: {errors}
-reproduction: {reproduction}
-timeline: {timeline}
+expected: " + EXPECTED + "
+actual: " + ACTUAL + "
+timeline: " + TIMELINE + "
+reproduction: " + REPRODUCTION + "
 </symptoms>
 
 <mode>
@@ -156,188 +240,256 @@ symptoms_prefilled: true
 goal: find_and_fix
 </mode>
 
-<debug_file>
-Create: .planning/debug/{slug}.md
-</debug_file>
-```
+<output>
+Track progress via M Comment on task " + DEBUG_TASK_ID + "
 
-```
-Task(
-  prompt=filled_prompt,
+On root cause found:
+1. Create Debug Report page linked to task
+2. Update task description with root cause
+3. Return: ## ROOT CAUSE FOUND with summary
+
+On checkpoint (need user input):
+1. Add checkpoint comment to task
+2. Return: ## CHECKPOINT REACHED with question
+
+On inconclusive:
+1. Add investigation summary comment
+2. Return: ## INVESTIGATION INCONCLUSIVE with what was checked
+</output>
+",
   subagent_type="gsd-debugger",
   model="{debugger_model}",
-  description="Debug {slug}"
+  description="Debug: " + slug
 )
 ```
 
-## 4. Handle Agent Return
+---
 
-**If `## ROOT CAUSE FOUND`:**
-- Display root cause and evidence summary
-- Offer options:
-  - "Fix now" - spawn fix subagent
-  - "Plan fix" - suggest /gsd:plan-phase --gaps
-  - "Manual fix" - done
+## Step 5: Handle Agent Return
 
-**If Mosic enabled, sync root cause:**
+### If `## ROOT CAUSE FOUND`:
 
 ```
-# Create Debug Report page linked to task
-debug_page = mosic_create_entity_page("MTask", debug_task_id, {
+# Create Debug Report page
+report_page = mosic_create_entity_page("MTask", DEBUG_TASK_ID, {
   workspace_id: WORKSPACE_ID,
   title: "Debug Report: " + slug,
   page_type: "Document",
   icon: "lucide:file-text",
   status: "Published",
-  content: convert_to_editorjs(.planning/debug/{slug}.md content),
+  content: {
+    blocks: [
+      {
+        type: "header",
+        data: { text: "Debug Report", level: 1 }
+      },
+      {
+        type: "header",
+        data: { text: "Issue", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: $ARGUMENTS }
+      },
+      {
+        type: "header",
+        data: { text: "Root Cause", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: root_cause_summary }
+      },
+      {
+        type: "header",
+        data: { text: "Evidence", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: evidence_details }
+      }
+    ]
+  },
   relation_type: "Related"
 })
 
-mosic_batch_add_tags_to_document("M Page", debug_page.name, [
-  GSD_MANAGED_TAG,
-  FIX_TAG
+REPORT_PAGE_ID = report_page.name
+
+mosic_batch_add_tags_to_document("M Page", REPORT_PAGE_ID, [
+  config.mosic.tags.gsd_managed,
+  config.mosic.tags.fix
 ])
 
-# Update task with root cause summary
-mosic_update_document("MTask", debug_task_id, {
-  description: existing_description + "\n\n## Root Cause\n\n" + root_cause_summary
-})
+DISPLAY:
+"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ GSD > ROOT CAUSE FOUND
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{root_cause_summary}
+
+Report: https://mosic.pro/app/page/{REPORT_PAGE_ID}
+
+───────────────────────────────────────────────────────────────
+
+Options:
+1. "fix" - Apply fix now (spawn fix agent)
+2. "plan" - Create fix plan via /gsd:plan-phase
+3. "done" - Manual fix, mark resolved
+"""
+
+WAIT for user response
+
+IF response == "fix":
+  # Spawn fix subagent
+  Task(
+    prompt="Apply fix for root cause...",
+    subagent_type="gsd-executor",
+    model="{executor_model}",
+    description="Fix: " + slug
+  )
+
+  # Mark task complete after fix
+  mosic_complete_task(DEBUG_TASK_ID)
+
+  mosic_create_document("M Comment", {
+    workspace_id: WORKSPACE_ID,
+    reference_doctype: "MTask",
+    reference_name: DEBUG_TASK_ID,
+    content: "**Resolved**\n\nFix applied via /gsd:debug"
+  })
+
+ELIF response == "plan":
+  DISPLAY: "Run /gsd:plan-phase to create fix plan"
+
+ELIF response == "done":
+  mosic_complete_task(DEBUG_TASK_ID)
+
+  mosic_create_document("M Comment", {
+    workspace_id: WORKSPACE_ID,
+    reference_doctype: "MTask",
+    reference_name: DEBUG_TASK_ID,
+    content: "**Resolved**\n\nManual fix applied"
+  })
 ```
 
-**If `## CHECKPOINT REACHED`:**
-- Present checkpoint details to user
-- Get user response
-- Spawn continuation agent (see step 5)
-
-**If Mosic enabled, add checkpoint comment:**
+### If `## CHECKPOINT REACHED`:
 
 ```
+# Add checkpoint comment
 mosic_create_document("M Comment", {
   workspace_id: WORKSPACE_ID,
-  ref_doc: "MTask",
-  ref_name: debug_task_id,
+  reference_doctype: "MTask",
+  reference_name: DEBUG_TASK_ID,
   content: "**Checkpoint:** " + checkpoint_type + "\n\n" + checkpoint_details
 })
-```
 
-**If `## INVESTIGATION INCONCLUSIVE`:**
-- Show what was checked and eliminated
-- Offer options:
-  - "Continue investigating" - spawn new agent with additional context
-  - "Manual investigation" - done
-  - "Add more context" - gather more symptoms, spawn again
+DISPLAY:
+"""
+───────────────────────────────────────────────────────────────
+Debug Checkpoint: {checkpoint_type}
+───────────────────────────────────────────────────────────────
 
-**If Mosic enabled:**
+{checkpoint_question}
 
-```
-# Add inconclusive comment
-mosic_create_document("M Comment", {
-  workspace_id: WORKSPACE_ID,
-  ref_doc: "MTask",
-  ref_name: debug_task_id,
-  content: "**Investigation Inconclusive**\n\nChecked:\n" + checked_items + "\n\nEliminated:\n" + eliminated_items
-})
+"""
 
-# Update task status to Blocked
-mosic_update_document("MTask", debug_task_id, {
-  status: "Blocked"
-})
-```
+WAIT for user response
 
-## 5. Spawn Continuation Agent (After Checkpoint)
-
-When user responds to checkpoint, spawn fresh agent:
-
-```markdown
+# Spawn continuation agent
+Task(
+  prompt="
 <objective>
-Continue debugging {slug}. Evidence is in the debug file.
+Continue debugging " + slug + ". Evidence is in the debug task.
 </objective>
 
 <prior_state>
-Debug file: @.planning/debug/{slug}.md
+Debug Task: " + DEBUG_TASK_ID + "
+Workspace ID: " + WORKSPACE_ID + "
 </prior_state>
 
 <checkpoint_response>
-**Type:** {checkpoint_type}
-**Response:** {user_response}
+**Type:** " + checkpoint_type + "
+**Response:** " + user_response + "
 </checkpoint_response>
 
 <mode>
 goal: find_and_fix
 </mode>
-```
-
-```
-Task(
-  prompt=continuation_prompt,
+",
   subagent_type="gsd-debugger",
   model="{debugger_model}",
-  description="Continue debug {slug}"
+  description="Continue debug: " + slug
 )
 ```
 
-## 6. Sync Resolution to Mosic (if fix applied)
-
-**If Mosic enabled and issue resolved:**
+### If `## INVESTIGATION INCONCLUSIVE`:
 
 ```
-# Mark debug task as completed
-mosic_complete_task(debug_task_id)
-
-# Update debug page with resolution
-mosic_update_content_blocks(debug_page.name, {
-  blocks: [
-    {
-      type: "header",
-      data: { text: "Resolution", level: 2 }
-    },
-    {
-      type: "paragraph",
-      data: { text: "[resolution details from debug file]" }
-    }
-  ],
-  append: true
+# Update task status
+mosic_update_document("MTask", DEBUG_TASK_ID, {
+  status: "Blocked"
 })
 
-# Add completion comment
+# Add inconclusive comment
 mosic_create_document("M Comment", {
   workspace_id: WORKSPACE_ID,
-  ref_doc: "MTask",
-  ref_name: debug_task_id,
-  content: "Issue resolved. Fix applied via /gsd:debug"
+  reference_doctype: "MTask",
+  reference_name: DEBUG_TASK_ID,
+  content: "**Investigation Inconclusive**\n\n**Checked:**\n" + checked_items + "\n\n**Eliminated:**\n" + eliminated_items
 })
+
+DISPLAY:
+"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ GSD > INVESTIGATION INCONCLUSIVE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Unable to determine root cause.
+
+**Checked:**
+{checked_items}
+
+**Eliminated:**
+{eliminated_items}
+
+Task: https://mosic.pro/app/MTask/{DEBUG_TASK_ID}
+
+───────────────────────────────────────────────────────────────
+
+Options:
+1. "continue" - Continue investigating with more context
+2. "context" - Add more information and retry
+3. "done" - Close investigation
+"""
 ```
 
-Display:
-```
-✓ Debug session completed in Mosic
-  Task: https://mosic.pro/app/MTask/[debug_task_id] (Completed)
-  Report: https://mosic.pro/app/page/[debug_page.name]
-```
+---
 
-**Error handling:**
+## Step 6: Update config.json
 
 ```
-IF mosic sync fails:
-  - Display warning: "Mosic completion sync failed: [error]."
-  - Add to mosic.pending_sync array:
-    { type: "debug_complete", task_id: debug_task_id }
-  - Continue (don't block)
+config.mosic.tasks["debug-" + slug] = DEBUG_TASK_ID
+IF REPORT_PAGE_ID:
+  config.mosic.pages["debug-" + slug + "-report"] = REPORT_PAGE_ID
+config.mosic.session = {
+  "last_action": "debug",
+  "last_task": DEBUG_TASK_ID,
+  "last_updated": ISO_TIMESTAMP
+}
+
+write config.json
 ```
 
 </process>
 
 <success_criteria>
-- [ ] Active sessions checked
-- [ ] Symptoms gathered (if new)
+- [ ] Active debug sessions checked in Mosic
+- [ ] Symptoms gathered (if new issue)
+- [ ] Debug task created in Mosic with fix tag
 - [ ] gsd-debugger spawned with context
-- [ ] Checkpoints handled correctly
+- [ ] Checkpoints handled via M Comment
 - [ ] Root cause confirmed before fixing
-- [ ] Mosic sync (if enabled):
-  - [ ] MTask created for debug session
-  - [ ] Tags applied (gsd-managed, fix)
-  - [ ] Debug report page created on resolution
-  - [ ] Task completed when issue resolved
-  - [ ] Progress comments added at checkpoints
-  - [ ] Sync failures handled gracefully (added to pending_sync)
+- [ ] Debug report page created on resolution
+- [ ] Task marked complete when resolved
+- [ ] config.json updated with task/page references
 </success_criteria>

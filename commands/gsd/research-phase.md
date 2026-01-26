@@ -1,15 +1,18 @@
 ---
 name: gsd:research-phase
-description: Research how to implement a phase (standalone - usually use /gsd:plan-phase instead)
+description: Research how to implement a phase (Mosic-native, standalone)
 argument-hint: "[phase]"
 allowed-tools:
   - Read
+  - Write
   - Bash
   - Task
+  - ToolSearch
+  - mcp__mosic_pro__*
 ---
 
 <objective>
-Research how to implement a phase. Spawns gsd-phase-researcher agent with phase context.
+Research how to implement a phase. Spawns gsd-phase-researcher agent with phase context from Mosic.
 
 **Note:** This is a standalone research command. For most workflows, use `/gsd:plan-phase` which integrates research automatically.
 
@@ -18,82 +21,145 @@ Research how to implement a phase. Spawns gsd-phase-researcher agent with phase 
 - You want to re-research after planning is complete
 - You need to investigate before deciding if a phase is feasible
 
-**Orchestrator role:** Parse phase, validate against roadmap, check existing research, gather context, spawn researcher agent, present results.
-
-**Why subagent:** Research burns context fast (WebSearch, Context7 queries, source verification). Fresh 200k context for investigation. Main context stays lean for user interaction.
+**Architecture:** All context loaded from Mosic. Research output becomes M Page linked to phase task list. config.json stores entity IDs only.
 </objective>
 
 <context>
 Phase number: $ARGUMENTS (required)
-
-Normalize phase input in step 1 before any directory lookups.
 </context>
 
 <process>
 
-## 0. Resolve Model Profile
-
-Read model profile for agent spawning:
+## 0. Load Config and Resolve Model Profile
 
 ```bash
-MODEL_PROFILE=$(cat .planning/config.json 2>/dev/null | grep -o '"model_profile"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || echo "balanced")
+CONFIG=$(cat config.json 2>/dev/null)
 ```
 
-Default to "balanced" if not set.
+If missing: Error - run `/gsd:new-project` first.
 
-**Model lookup table:**
+```
+workspace_id = config.mosic.workspace_id
+project_id = config.mosic.project_id
+model_profile = config.model_profile or "balanced"
 
+Model lookup:
 | Agent | quality | balanced | budget |
 |-------|---------|----------|--------|
 | gsd-phase-researcher | opus | sonnet | haiku |
-
-Store resolved model for use in Task calls below.
+```
 
 ## 1. Normalize and Validate Phase
 
-```bash
-# Normalize phase number (8 → 08, but preserve decimals like 2.1 → 02.1)
-if [[ "$ARGUMENTS" =~ ^[0-9]+$ ]]; then
-  PHASE=$(printf "%02d" "$ARGUMENTS")
-elif [[ "$ARGUMENTS" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
-  PHASE=$(printf "%02d.%s" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}")
-else
-  PHASE="$ARGUMENTS"
-fi
-
-grep -A5 "Phase ${PHASE}:" .planning/ROADMAP.md 2>/dev/null
+```
+# Normalize phase number
+IF ARGUMENTS is integer: PHASE = printf("%02d", ARGUMENTS)
+ELIF ARGUMENTS has decimal: PHASE = printf("%02d.%s", integer_part, decimal_part)
+ELSE: PHASE = ARGUMENTS
 ```
 
-**If not found:** Error and exit. **If found:** Extract phase number, name, description.
+## 2. Load Phase from Mosic
 
-## 2. Check Existing Research
+```
+phase_key = "phase-" + PHASE
+task_list_id = config.mosic.task_lists[phase_key]
 
-```bash
-ls .planning/phases/${PHASE}-*/RESEARCH.md 2>/dev/null
+IF not task_list_id:
+  ERROR: Phase {PHASE} not found in config. Available phases: {list keys}
+
+# Load phase details
+phase = mosic_get_task_list(task_list_id, {
+  include_tasks: false
+})
+
+# Load phase pages
+phase_pages = mosic_get_entity_pages("MTask List", task_list_id, {
+  include_subtree: false
+})
+
+# Check for existing research page
+existing_research_page = phase_pages.find(p => p.title contains "Research")
 ```
 
-**If exists:** Offer: 1) Update research, 2) View existing, 3) Skip. Wait for response.
-
-**If doesn't exist:** Continue.
-
-## 3. Gather Phase Context
-
-```bash
-grep -A20 "Phase ${PHASE}:" .planning/ROADMAP.md
-cat .planning/REQUIREMENTS.md 2>/dev/null
-cat .planning/phases/${PHASE}-*/*-CONTEXT.md 2>/dev/null
-grep -A30 "### Decisions Made" .planning/STATE.md 2>/dev/null
+Display:
+```
+Phase {PHASE}: {phase.title}
+Research: {existing_research_page ? "Found" : "None"}
 ```
 
-Present summary with phase description, requirements, prior decisions.
+## 3. Check Existing Research
 
-## 4. Spawn gsd-phase-researcher Agent
+```
+IF existing_research_page:
+  research_content = mosic_get_page(existing_research_page.name, {
+    content_format: "markdown"
+  })
+
+  Display summary of existing research
+
+  Offer:
+  1) Update research (re-research with fresh data)
+  2) View full research
+  3) Skip (proceed to planning)
+
+  Wait for response.
+
+  IF view: Display full content, return to menu
+  IF skip: Exit with next steps
+```
+
+## 4. Gather Phase Context from Mosic
+
+```
+# Load context page if exists
+context_page = phase_pages.find(p => p.title contains "Context")
+context_content = ""
+IF context_page:
+  context_content = mosic_get_page(context_page.name, {
+    content_format: "markdown"
+  }).content
+
+# Load requirements
+requirements_content = ""
+IF config.mosic.pages.requirements:
+  requirements_content = mosic_get_page(config.mosic.pages.requirements, {
+    content_format: "markdown"
+  }).content
+
+# Load roadmap for phase description
+roadmap_content = ""
+IF config.mosic.pages.roadmap:
+  roadmap_content = mosic_get_page(config.mosic.pages.roadmap, {
+    content_format: "markdown"
+  }).content
+```
+
+Display:
+```
+Context loaded:
+- Phase goal: {phase.description}
+- Context decisions: {context_page ? "Yes" : "None"}
+- Requirements: {requirements_content ? "Yes" : "None"}
+
+Proceeding to research...
+```
+
+## 5. Spawn gsd-phase-researcher Agent
+
+Display:
+```
+-------------------------------------------
+ GSD > RESEARCHING PHASE {PHASE}
+-------------------------------------------
+
+Spawning researcher...
+```
 
 Research modes: ecosystem (default), feasibility, implementation, comparison.
 
 ```markdown
 <research_type>
-Phase Research — investigating HOW to implement a specific phase well.
+Phase Research - investigating HOW to implement a specific phase well.
 </research_type>
 
 <key_insight>
@@ -110,24 +176,28 @@ For this phase, discover:
 </key_insight>
 
 <objective>
-Research implementation approach for Phase {phase_number}: {phase_name}
+Research implementation approach for Phase {PHASE}: {phase.title}
 Mode: ecosystem
 </objective>
 
 <context>
-**Phase description:** {phase_description}
-**Requirements:** {requirements_list}
-**Prior decisions:** {decisions_if_any}
-**Phase context:** {context_md_content}
+**Phase goal:**
+{phase.description}
+
+**Requirements:**
+{requirements_content}
+
+**Context decisions:**
+{context_content}
 </context>
 
 <downstream_consumer>
-Your RESEARCH.md will be loaded by `/gsd:plan-phase` which uses specific sections:
-- `## Standard Stack` → Plans use these libraries
-- `## Architecture Patterns` → Task structure follows these
-- `## Don't Hand-Roll` → Tasks NEVER build custom solutions for listed problems
-- `## Common Pitfalls` → Verification steps check for these
-- `## Code Examples` → Task actions reference these patterns
+Your research will be loaded by `/gsd:plan-phase` which uses specific sections:
+- `## Standard Stack` -> Plans use these libraries
+- `## Architecture Patterns` -> Task structure follows these
+- `## Don't Hand-Roll` -> Tasks NEVER build custom solutions for listed problems
+- `## Common Pitfalls` -> Verification steps check for these
+- `## Code Examples` -> Task actions reference these patterns
 
 Be prescriptive, not exploratory. "Use X" not "Consider X or Y."
 </downstream_consumer>
@@ -142,136 +212,89 @@ Before declaring complete, verify:
 </quality_gate>
 
 <output>
-Write to: .planning/phases/${PHASE}-{slug}/${PHASE}-RESEARCH.md
+Return research findings as structured markdown. The orchestrator will create the Mosic page.
 </output>
 ```
 
 ```
 Task(
-  prompt="First, read ~/.claude/agents/gsd-phase-researcher.md for your role and instructions.\n\n" + filled_prompt,
+  prompt="First, read ~/.claude/agents/gsd-phase-researcher.md for your role.\n\n" + research_prompt,
   subagent_type="general-purpose",
   model="{researcher_model}",
-  description="Research Phase {phase}"
+  description="Research Phase {PHASE}"
 )
 ```
 
-## 5. Handle Agent Return
+## 6. Handle Agent Return and Create Research Page
 
-**`## RESEARCH COMPLETE`:** Display summary, proceed to Mosic sync, then offer: Plan phase, Dig deeper, Review full, Done.
-
-**`## CHECKPOINT REACHED`:** Present to user, get response, spawn continuation.
-
-**`## RESEARCH INCONCLUSIVE`:** Show what was attempted, offer: Add context, Try different mode, Manual.
-
-## 5.5. Sync Research to Mosic (Deep Integration)
-
-**Check if Mosic is enabled:**
-
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true AND research completed successfully:**
-
-Display:
-```
-◆ Syncing research to Mosic...
-```
-
-### Step 5.5.1: Load Mosic Config
-
-```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PHASE}\"]")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-RESEARCH_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.research")
-PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PHASE}\"]")
-```
-
-### Step 5.5.2: Check for Existing Research Page
+**If `## RESEARCH COMPLETE`:**
 
 ```
-# Search for existing research page linked to this phase
-existing_pages = mosic_get_entity_pages("MTask List", TASK_LIST_ID, {
-  include_subtree: false
-})
-
-existing_research_page = null
-FOR each page in existing_pages:
-  IF page.title contains "Research":
-    existing_research_page = page.name
-    BREAK
-```
-
-### Step 5.5.3: Create or Update Research Page
-
-```
-research_content = read_file("${PHASE_DIR}/${PHASE}-RESEARCH.md")
-
+# Create or update research page in Mosic
 IF existing_research_page:
-  # Update existing page
-  mosic_update_document("M Page", existing_research_page, {
-    status: "Published",
-    content: convert_to_editorjs(research_content)
+  mosic_update_document("M Page", existing_research_page.name, {
+    content: convert_to_editorjs(research_findings),
+    status: "Published"
   })
-  page_id = existing_research_page
+  research_page_id = existing_research_page.name
 ELSE:
-  # Create new Research page linked to phase task list
-  research_page = mosic_create_entity_page("MTask List", TASK_LIST_ID, {
+  research_page = mosic_create_entity_page("MTask List", task_list_id, {
     workspace_id: workspace_id,
     title: "Phase " + PHASE + " Research",
     page_type: "Document",
-    icon: mosic.page_icons.research,  # "lucide:search"
+    icon: config.mosic.page_icons.research,
     status: "Published",
-    content: convert_to_editorjs(research_content),
+    content: convert_to_editorjs(research_findings),
     relation_type: "Related"
   })
-  page_id = research_page.name
+  research_page_id = research_page.name
 ```
 
-### Step 5.5.4: Tag the Research Page
+**Tag research page:**
 
 ```
-mosic_batch_add_tags_to_document("M Page", page_id, [
-  GSD_MANAGED_TAG,
-  RESEARCH_TAG,
-  PHASE_TAG
+mosic_batch_add_tags_to_document("M Page", research_page_id, [
+  config.mosic.tags.gsd_managed,
+  config.mosic.tags.research,
+  config.mosic.tags.phase_tags[phase_key]
 ])
 ```
 
-### Step 5.5.5: Update config.json
+**Update config:**
 
-```bash
-# Update config.json with:
-# mosic.pages["phase-NN-research"] = page_id
-# mosic.last_sync = current timestamp
+```
+config.mosic.pages["phase-" + PHASE + "-research"] = research_page_id
+config.mosic.session.last_action = "research-phase"
+config.mosic.session.last_updated = "[ISO timestamp]"
+
+write config.json
 ```
 
 Display:
 ```
-✓ Research synced to Mosic
-  Page: https://mosic.pro/app/page/[page_id]
+Research synced to Mosic
+Page: https://mosic.pro/app/page/{research_page_id}
 ```
 
-**Error handling:**
-```
-IF mosic sync fails:
-  - Log warning: "Mosic sync failed: [error]. Research saved locally."
-  - Add to mosic.pending_sync array for retry
-  - Continue (don't block)
-```
+**If `## CHECKPOINT REACHED`:**
+- Present checkpoint to user
+- Get response
+- Spawn continuation agent with checkpoint context
 
-**If mosic.enabled = false:** Skip Mosic sync.
+**If `## RESEARCH INCONCLUSIVE`:**
+- Show what was attempted
+- Offer: Add context, Try different mode, Manual investigation
+- Wait for response
 
-## 6. Spawn Continuation Agent
+## 7. Spawn Continuation Agent (if needed)
 
 ```markdown
 <objective>
-Continue research for Phase {phase_number}: {phase_name}
+Continue research for Phase {PHASE}: {phase.title}
 </objective>
 
 <prior_state>
-Research file: @.planning/phases/${PHASE}-{slug}/${PHASE}-RESEARCH.md
+Research page: https://mosic.pro/app/page/{research_page_id}
 </prior_state>
 
 <checkpoint_response>
@@ -282,23 +305,83 @@ Research file: @.planning/phases/${PHASE}-{slug}/${PHASE}-RESEARCH.md
 
 ```
 Task(
-  prompt="First, read ~/.claude/agents/gsd-phase-researcher.md for your role and instructions.\n\n" + continuation_prompt,
+  prompt="First, read ~/.claude/agents/gsd-phase-researcher.md for your role.\n\n" + continuation_prompt,
   subagent_type="general-purpose",
   model="{researcher_model}",
-  description="Continue research Phase {phase}"
+  description="Continue research Phase {PHASE}"
 )
+```
+
+## 8. Offer Next Steps
+
+```
+-------------------------------------------
+ GSD > RESEARCH COMPLETE
+-------------------------------------------
+
+**Phase {PHASE}: {phase.title}**
+
+Research: https://mosic.pro/app/page/{research_page_id}
+
+Key findings:
+- {summary_point_1}
+- {summary_point_2}
+- {summary_point_3}
+
+---
+
+## Next Up
+
+**Plan Phase {PHASE}** - create execution plans based on research
+
+`/gsd:plan-phase {PHASE}`
+
+<sub>`/clear` first -> fresh context window</sub>
+
+---
+
+**Also available:**
+- View research in Mosic
+- `/gsd:research-phase {PHASE}` - dig deeper
+- `/gsd:discuss-phase {PHASE}` - gather more context first
+
+---
 ```
 
 </process>
 
+<error_handling>
+```
+IF mosic operation fails:
+  Display: "Mosic sync failed: {error}"
+
+  # Save research locally as backup
+  Write research to /tmp/phase-{PHASE}-research.md
+
+  Display: "Research saved to /tmp/phase-{PHASE}-research.md"
+  Display: "Retry with /gsd:sync-mosic or copy content manually"
+
+  # Add to pending sync
+  config.mosic.pending_sync = config.mosic.pending_sync or []
+  config.mosic.pending_sync.push({
+    type: "research_page",
+    phase: PHASE,
+    content_path: "/tmp/phase-" + PHASE + "-research.md",
+    timestamp: now
+  })
+
+  write config.json
+```
+</error_handling>
+
 <success_criteria>
-- [ ] Phase validated against roadmap
+- [ ] Phase loaded from Mosic
 - [ ] Existing research checked
-- [ ] gsd-phase-researcher spawned with context
+- [ ] Context loaded from Mosic (context page, requirements)
+- [ ] gsd-phase-researcher spawned with full context
 - [ ] Checkpoints handled correctly
-- [ ] Mosic sync (if enabled):
-  - [ ] Research page created or updated linked to phase task list
-  - [ ] Tags applied (gsd-managed, research, phase-NN)
-  - [ ] config.json updated with page mapping
-- [ ] User knows next steps
+- [ ] Research page created/updated in Mosic linked to phase
+- [ ] Tags applied (gsd-managed, research, phase-NN)
+- [ ] config.json updated with page mapping
+- [ ] User knows next steps with Mosic URLs
 </success_criteria>

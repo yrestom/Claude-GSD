@@ -1,101 +1,130 @@
 ---
 name: gsd:progress
-description: Check project progress, show context, and route to next action (execute or plan)
+description: Check project progress from Mosic, show context, and route to next action
 allowed-tools:
   - Read
   - Bash
-  - Grep
-  - Glob
+  - ToolSearch
+  - mcp__mosic_pro__mosic_get_project
+  - mcp__mosic_pro__mosic_get_task_list
+  - mcp__mosic_pro__mosic_get_task
+  - mcp__mosic_pro__mosic_search_tasks
+  - mcp__mosic_pro__mosic_get_entity_pages
+  - mcp__mosic_pro__mosic_get_document_relations
+  - mcp__mosic_pro__mosic_advanced_search
+  - mcp__mosic_pro__mosic_get_related_documents
+  - mcp__mosic_pro__mosic_get_relation_stats
+  - mcp__mosic_pro__mosic_find_relation_path
   - SlashCommand
 ---
 
 <objective>
-Check project progress, summarize recent work and what's ahead, then intelligently route to the next action - either executing an existing plan or creating the next one.
+Check project progress from Mosic MCP, summarize recent work and what's ahead, then intelligently route to the next action - either executing an existing plan or creating the next one.
 
-Provides situational awareness before continuing work.
+All state is sourced directly from Mosic. The only local file is `config.json` for session context and Mosic entity IDs.
 </objective>
 
 
 <process>
 
 <step name="verify">
-**Verify planning structure exists:**
+**Verify Mosic configuration exists:**
 
-Use Bash (not Glob) to check—Glob respects .gitignore but .planning/ is often gitignored:
+Check if `config.json` exists with Mosic project configured:
 
 ```bash
-test -d .planning && echo "exists" || echo "missing"
+test -f config.json && echo "exists" || echo "missing"
 ```
 
-If no `.planning/` directory:
+**If config.json missing:**
 
 ```
-No planning structure found.
+No project configuration found.
 
 Run /gsd:new-project to start a new project.
 ```
 
 Exit.
 
-If missing STATE.md: suggest `/gsd:new-project`.
+**If config.json exists, check for Mosic project_id:**
 
-**If ROADMAP.md missing but PROJECT.md exists:**
-
-This means a milestone was completed and archived. Go to **Route F** (between milestones).
-
-If missing both ROADMAP.md and PROJECT.md: suggest `/gsd:new-project`.
-</step>
-
-<step name="load">
-**Load full project context:**
-
-- Read `.planning/STATE.md` for living memory (position, decisions, issues)
-- Read `.planning/ROADMAP.md` for phase structure and objectives
-- Read `.planning/PROJECT.md` for current state (What This Is, Core Value, Requirements)
-- Read `.planning/config.json` for settings (model_profile, workflow toggles, mosic config)
-</step>
-
-<step name="enrich_from_mosic">
-**Enrich context from Mosic (Deep Integration):**
-
-Check Mosic status:
 ```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+cat config.json | jq -r '.mosic.project_id // empty'
 ```
 
-**If mosic.enabled = true:**
+**If project_id is empty or null:**
 
-Load Mosic config:
-```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+```
+No Mosic project linked.
+
+Run /gsd:new-project to initialize a new project with Mosic integration.
 ```
 
-### Step 1: Fetch Project Overview
+Exit.
+
+**Extract Mosic configuration:**
+
+```bash
+WORKSPACE_ID=$(cat config.json | jq -r '.mosic.workspace_id')
+PROJECT_ID=$(cat config.json | jq -r '.mosic.project_id')
+```
+
+Store these for use in Mosic MCP calls.
+</step>
+
+<step name="load_from_mosic">
+**Load full project context from Mosic:**
+
+### Step 1: Load MCP Tools
+
+```
+ToolSearch(query: "+mosic project")
+```
+
+Ensure Mosic MCP tools are available before proceeding.
+
+### Step 2: Fetch Project Overview
+
 ```
 project = mosic_get_project(project_id, {
   include_task_lists: true,
   include_comments: true
 })
+```
 
-# Get all pages linked to project
+Extract:
+- `project.title` - Project name
+- `project.description` - Project description
+- `project.status` - Current status (Backlog, In Progress, Completed, etc.)
+- `project.task_lists` - All phases (MTask Lists)
+- `project.done` - Overall completion flag
+
+### Step 3: Get Project Documentation Pages
+
+```
 project_pages = mosic_get_entity_pages("MProject", project_id, {
-  include_subtree: true,
+  include_subtree: false,
   include_content: false
 })
 ```
 
-### Step 2: Fetch Task Statistics by Phase
+Identify key pages:
+- Overview page (page_type: "Document", title contains "Overview")
+- Requirements page (page_type: "Spec", title contains "Requirements")
+- Roadmap page (page_type: "Spec", title contains "Roadmap")
+
+### Step 4: Fetch All Tasks Across Project
+
 ```
-# Search for all tasks across all phases
 all_tasks = mosic_search_tasks({
   workspace_id: workspace_id,
   project_id: project_id,
-  limit: 100
+  limit: 200
 })
+```
 
-# Group by status
+Group tasks by status:
+```
 task_by_status = {
   "Backlog": [],
   "ToDo": [],
@@ -107,123 +136,126 @@ task_by_status = {
 
 FOR each task in all_tasks:
   task_by_status[task.status].push(task)
+```
 
-# Search for blocked tasks specifically (important for routing)
-blocked_tasks = mosic_search_tasks({
-  workspace_id: workspace_id,
-  project_id: project_id,
-  status: "Blocked"
-})
+### Step 5: Get Blocked Task Details
 
-# Get blocked task details including relations
+```
+blocked_tasks = all_tasks.filter(t => t.status == "Blocked")
+
 FOR each blocked_task:
   relations = mosic_get_document_relations("MTask", blocked_task.name, {
     relation_types: ["Blocker"]
   })
-  blocked_task.blockers = relations.incoming  # What's blocking this
+  blocked_task.blockers = relations.incoming
 ```
 
-### Step 3: Calculate Phase-Level Progress
+### Step 6: Calculate Phase-Level Progress
+
 ```
-# For each phase task list
+phase_stats = []
+
 FOR each task_list in project.task_lists:
+  # Get tasks for this phase
   phase_tasks = mosic_search_tasks({
     workspace_id: workspace_id,
-    task_list_id: task_list.name
+    task_list_id: task_list.name,
+    limit: 100
   })
 
-  phase_stats = {
-    name: task_list.title,
-    total: phase_tasks.length,
-    completed: phase_tasks.filter(t => t.done).length,
-    in_progress: phase_tasks.filter(t => t.status == "In Progress").length,
-    blocked: phase_tasks.filter(t => t.status == "Blocked").length,
-    progress_pct: (completed / total * 100).toFixed(0) + "%"
-  }
+  total = phase_tasks.length
+  completed = phase_tasks.filter(t => t.done).length
+  in_progress = phase_tasks.filter(t => t.status == "In Progress").length
+  blocked = phase_tasks.filter(t => t.status == "Blocked").length
 
   # Get phase pages
   phase_pages = mosic_get_entity_pages("MTask List", task_list.name)
 
-  phase_stats.has_research = phase_pages.find(p => p.title.includes("Research"))
-  phase_stats.has_verification = phase_pages.find(p => p.title.includes("Verification"))
-  phase_stats.has_uat = phase_pages.find(p => p.title.includes("UAT"))
+  phase_stat = {
+    task_list_id: task_list.name,
+    name: task_list.title,
+    description: task_list.description,
+    done: task_list.done,
+    total: total,
+    completed: completed,
+    in_progress: in_progress,
+    blocked: blocked,
+    progress_pct: total > 0 ? Math.round(completed / total * 100) : 0,
+    has_research: phase_pages.find(p => p.title.includes("Research")),
+    has_plan: total > 0,  # Phase has planned tasks
+    has_verification: phase_pages.find(p => p.title.includes("Verification")),
+    has_uat: phase_pages.find(p => p.title.includes("UAT"))
+  }
+
+  phase_stats.push(phase_stat)
 ```
 
-### Step 4: Find Cross-Session Completions
+### Step 7: Identify Current Phase
+
 ```
-# Get tasks completed since last local sync
-last_sync = mosic.last_sync from config.json
+# Current phase = first non-completed phase with work to do
+current_phase = phase_stats.find(p => !p.done && (p.in_progress > 0 || p.completed < p.total))
+
+# If no active phase, find first phase that needs planning
+IF current_phase is null:
+  current_phase = phase_stats.find(p => !p.done)
+```
+
+### Step 8: Get Recent Activity (Cross-Session Completions)
+
+```
+# Get tasks completed recently (last 7 days)
+seven_days_ago = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
 recent_completions = mosic_advanced_search({
   workspace_id: workspace_id,
   doctypes: ["MTask"],
   filters: {
-    project_id: project_id,
+    project: project_id,
     done: true,
-    modified: [">=", last_sync]
-  }
+    modified: [">=", seven_days_ago]
+  },
+  limit: 10
 })
-
-# Cross-reference with local STATE.md to find external completions
-# (Tasks completed in other sessions or by other agents)
 ```
 
-### Step 5: Get Relation Insights
-```
-# Find dependency paths and blockers
-relation_stats = mosic_get_relation_stats({
-  workspace_id: workspace_id,
-  doctype: "MProject",
-  docname: project_id
-})
+### Step 9: Get Relation Insights
 
-# Find blocking chains
-FOR each blocked_task:
+```
+# Find blocking chains for blocked tasks
+FOR each blocked_task in blocked_tasks:
   path = mosic_find_relation_path({
     from_doctype: "MTask",
     from_docname: blocked_task.name,
     to_doctype: "MTask List",
-    to_docname: current_phase_task_list,
+    to_docname: current_phase.task_list_id,
     relation_types: ["Blocker", "Depends"],
     max_depth: 5
   })
   blocked_task.resolution_path = path
 ```
-
-Store for display in report step:
-- `mosic_project_url`: `https://mosic.pro/app/Project/${project_id}`
-- `mosic_total_tasks`: all_tasks.length
-- `mosic_completed_tasks`: task_by_status["Completed"].length
-- `mosic_in_progress_tasks`: task_by_status["In Progress"].length
-- `mosic_blocked_tasks`: blocked_tasks with resolution paths
-- `mosic_phase_progress`: Array of phase_stats
-- `mosic_recent_completions`: Completions since last sync
-- `mosic_documentation`: project_pages summary
-- `mosic_relation_stats`: relation_stats
-
-**If Mosic fetch fails:**
-- Log warning, continue with local-only data
-- Display: "(Mosic sync unavailable - showing local state only)"
 </step>
 
-<step name="recent">
-**Gather recent work context:**
+<step name="calculate_progress">
+**Calculate overall progress:**
 
-- Find the 2-3 most recent SUMMARY.md files
-- Extract from each: what was accomplished, key decisions, any issues logged
-- This shows "what we've been working on"
-  </step>
+```
+total_tasks = all_tasks.length
+completed_tasks = task_by_status["Completed"].length
+in_progress_tasks = task_by_status["In Progress"].length
+blocked_count = task_by_status["Blocked"].length
 
-<step name="position">
-**Parse current position:**
+progress_pct = total_tasks > 0 ? Math.round(completed_tasks / total_tasks * 100) : 0
 
-- From STATE.md: current phase, plan number, status
-- Calculate: total plans, completed plans, remaining plans
-- Note any blockers or concerns
-- Check for CONTEXT.md: For phases without PLAN.md files, check if `{phase}-CONTEXT.md` exists in phase directory
-- Count pending todos: `ls .planning/todos/pending/*.md 2>/dev/null | wc -l`
-- Check for active debug sessions: `ls .planning/debug/*.md 2>/dev/null | grep -v resolved | wc -l`
-  </step>
+# Visual progress bar (10 segments)
+filled = Math.round(progress_pct / 10)
+progress_bar = "█".repeat(filled) + "░".repeat(10 - filled)
+
+# Count phases
+total_phases = phase_stats.length
+completed_phases = phase_stats.filter(p => p.done).length
+```
+</step>
 
 <step name="report">
 **Present rich status report:**
@@ -231,100 +263,128 @@ Store for display in report step:
 ```
 # [Project Name]
 
-**Progress:** [████████░░] 8/10 plans complete
-**Profile:** [quality/balanced/budget]
-[IF mosic.enabled:] **Mosic:** [mosic_project_url] [END IF]
+**Progress:** [[progress_bar]] [completed_tasks]/[total_tasks] tasks ([progress_pct]%)
+**Phases:** [completed_phases]/[total_phases] complete
+**Mosic:** https://mosic.pro/app/Project/[project_id]
 
-## Recent Work
-- [Phase X, Plan Y]: [what was accomplished - 1 line]
-- [Phase X, Plan Z]: [what was accomplished - 1 line]
+## Phase Overview
+
+| # | Phase | Progress | Status |
+|---|-------|----------|--------|
+| 1 | [Phase 1 name] | [██████████] 100% | ✓ Complete |
+| 2 | [Phase 2 name] | [████░░░░░░] 40% | In Progress |
+| 3 | [Phase 3 name] | [░░░░░░░░░░] 0% | Pending |
 
 ## Current Position
-Phase [N] of [total]: [phase-name]
-Plan [M] of [phase-total]: [status]
-CONTEXT: [✓ if CONTEXT.md exists | - if not]
 
-[IF mosic.enabled AND mosic_recent_completions:]
-## Cross-Session Progress (from Mosic)
-Tasks completed in prior sessions:
-- [task_title] — [completion_date]
-- [task_title] — [completion_date]
+**Phase [N]:** [phase-name]
+- [X] tasks completed
+- [Y] tasks in progress
+- [Z] tasks remaining
+
+[IF blocked_count > 0:]
+## Blocked Tasks
+
+- **[task_title]** — Blocked by: [blocker_info]
+  Resolution path: [path if available]
 [END IF]
 
-## Key Decisions Made
-- [decision 1 from STATE.md]
-- [decision 2]
+[IF recent_completions.length > 0:]
+## Recent Completions
 
-## Blockers/Concerns
-- [any blockers or concerns from STATE.md]
-[IF mosic.enabled AND mosic_blocked_tasks:]
-- [Mosic blocked tasks]
+- [task_title] — completed [relative_time]
+- [task_title] — completed [relative_time]
 [END IF]
-
-## Pending Todos
-- [count] pending — /gsd:check-todos to review
-
-## Active Debug Sessions
-- [count] active — /gsd:debug to continue
-(Only show this section if count > 0)
 
 ## What's Next
-[Next phase/plan objective from ROADMAP]
-```
 
+[Next action based on routing logic]
+```
 </step>
 
 <step name="route">
-**Determine next action based on verified counts.**
+**Determine next action based on Mosic task states.**
 
-**Step 1: Count plans, summaries, and issues in current phase**
+### Step 1: Analyze Current Phase Status
 
-List files in the current phase directory:
+From `current_phase` calculated earlier:
 
-```bash
-ls -1 .planning/phases/[current-phase-dir]/*-PLAN.md 2>/dev/null | wc -l
-ls -1 .planning/phases/[current-phase-dir]/*-SUMMARY.md 2>/dev/null | wc -l
-ls -1 .planning/phases/[current-phase-dir]/*-UAT.md 2>/dev/null | wc -l
+```
+has_unexecuted_tasks = current_phase.total > 0 && current_phase.completed < current_phase.total
+has_in_progress = current_phase.in_progress > 0
+needs_planning = current_phase.total == 0
+phase_complete = current_phase.done || (current_phase.total > 0 && current_phase.completed == current_phase.total)
 ```
 
-State: "This phase has {X} plans, {Y} summaries."
+### Step 2: Check for UAT Gaps
 
-**Step 1.5: Check for unaddressed UAT gaps**
+```
+# Check if phase has UAT page with diagnosed gaps
+uat_page = phase_pages.find(p => p.title.includes("UAT"))
 
-Check for UAT.md files with status "diagnosed" (has gaps needing fixes).
-
-```bash
-# Check for diagnosed UAT with gaps
-grep -l "status: diagnosed" .planning/phases/[current-phase-dir]/*-UAT.md 2>/dev/null
+IF uat_page:
+  uat_content = mosic_get_page(uat_page.name, { content_format: "plain" })
+  has_uat_gaps = uat_content.includes("status: diagnosed") || uat_content.includes("gaps:")
 ```
 
-Track:
-- `uat_with_gaps`: UAT.md files with status "diagnosed" (gaps need fixing)
+### Step 3: Route Based on State
 
-**Step 2: Route based on counts**
-
-| Condition | Meaning | Action |
-|-----------|---------|--------|
-| uat_with_gaps > 0 | UAT gaps need fix plans | Go to **Route E** |
-| summaries < plans | Unexecuted plans exist | Go to **Route A** |
-| summaries = plans AND plans > 0 | Phase complete | Go to Step 3 |
-| plans = 0 | Phase not yet planned | Go to **Route B** |
+| Condition | Meaning | Route |
+|-----------|---------|-------|
+| `has_uat_gaps` | UAT gaps need fix plans | **Route E** |
+| `has_in_progress` | Work in progress | **Route A-1** (continue execution) |
+| `has_unexecuted_tasks && !has_in_progress` | Pending tasks exist | **Route A-2** (start execution) |
+| `needs_planning` | Phase has no tasks | **Route B** |
+| `phase_complete && more_phases` | Phase done, more remain | **Route C** |
+| `phase_complete && !more_phases` | All phases done | **Route D** |
+| `!current_phase` | Between milestones | **Route F** |
 
 ---
 
-**Route A: Unexecuted plan exists**
+**Route A-1: Work in progress**
 
-Find the first PLAN.md without matching SUMMARY.md.
-Read its `<objective>` section.
+Find the in-progress task:
+
+```
+in_progress_task = phase_tasks.find(t => t.status == "In Progress")
+```
+
+```
+---
+
+## ▶ Continue Work
+
+**[phase-name] — [task_title]** (In Progress)
+
+Task: https://mosic.pro/app/MTask/[task_id]
+
+`/gsd:execute-phase [phase-number]`
+
+<sub>`/clear` first → fresh context window</sub>
+
+---
+```
+
+---
+
+**Route A-2: Unexecuted tasks exist**
+
+Find the first pending task:
+
+```
+next_task = phase_tasks.find(t => t.status == "Backlog" || t.status == "ToDo")
+```
 
 ```
 ---
 
 ## ▶ Next Up
 
-**{phase}-{plan}: [Plan Name]** — [objective summary from PLAN.md]
+**[phase-name] — [task_title]** (Ready to execute)
 
-`/gsd:execute-phase {phase}`
+Task: https://mosic.pro/app/MTask/[task_id]
+
+`/gsd:execute-phase [phase-number]`
 
 <sub>`/clear` first → fresh context window</sub>
 
@@ -335,130 +395,95 @@ Read its `<objective>` section.
 
 **Route B: Phase needs planning**
 
-Check if `{phase}-CONTEXT.md` exists in phase directory.
+Check for research page:
 
-**If CONTEXT.md exists:**
+```
+has_research = phase_pages.find(p => p.title.includes("Research"))
+```
+
+**If research exists:**
 
 ```
 ---
 
 ## ▶ Next Up
 
-**Phase {N}: {Name}** — {Goal from ROADMAP.md}
-<sub>✓ Context gathered, ready to plan</sub>
+**Phase [N]: [Name]** — [Goal from phase description]
+<sub>✓ Research complete, ready to plan</sub>
 
-`/gsd:plan-phase {phase-number}`
+`/gsd:plan-phase [phase-number]`
 
 <sub>`/clear` first → fresh context window</sub>
 
 ---
 ```
 
-**If CONTEXT.md does NOT exist:**
+**If NO research:**
 
 ```
 ---
 
 ## ▶ Next Up
 
-**Phase {N}: {Name}** — {Goal from ROADMAP.md}
+**Phase [N]: [Name]** — [Goal from phase description]
 
-`/gsd:discuss-phase {phase}` — gather context and clarify approach
-
-<sub>`/clear` first → fresh context window</sub>
-
----
-
-**Also available:**
-- `/gsd:plan-phase {phase}` — skip discussion, plan directly
-- `/gsd:list-phase-assumptions {phase}` — see Claude's assumptions
-
----
-```
-
----
-
-**Route E: UAT gaps need fix plans**
-
-UAT.md exists with gaps (diagnosed issues). User needs to plan fixes.
-
-```
----
-
-## ⚠ UAT Gaps Found
-
-**{phase}-UAT.md** has {N} gaps requiring fixes.
-
-`/gsd:plan-phase {phase} --gaps`
+`/gsd:discuss-phase [phase-number]` — gather context and clarify approach
 
 <sub>`/clear` first → fresh context window</sub>
 
 ---
 
 **Also available:**
-- `/gsd:execute-phase {phase}` — execute phase plans
-- `/gsd:verify-work {phase}` — run more UAT testing
+- `/gsd:plan-phase [phase-number]` — skip discussion, plan directly
+- `/gsd:research-phase [phase-number]` — deep dive research first
 
 ---
 ```
-
----
-
-**Step 3: Check milestone status (only when phase complete)**
-
-Read ROADMAP.md and identify:
-1. Current phase number
-2. All phase numbers in the current milestone section
-
-Count total phases and identify the highest phase number.
-
-State: "Current phase is {X}. Milestone has {N} phases (highest: {Y})."
-
-**Route based on milestone status:**
-
-| Condition | Meaning | Action |
-|-----------|---------|--------|
-| current phase < highest phase | More phases remain | Go to **Route C** |
-| current phase = highest phase | Milestone complete | Go to **Route D** |
 
 ---
 
 **Route C: Phase complete, more phases remain**
 
-Read ROADMAP.md to get the next phase's name and goal.
+Find next phase:
+
+```
+next_phase = phase_stats.find(p => !p.done && p != current_phase)
+```
 
 ```
 ---
 
-## ✓ Phase {Z} Complete
+## ✓ Phase [N] Complete
+
+All [X] tasks completed.
 
 ## ▶ Next Up
 
-**Phase {Z+1}: {Name}** — {Goal from ROADMAP.md}
+**Phase [N+1]: [Name]** — [Goal from phase description]
 
-`/gsd:discuss-phase {Z+1}` — gather context and clarify approach
+`/gsd:discuss-phase [N+1]` — gather context and clarify approach
 
 <sub>`/clear` first → fresh context window</sub>
 
 ---
 
 **Also available:**
-- `/gsd:plan-phase {Z+1}` — skip discussion, plan directly
-- `/gsd:verify-work {Z}` — user acceptance test before continuing
+- `/gsd:plan-phase [N+1]` — skip discussion, plan directly
+- `/gsd:verify-work [N]` — user acceptance test before continuing
 
 ---
 ```
 
 ---
 
-**Route D: Milestone complete**
+**Route D: All phases complete (Milestone complete)**
 
 ```
 ---
 
-## 🎉 Milestone Complete
+## Milestone Complete
 
-All {N} phases finished!
+All [N] phases finished!
 
 ## ▶ Next Up
 
@@ -478,16 +503,38 @@ All {N} phases finished!
 
 ---
 
-**Route F: Between milestones (ROADMAP.md missing, PROJECT.md exists)**
-
-A milestone was completed and archived. Ready to start the next milestone cycle.
-
-Read MILESTONES.md to find the last completed milestone version.
+**Route E: UAT gaps need fix plans**
 
 ```
 ---
 
-## ✓ Milestone v{X.Y} Complete
+## ⚠ UAT Gaps Found
+
+**Phase [N] UAT** has gaps requiring fixes.
+
+View: https://mosic.pro/app/page/[uat_page_id]
+
+`/gsd:plan-phase [phase-number] --gaps`
+
+<sub>`/clear` first → fresh context window</sub>
+
+---
+
+**Also available:**
+- `/gsd:execute-phase [phase-number]` — execute existing fix tasks
+- `/gsd:verify-work [phase-number]` — run more UAT testing
+
+---
+```
+
+---
+
+**Route F: Between milestones (no current phase)**
+
+```
+---
+
+## ✓ Milestone Complete
 
 Ready to plan the next milestone.
 
@@ -507,20 +554,50 @@ Ready to plan the next milestone.
 <step name="edge_cases">
 **Handle edge cases:**
 
-- Phase complete but next phase not planned → offer `/gsd:plan-phase [next]`
-- All work complete → offer milestone completion
-- Blockers present → highlight before offering to continue
-- Handoff file exists → mention it, offer `/gsd:resume-work`
-  </step>
+- **Blocked tasks exist:** Highlight blockers prominently before suggesting next action
+- **Multiple in-progress tasks:** List all, suggest focusing on one
+- **Phase has both pending and in-progress:** Prioritize continuing in-progress work
+- **Mosic connection fails:** Display error with cached info from config.json if available
+- **Project archived:** Suggest creating new milestone or unarchiving
+
+**Error handling:**
+
+```
+IF Mosic API call fails:
+  Display:
+  ---
+  ⚠ Mosic connection failed
+
+  Error: [error message]
+
+  Check:
+  - Network connectivity
+  - Mosic MCP server status
+  - Project still exists: https://mosic.pro/app/Project/[project_id]
+  ---
+```
+</step>
 
 </process>
 
 <success_criteria>
 
-- [ ] Rich context provided (recent work, decisions, issues)
-- [ ] Current position clear with visual progress
-- [ ] What's next clearly explained
-- [ ] Smart routing: /gsd:execute-phase if plans exist, /gsd:plan-phase if not
+- [ ] config.json checked for mosic.project_id
+- [ ] Project context loaded entirely from Mosic MCP
+- [ ] Phase progress calculated from Mosic task completion states
+- [ ] Current phase identified from live Mosic data
+- [ ] Blocked tasks identified with blocker relations
+- [ ] Recent completions shown (cross-session awareness)
+- [ ] Visual progress bar and statistics displayed
+- [ ] Mosic project URL provided for quick access
+- [ ] Smart routing based on Mosic task states:
+  - Route A: Unexecuted tasks → /gsd:execute-phase
+  - Route B: No tasks in phase → /gsd:plan-phase or /gsd:discuss-phase
+  - Route C: Phase complete, more remain → next phase
+  - Route D: All complete → /gsd:complete-milestone
+  - Route E: UAT gaps → /gsd:plan-phase --gaps
+  - Route F: Between milestones → /gsd:new-milestone
+- [ ] No references to local .planning/ directory (except config.json)
 - [ ] User confirms before any action
-- [ ] Seamless handoff to appropriate gsd command
-      </success_criteria>
+
+</success_criteria>

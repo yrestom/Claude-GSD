@@ -1,6 +1,6 @@
 ---
 name: gsd:quick
-description: Execute a quick task with GSD guarantees (atomic commits, state tracking) but skip optional agents
+description: Execute a quick task with GSD guarantees using Mosic for state management
 argument-hint: ""
 allowed-tools:
   - Read
@@ -11,16 +11,18 @@ allowed-tools:
   - Bash
   - Task
   - AskUserQuestion
+  - ToolSearch
+  - mcp__mosic_pro__*
 ---
 
 <objective>
-Execute small, ad-hoc tasks with GSD guarantees (atomic commits, STATE.md tracking) while skipping optional agents (research, plan-checker, verifier).
+Execute small, ad-hoc tasks with GSD guarantees (atomic commits, state tracking) while skipping optional agents (research, plan-checker, verifier).
 
 Quick mode is the same system with a shorter path:
 - Spawns gsd-planner (quick mode) + gsd-executor(s)
 - Skips gsd-phase-researcher, gsd-plan-checker, gsd-verifier
-- Quick tasks live in `.planning/quick/` separate from planned phases
-- Updates STATE.md "Quick Tasks Completed" table (NOT ROADMAP.md)
+- Quick tasks live in Mosic as MTask entries in a "Quick Tasks" task list
+- All state tracked in Mosic, config.json stores entity IDs
 
 Use when: You know exactly what to do and the task is small enough to not need research or verification.
 </objective>
@@ -30,19 +32,53 @@ Orchestration is inline - no separate workflow file. Quick mode is deliberately 
 </execution_context>
 
 <context>
-@.planning/STATE.md
+**Config file:** config.json (minimal - just workspace_id required)
 </context>
 
 <process>
-**Step 0: Resolve Model Profile**
 
-Read model profile for agent spawning:
+## Step 0: Load Configuration and Mosic Tools
 
 ```bash
-MODEL_PROFILE=$(cat .planning/config.json 2>/dev/null | grep -o '"model_profile"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || echo "balanced")
+# Load config.json
+CONFIG=$(cat config.json 2>/dev/null || echo '{}')
+WORKSPACE_ID=$(echo "$CONFIG" | jq -r '.mosic.workspace_id // empty')
 ```
 
-Default to "balanced" if not set.
+Load Mosic tools:
+```
+ToolSearch("mosic task create document entity page")
+```
+
+**Minimal config validation:**
+```
+IF WORKSPACE_ID is empty:
+  # Quick mode only requires workspace_id - no full project needed
+  PROMPT: "Enter your Mosic workspace ID (or run /gsd:new-project for full setup):"
+  WORKSPACE_ID = user_response
+
+  # Create minimal config.json
+  config = {
+    "mosic": {
+      "enabled": true,
+      "workspace_id": WORKSPACE_ID,
+      "tags": {
+        "gsd_managed": "gsd-managed",
+        "quick": "quick",
+        "summary": "summary"
+      },
+      "task_lists": {},
+      "tasks": {},
+      "pages": {}
+    }
+  }
+  write config.json
+```
+
+Resolve model profile:
+```bash
+MODEL_PROFILE=$(echo "$CONFIG" | jq -r '.model_profile // "balanced"')
+```
 
 **Model lookup table:**
 
@@ -51,29 +87,9 @@ Default to "balanced" if not set.
 | gsd-planner | opus | opus | sonnet |
 | gsd-executor | opus | sonnet | sonnet |
 
-Store resolved models for use in Task calls below.
-
 ---
 
-**Step 1: Pre-flight validation**
-
-Check that an active GSD project exists:
-
-```bash
-if [ ! -f .planning/ROADMAP.md ]; then
-  echo "Quick mode requires an active project with ROADMAP.md."
-  echo "Run /gsd:new-project first."
-  exit 1
-fi
-```
-
-If validation fails, stop immediately with the error message.
-
-Quick tasks can run mid-phase - validation only checks ROADMAP.md exists, not phase status.
-
----
-
-**Step 2: Get task description**
+## Step 1: Get Task Description
 
 Prompt user interactively for the task description:
 
@@ -96,48 +112,138 @@ slug=$(echo "$DESCRIPTION" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' 
 
 ---
 
-**Step 3: Calculate next quick task number**
+## Step 2: Find or Create Quick Tasks List in Mosic
 
-Ensure `.planning/quick/` directory exists and find the next sequential number:
+```
+# Check if Quick Tasks list exists in config
+QUICK_LIST_ID = config.mosic.task_lists["quick"]
 
-```bash
-# Ensure .planning/quick/ exists
-mkdir -p .planning/quick
+IF QUICK_LIST_ID is null or empty:
+  # Search for existing Quick Tasks list
+  existing_lists = mosic_search({
+    workspace_id: WORKSPACE_ID,
+    query: "Quick Tasks",
+    doctypes: ["MTask List"]
+  })
 
-# Find highest existing number and increment
-last=$(ls -1d .planning/quick/[0-9][0-9][0-9]-* 2>/dev/null | sort -r | head -1 | xargs -I{} basename {} | grep -oE '^[0-9]+')
+  IF existing_lists.results.length > 0:
+    # Use existing list
+    QUICK_LIST_ID = existing_lists.results[0].name
+    DISPLAY: "Found existing Quick Tasks list"
+  ELSE:
+    # Create Quick Tasks list
+    quick_list = mosic_create_document("MTask List", {
+      workspace_id: WORKSPACE_ID,
+      title: "Quick Tasks",
+      description: "Ad-hoc tasks completed via `/gsd:quick`.\n\nThese are small, atomic tasks that don't require full planning cycles.",
+      icon: "lucide:zap",
+      color: "amber",
+      status: "In Progress",
+      prefix: "QT"
+    })
+    QUICK_LIST_ID = quick_list.name
 
-if [ -z "$last" ]; then
-  next_num="001"
-else
-  next_num=$(printf "%03d" $((10#$last + 1)))
-fi
+    # Tag the list
+    mosic_batch_add_tags_to_document("MTask List", QUICK_LIST_ID, [
+      config.mosic.tags.gsd_managed,
+      config.mosic.tags.quick
+    ])
+
+    DISPLAY: "Created Quick Tasks list: https://mosic.pro/app/MTask%20List/" + QUICK_LIST_ID
+
+  # Store in config
+  config.mosic.task_lists["quick"] = QUICK_LIST_ID
+  write config.json
 ```
 
 ---
 
-**Step 4: Create quick task directory**
+## Step 3: Calculate Next Quick Task Number
 
-Create the directory for this quick task:
-
-```bash
-QUICK_DIR=".planning/quick/${next_num}-${slug}"
-mkdir -p "$QUICK_DIR"
 ```
+# Get existing tasks in Quick Tasks list to determine next number
+quick_list = mosic_get_task_list(QUICK_LIST_ID, { include_tasks: true })
 
-Report to user:
-```
-Creating quick task ${next_num}: ${DESCRIPTION}
-Directory: ${QUICK_DIR}
-```
+IF quick_list.tasks && quick_list.tasks.length > 0:
+  # Find highest QT-N number
+  highest = 0
+  FOR each task in quick_list.tasks:
+    match = task.identifier.match(/QT-(\d+)/)
+    IF match && parseInt(match[1]) > highest:
+      highest = parseInt(match[1])
+  next_num = highest + 1
+ELSE:
+  next_num = 1
 
-Store `$QUICK_DIR` for use in orchestration.
+TASK_NUMBER = String(next_num).padStart(3, '0')
+TASK_IDENTIFIER = "QT-" + next_num
+
+DISPLAY: "Creating quick task " + TASK_IDENTIFIER + ": " + DESCRIPTION
+```
 
 ---
 
-**Step 5: Spawn planner (quick mode)**
+## Step 4: Create Quick Task in Mosic
 
-Spawn gsd-planner with quick mode context:
+```
+# Create the task (not yet done - will be marked done after execution)
+quick_task = mosic_create_document("MTask", {
+  workspace_id: WORKSPACE_ID,
+  task_list: QUICK_LIST_ID,
+  title: DESCRIPTION,
+  description: "Quick task initiated via /gsd:quick\n\n**Status:** Planning...",
+  icon: "lucide:zap",
+  status: "In Progress",
+  priority: "Normal",
+  start_date: ISO_TIMESTAMP
+})
+
+TASK_ID = quick_task.name
+
+# Tag the task
+mosic_batch_add_tags_to_document("MTask", TASK_ID, [
+  config.mosic.tags.gsd_managed,
+  config.mosic.tags.quick
+])
+
+DISPLAY: "Task created: https://mosic.pro/app/MTask/" + TASK_ID
+```
+
+---
+
+## Step 5: Spawn Planner (Quick Mode)
+
+Create plan page linked to task, then spawn planner:
+
+```
+# Create plan page
+plan_page = mosic_create_entity_page("MTask", TASK_ID, {
+  workspace_id: WORKSPACE_ID,
+  title: "Execution Plan",
+  page_type: "Spec",
+  icon: "lucide:file-code",
+  status: "Draft",
+  content: {
+    blocks: [
+      {
+        type: "header",
+        data: { text: "Quick Task Plan", level: 1 }
+      },
+      {
+        type: "paragraph",
+        data: { text: "Planning in progress..." }
+      }
+    ]
+  },
+  relation_type: "Related"
+})
+
+PLAN_PAGE_ID = plan_page.name
+
+mosic_add_tag_to_document("M Page", PLAN_PAGE_ID, config.mosic.tags.plan)
+```
+
+Spawn planner:
 
 ```
 Task(
@@ -145,11 +251,10 @@ Task(
 <planning_context>
 
 **Mode:** quick
-**Directory:** ${QUICK_DIR}
-**Description:** ${DESCRIPTION}
-
-**Project State:**
-@.planning/STATE.md
+**Task ID:** " + TASK_ID + "
+**Plan Page:** " + PLAN_PAGE_ID + "
+**Description:** " + DESCRIPTION + "
+**Workspace ID:** " + WORKSPACE_ID + "
 
 </planning_context>
 
@@ -158,331 +263,185 @@ Task(
 - Quick tasks should be atomic and self-contained
 - No research phase, no checker phase
 - Target ~30% context usage (simple, focused)
+- Update the plan page with structured execution steps
 </constraints>
 
 <output>
-Write plan to: ${QUICK_DIR}/${next_num}-PLAN.md
-Return: ## PLANNING COMPLETE with plan path
+Update plan page " + PLAN_PAGE_ID + " with:
+1. Clear objective
+2. 1-3 numbered tasks with acceptance criteria
+3. Success verification steps
+
+Return: ## PLANNING COMPLETE with task count
 </output>
 ",
   subagent_type="gsd-planner",
   model="{planner_model}",
-  description="Quick plan: ${DESCRIPTION}"
+  description="Quick plan: " + DESCRIPTION
 )
 ```
 
 After planner returns:
-1. Verify plan exists at `${QUICK_DIR}/${next_num}-PLAN.md`
-2. Extract plan count (typically 1 for quick tasks)
-3. Report: "Plan created: ${QUICK_DIR}/${next_num}-PLAN.md"
-
-If plan not found, error: "Planner failed to create ${next_num}-PLAN.md"
+1. Verify plan page was updated
+2. Extract plan count from return message
+3. Report: "Plan ready"
 
 ---
 
-**Step 6: Spawn executor**
-
-Spawn gsd-executor with plan reference:
+## Step 6: Spawn Executor
 
 ```
 Task(
   prompt="
-Execute quick task ${next_num}.
+Execute quick task " + TASK_IDENTIFIER + ".
 
-Plan: @${QUICK_DIR}/${next_num}-PLAN.md
-Project state: @.planning/STATE.md
+**Task ID:** " + TASK_ID + "
+**Plan Page:** " + PLAN_PAGE_ID + "
+**Workspace ID:** " + WORKSPACE_ID + "
 
 <constraints>
 - Execute all tasks in the plan
 - Commit each task atomically
-- Create summary at: ${QUICK_DIR}/${next_num}-SUMMARY.md
-- Do NOT update ROADMAP.md (quick tasks are separate from planned phases)
+- Create summary by updating the task description
+- Track progress via M Comment on the task
 </constraints>
+
+<output>
+After completion:
+1. Update task status to Completed
+2. Add summary to task description
+3. Return: ## EXECUTION COMPLETE with commit hash
+</output>
 ",
   subagent_type="gsd-executor",
   model="{executor_model}",
-  description="Execute: ${DESCRIPTION}"
+  description="Execute: " + DESCRIPTION
 )
 ```
 
 After executor returns:
-1. Verify summary exists at `${QUICK_DIR}/${next_num}-SUMMARY.md`
-2. Extract commit hash from executor output
-3. Report completion status
-
-If summary not found, error: "Executor failed to create ${next_num}-SUMMARY.md"
-
-Note: For quick tasks producing multiple plans (rare), spawn executors in parallel waves per execute-phase patterns.
+1. Extract commit hash from output
+2. Verify task status is updated
 
 ---
 
-**Step 6.5: Sync quick task to Mosic (Deep Integration)**
-
-Check Mosic status:
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true:**
-
-Display:
-```
-◆ Syncing quick task to Mosic...
-```
-
-### Step 6.5a: Load Mosic Config
-
-```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-QUICK_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.quick")
-SUMMARY_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.summary")
-QUICK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"quick\"]")
-```
-
-### Step 6.5b: Find or Create "Quick Tasks" MTask List
+## Step 7: Create Summary Page and Mark Complete
 
 ```
-IF QUICK_LIST_ID is null or empty:
-  # Search for existing Quick Tasks list first
-  existing_lists = mosic_search({
-    workspace_id: workspace_id,
-    query: "Quick Tasks",
-    doctypes: ["MTask List"]
-  })
+# Get the updated task to extract summary
+task = mosic_get_task(TASK_ID, { description_format: "markdown" })
 
-  IF existing_lists.length > 0 AND existing_lists[0].project == project_id:
-    quick_list_id = existing_lists[0].name
-  ELSE:
-    # Create Quick Tasks list with rich metadata
-    quick_list = mosic_create_document("MTask List", {
-      workspace_id: workspace_id,
-      project: project_id,
-      title: "Quick Tasks",
-      description: "Ad-hoc tasks completed outside the main roadmap.\n\nThese are small, atomic tasks handled via `/gsd:quick` that don't require full planning cycles.",
-      icon: "lucide:zap",
-      color: "amber",
-      status: "In Progress",
-      prefix: "QT"
-    })
-    quick_list_id = quick_list.name
-
-    # Tag the list
-    mosic_batch_add_tags_to_document("MTask List", quick_list_id, [
-      GSD_MANAGED_TAG,
-      QUICK_TAG
-    ])
-
-  # Store in config.json
-  # mosic.task_lists["quick"] = quick_list_id
-```
-
-### Step 6.5c: Create MTask with Rich Metadata
-
-```
-# Read SUMMARY.md for task description
-summary_content = read(${QUICK_DIR}/${next_num}-SUMMARY.md)
-task_description = extract_summary_section(summary_content)
-
-task = mosic_create_document("MTask", {
-  workspace_id: workspace_id,
-  task_list: quick_list_id,
-  title: "QT-" + next_num + ": " + DESCRIPTION,
-  description: task_description,
-  icon: "lucide:zap",
-  status: "Completed",
-  priority: "Normal",
-  done: true,
-  start_date: "[ISO timestamp - task start]",
-  end_date: "[ISO timestamp - now]"
-})
-
-task_id = task.name
-```
-
-### Step 6.5d: Create Checklist from PLAN.md Tasks
-
-```
-# Extract tasks from PLAN.md
-plan_tasks = extract_plan_tasks(${QUICK_DIR}/${next_num}-PLAN.md)
-
-FOR each plan_task in plan_tasks:
-  mosic_create_document("MTask CheckList", {
-    workspace_id: workspace_id,
-    task: task_id,
-    title: plan_task.name,
-    done: true  # All complete since task is done
-  })
-```
-
-### Step 6.5e: Tag the Task
-
-```
-mosic_batch_add_tags_to_document("MTask", task_id, [
-  GSD_MANAGED_TAG,
-  QUICK_TAG
-])
-```
-
-### Step 6.5f: Add Commit as Comment
-
-```
-mosic_create_document("M Comment", {
-  workspace_id: workspace_id,
-  ref_doc: "MTask",
-  ref_name: task_id,
-  content: "✅ **Completed**\n\n**Commit:** `" + commit_hash + "`\n\n**Summary:** " + QUICK_DIR + "/" + next_num + "-SUMMARY.md"
-})
-```
-
-### Step 6.5g: Create Summary Page Linked to Task
-
-```
-summary_page = mosic_create_entity_page("MTask", task_id, {
-  workspace_id: workspace_id,
+# Create summary page linked to task
+summary_page = mosic_create_entity_page("MTask", TASK_ID, {
+  workspace_id: WORKSPACE_ID,
   title: "Execution Summary",
   page_type: "Document",
   icon: "lucide:check-circle",
   status: "Published",
-  content: convert_to_editorjs(summary_content),
+  content: {
+    blocks: [
+      {
+        type: "header",
+        data: { text: "Quick Task Complete", level: 1 }
+      },
+      {
+        type: "paragraph",
+        data: { text: "**Task:** " + DESCRIPTION }
+      },
+      {
+        type: "paragraph",
+        data: { text: "**Commit:** `" + commit_hash + "`" }
+      },
+      {
+        type: "header",
+        data: { text: "Summary", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: task.description }
+      }
+    ]
+  },
   relation_type: "Related"
 })
 
+SUMMARY_PAGE_ID = summary_page.name
+
 # Tag the summary page
-mosic_batch_add_tags_to_document("M Page", summary_page.name, [
-  GSD_MANAGED_TAG,
-  SUMMARY_TAG,
-  QUICK_TAG
+mosic_batch_add_tags_to_document("M Page", SUMMARY_PAGE_ID, [
+  config.mosic.tags.gsd_managed,
+  config.mosic.tags.summary,
+  config.mosic.tags.quick
 ])
 
-# Store page ID
-# mosic.pages["quick-" + next_num + "-summary"] = summary_page.name
-```
+# Mark task as completed
+mosic_complete_task(TASK_ID)
 
-### Step 6.5h: Update config.json Mappings
+# Add completion comment
+mosic_create_document("M Comment", {
+  workspace_id: WORKSPACE_ID,
+  reference_doctype: "MTask",
+  reference_name: TASK_ID,
+  content: "**Completed**\n\nCommit: `" + commit_hash + "`\n\n[View Summary](https://mosic.pro/app/page/" + SUMMARY_PAGE_ID + ")"
+})
 
-```bash
-# Update config.json with:
-# mosic.tasks["quick-NNN"] = task_id
-# mosic.pages["quick-NNN-summary"] = summary_page.name
+DISPLAY: "Summary created: https://mosic.pro/app/page/" + SUMMARY_PAGE_ID
 ```
-
-Display:
-```
-✓ Quick task synced to Mosic
-  Task: https://mosic.pro/app/MTask/[task_id]
-  Summary: https://mosic.pro/app/page/[summary_page.name]
-```
-
-**Error handling:**
-```
-IF mosic sync fails:
-  - Log warning: "Mosic sync failed: [error]. Task completed locally."
-  - Add to mosic.pending_sync array for retry
-  - Continue to step 7 (don't block)
-```
-
-**If mosic.enabled = false:** Skip to step 7.
 
 ---
 
-**Step 7: Update STATE.md**
+## Step 8: Update config.json
 
-Update STATE.md with quick task completion record.
-
-**7a. Check if "Quick Tasks Completed" section exists:**
-
-Read STATE.md and check for `### Quick Tasks Completed` section.
-
-**7b. If section doesn't exist, create it:**
-
-Insert after `### Blockers/Concerns` section:
-
-```markdown
-### Quick Tasks Completed
-
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
 ```
+# Store task and page references
+config.mosic.tasks["quick-" + TASK_NUMBER] = TASK_ID
+config.mosic.pages["quick-" + TASK_NUMBER + "-plan"] = PLAN_PAGE_ID
+config.mosic.pages["quick-" + TASK_NUMBER + "-summary"] = SUMMARY_PAGE_ID
+config.mosic.session = {
+  "last_action": "quick",
+  "last_task": TASK_ID,
+  "last_updated": ISO_TIMESTAMP
+}
 
-**7c. Append new row to table:**
-
-```markdown
-| ${next_num} | ${DESCRIPTION} | $(date +%Y-%m-%d) | ${commit_hash} | [${next_num}-${slug}](./quick/${next_num}-${slug}/) |
+write config.json
 ```
-
-**7d. Update "Last activity" line:**
-
-Find and update the line:
-```
-Last activity: $(date +%Y-%m-%d) - Completed quick task ${next_num}: ${DESCRIPTION}
-```
-
-Use Edit tool to make these changes atomically
 
 ---
 
-**Step 8: Final commit and completion**
+## Step 9: Display Completion
 
-Stage and commit quick task artifacts:
-
-```bash
-# Stage quick task artifacts
-git add ${QUICK_DIR}/${next_num}-PLAN.md
-git add ${QUICK_DIR}/${next_num}-SUMMARY.md
-git add .planning/STATE.md
-
-# Commit with quick task format
-git commit -m "$(cat <<'EOF'
-docs(quick-${next_num}): ${DESCRIPTION}
-
-Quick task completed.
-
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
-EOF
-)"
 ```
-
-Get final commit hash:
-```bash
-commit_hash=$(git rev-parse --short HEAD)
-```
-
-Display completion output:
-```
----
+DISPLAY:
+"""
+───────────────────────────────────────────────────────────────
 
 GSD > QUICK TASK COMPLETE
 
-Quick Task ${next_num}: ${DESCRIPTION}
+{TASK_IDENTIFIER}: {DESCRIPTION}
 
-Summary: ${QUICK_DIR}/${next_num}-SUMMARY.md
-Commit: ${commit_hash}
-[IF mosic.enabled:]
-Mosic: https://mosic.pro/app/MTask/[task_id]
-[END IF]
+Commit: {commit_hash}
 
----
+Mosic:
+  Task: https://mosic.pro/app/MTask/{TASK_ID}
+  Summary: https://mosic.pro/app/page/{SUMMARY_PAGE_ID}
+
+───────────────────────────────────────────────────────────────
 
 Ready for next task: /gsd:quick
+"""
 ```
 
 </process>
 
 <success_criteria>
-- [ ] ROADMAP.md validation passes
+- [ ] Workspace ID available (from config or user input)
 - [ ] User provides task description
-- [ ] Slug generated (lowercase, hyphens, max 40 chars)
-- [ ] Next number calculated (001, 002, 003...)
-- [ ] Directory created at `.planning/quick/NNN-slug/`
-- [ ] `${next_num}-PLAN.md` created by planner
-- [ ] `${next_num}-SUMMARY.md` created by executor
-- [ ] STATE.md updated with quick task row
-- [ ] Mosic sync (if enabled):
-  - [ ] Quick Tasks MTask List found or created
-  - [ ] MTask created with status "Completed"
-  - [ ] Tags applied (gsd-managed, quick)
-  - [ ] Commit added as comment
-- [ ] Artifacts committed
+- [ ] Quick Tasks list found or created in Mosic
+- [ ] MTask created with quick tag
+- [ ] Plan page created and updated by planner
+- [ ] Executor completes work with atomic commits
+- [ ] Summary page created linked to task
+- [ ] Task marked completed in Mosic
+- [ ] config.json updated with entity references
+- [ ] Completion displayed with Mosic links
 </success_criteria>

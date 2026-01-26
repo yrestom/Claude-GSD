@@ -1,7 +1,7 @@
 ---
 name: gsd:verify-work
-description: Validate built features through conversational UAT
-argument-hint: "[phase number, e.g., '4']"
+description: Validate built features through conversational UAT with Mosic integration
+argument-hint: "[phase identifier, e.g., 'P01-1' or task list UUID]"
 allowed-tools:
   - Read
   - Bash
@@ -10,14 +10,16 @@ allowed-tools:
   - Edit
   - Write
   - Task
+  - ToolSearch
+  - mcp__mosic_pro__*
 ---
 
 <objective>
-Validate built features through conversational testing with persistent state.
+Validate built features through conversational testing with Mosic as the single source of truth.
 
 Purpose: Confirm what Claude built actually works from user's perspective. One test at a time, plain text responses, no interrogation. When issues are found, automatically diagnose, plan fixes, and prepare for execution.
 
-Output: {phase}-UAT.md tracking all test results. If issues found: diagnosed gaps, verified fix plans ready for /gsd:execute-phase
+Output: UAT Page in Mosic tracking all test results. If issues found: diagnosed gaps, verified fix plans ready for /gsd:execute-phase
 </objective>
 
 <execution_context>
@@ -27,233 +29,421 @@ Output: {phase}-UAT.md tracking all test results. If issues found: diagnosed gap
 
 <context>
 Phase: $ARGUMENTS (optional)
-- If provided: Test specific phase (e.g., "4")
+- If provided: Test specific phase (e.g., "P01-1" identifier or task list UUID)
 - If not provided: Check for active sessions or prompt for phase
 
-@.planning/STATE.md
-@.planning/ROADMAP.md
+**Config file:** config.json (local file with Mosic entity IDs)
 </context>
 
 <process>
-1. Check for active UAT sessions (resume or start new)
-2. Find SUMMARY.md files for the phase
-3. Extract testable deliverables (user-observable outcomes)
-4. Create {phase}-UAT.md with test list
-5. Present tests one at a time:
-   - Show expected behavior
-   - Wait for plain text response
-   - "yes/y/next" = pass, anything else = issue (severity inferred)
-6. Update UAT.md after each response
-7. On completion: commit, present summary
-8. If issues found:
-   - Spawn parallel debug agents to diagnose root causes
-   - Spawn gsd-planner in --gaps mode to create fix plans
-   - Spawn gsd-plan-checker to verify fix plans
-   - Iterate planner ↔ checker until plans pass (max 3)
-   - Present ready status with `/clear` then `/gsd:execute-phase`
-9. Sync verification to Mosic (see sync_verification step)
-</process>
 
-<sync_verification>
-**Sync verification results to Mosic (Deep Integration):**
+## Step 0: Load Configuration and Mosic Tools
 
-Check Mosic status:
 ```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+# Load config.json
+CONFIG=$(cat config.json 2>/dev/null || echo '{}')
+WORKSPACE_ID=$(echo "$CONFIG" | jq -r '.mosic.workspace_id // empty')
+PROJECT_ID=$(echo "$CONFIG" | jq -r '.mosic.project_id // empty')
 ```
 
-**If mosic.enabled = true:**
-
-Load Mosic config:
-```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PHASE}\"]")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-UAT_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.uat")
-FIX_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.fix")
-VERIFICATION_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.verification")
-PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PHASE}\"]")
+Validate Mosic is configured:
+```
+IF WORKSPACE_ID is empty:
+  ERROR: "No Mosic workspace configured. Run /gsd:new-project first."
+  EXIT
 ```
 
-### Step 1: Create UAT Page (type: Document) Linked to Phase
+Load Mosic tools:
+```
+ToolSearch("mosic task page entity create")
+```
+
+## Step 1: Resolve Phase from Mosic
+
+### If $ARGUMENTS provided:
 
 ```
-# Parse UAT results for structured content
-uat_summary = parse_uat_md(UAT.md)
+# Try to resolve phase identifier or UUID
+IF $ARGUMENTS is UUID format:
+  task_list = mosic_get_task_list($ARGUMENTS, { include_tasks: true })
+ELSE:
+  # Search by identifier (e.g., "P01-1")
+  task_list = mosic_get_task_list($ARGUMENTS, {
+    workspace_id: WORKSPACE_ID,
+    include_tasks: true
+  })
 
-# Create UAT page with proper type
-uat_page = mosic_create_entity_page("MTask List", task_list_id, {
-  workspace_id: workspace_id,
-  title: "UAT Results - " + format_date(now),
-  page_type: "Document",  # UAT results are documentation
-  icon: mosic.page_icons.uat,  # "lucide:user-check"
-  status: "Published",
-  content: convert_uat_to_editorjs(UAT.md),
+IF task_list not found:
+  ERROR: "Phase not found: $ARGUMENTS"
+  # List available phases
+  project = mosic_get_project(PROJECT_ID, { include_task_lists: true })
+  DISPLAY: "Available phases:" + project.task_lists
+  EXIT
+```
+
+### If no $ARGUMENTS:
+
+```
+# Get project with task lists
+project = mosic_get_project(PROJECT_ID, { include_task_lists: true })
+
+# Find phases ready for verification (status: In Review or tasks completed)
+verifiable_phases = project.task_lists.filter(tl =>
+  tl.status == "In Review" OR
+  (tl.tasks && tl.tasks.filter(t => t.done).length > 0)
+)
+
+IF verifiable_phases.length == 0:
+  ERROR: "No phases ready for verification. Complete some tasks first."
+  EXIT
+
+IF verifiable_phases.length == 1:
+  task_list = verifiable_phases[0]
+ELSE:
+  DISPLAY: "Multiple phases available for verification:"
+  FOR each phase in verifiable_phases:
+    DISPLAY: "- " + phase.identifier + ": " + phase.title
+  PROMPT: "Which phase to verify?"
+  task_list = selected_phase
+```
+
+Store phase context:
+```
+PHASE_ID = task_list.name
+PHASE_TITLE = task_list.title
+PHASE_IDENTIFIER = task_list.identifier
+```
+
+## Step 2: Extract Testable Deliverables from Mosic
+
+```
+# Get all completed tasks in the phase
+completed_tasks = task_list.tasks.filter(t => t.done == true)
+
+IF completed_tasks.length == 0:
+  ERROR: "No completed tasks in phase. Nothing to verify."
+  EXIT
+
+# Get summary pages linked to tasks
+test_items = []
+
+FOR each task in completed_tasks:
+  # Get pages related to this task
+  pages = mosic_get_entity_pages("MTask", task.name, { include_subtree: false })
+
+  # Find summary pages
+  summary_page = pages.find(p => p.title.includes("Summary"))
+
+  IF summary_page:
+    # Get page content in markdown format
+    page_content = mosic_get_page(summary_page.name, { content_format: "markdown" })
+
+    # Extract testable outcomes from summary
+    testable_outcomes = extract_testable_items(page_content)
+
+    FOR each outcome in testable_outcomes:
+      test_items.push({
+        task_id: task.name,
+        task_title: task.title,
+        test: outcome.description,
+        expected: outcome.expected_behavior,
+        source_page: summary_page.name
+      })
+  ELSE:
+    # Use task description and checklist as test items
+    test_items.push({
+      task_id: task.name,
+      task_title: task.title,
+      test: task.title + " works as expected",
+      expected: task.description,
+      source_page: null
+    })
+
+DISPLAY: "Found " + test_items.length + " testable items from " + completed_tasks.length + " completed tasks"
+```
+
+## Step 3: Create UAT Page in Mosic
+
+```
+# Create UAT page linked to phase
+uat_page = mosic_create_entity_page("MTask List", PHASE_ID, {
+  workspace_id: WORKSPACE_ID,
+  title: "UAT Results - " + PHASE_IDENTIFIER + " - " + format_date(now),
+  page_type: "Document",
+  icon: "lucide:user-check",
+  status: "Draft",
+  content: {
+    blocks: [
+      {
+        type: "header",
+        data: { text: "User Acceptance Testing", level: 1 }
+      },
+      {
+        type: "paragraph",
+        data: { text: "Phase: " + PHASE_TITLE }
+      },
+      {
+        type: "header",
+        data: { text: "Test Cases", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: "Testing " + test_items.length + " deliverables..." }
+      }
+    ]
+  },
   relation_type: "Related"
 })
 
-# Tag with appropriate tags
-mosic_batch_add_tags_to_document("M Page", uat_page.name, [
-  GSD_MANAGED_TAG,
-  UAT_TAG,
-  PHASE_TAG
+UAT_PAGE_ID = uat_page.name
+
+# Tag the UAT page
+mosic_batch_add_tags_to_document("M Page", UAT_PAGE_ID, [
+  config.mosic.tags.gsd_managed,
+  config.mosic.tags.uat,
+  config.mosic.tags.verification
 ])
 
-# Store page ID
-mosic.pages["phase-" + PHASE + "-uat"] = uat_page.name
+DISPLAY: "Created UAT page: https://mosic.pro/app/page/" + UAT_PAGE_ID
 ```
 
-### Step 2: Create Issue Tasks with Blocker Relations
+## Step 4: Run Tests One at a Time
 
 ```
-# Severity to priority mapping
-severity_to_priority = {
-  "blocker": "Critical",
-  "major": "High",
-  "minor": "Normal",
-  "cosmetic": "Low"
-}
+results = []
+current_test = 0
 
-FOR each issue in UAT.md.gaps:
-  # Find the original task that produced this issue
-  original_task_id = find_source_task(issue, SUMMARY.md files)
+FOR each test_item in test_items:
+  current_test++
 
-  # Create MTask for the issue fix
-  issue_task = mosic_create_document("MTask", {
-    workspace_id: workspace_id,
-    task_list: task_list_id,
-    title: "Fix: " + issue.truth.substring(0, 80),
-    description: build_issue_description(issue),
-    icon: "lucide:bug",
-    status: "Blocked",
-    priority: severity_to_priority[issue.severity]
-  })
+  DISPLAY:
+  """
+  ───────────────────────────────────────────────────────────────
+  Test {current_test}/{test_items.length}
 
-  # Create checklist items for fix verification
-  mosic_create_document("MTask CheckList", {
-    workspace_id: workspace_id,
-    task: issue_task.name,
-    title: "Verify: " + issue.truth,
-    done: false
-  })
+  **Task:** {test_item.task_title}
 
-  # Tag as issue fix
-  mosic_batch_add_tags_to_document("MTask", issue_task.name, [
-    GSD_MANAGED_TAG,
-    FIX_TAG,
-    PHASE_TAG
-  ])
+  **Expected Behavior:**
+  {test_item.expected}
 
-  # Create Blocker relation to original task (issue blocks completion)
-  IF original_task_id:
-    mosic_create_document("M Relation", {
-      workspace_id: workspace_id,
-      source_doctype: "MTask",
-      source_name: issue_task.name,
-      target_doctype: "MTask",
-      target_name: original_task_id,
-      relation_type: "Blocker"
+  ───────────────────────────────────────────────────────────────
+
+  Does this work as expected?
+  (yes/y/next = pass, anything else describes the issue)
+  """
+
+  WAIT for user response
+
+  IF response in ["yes", "y", "next", ""]:
+    results.push({
+      test: test_item,
+      status: "passed",
+      notes: null
     })
+    DISPLAY: "✓ Passed"
+  ELSE:
+    # Infer severity from description
+    severity = infer_severity(response)
 
-  # Create Related relation to UAT page
-  mosic_create_document("M Relation", {
-    workspace_id: workspace_id,
-    source_doctype: "M Page",
-    source_name: uat_page.name,
-    target_doctype: "MTask",
-    target_name: issue_task.name,
-    relation_type: "Related"
-  })
+    results.push({
+      test: test_item,
+      status: "failed",
+      issue: response,
+      severity: severity
+    })
+    DISPLAY: "✗ Issue logged (" + severity + ")"
 
-  # Store issue task ID
-  mosic.tasks["phase-" + PHASE + "-fix-" + issue.test] = issue_task.name
+  # Update UAT page every 5 tests or on failure
+  IF current_test % 5 == 0 OR results[-1].status == "failed":
+    update_uat_page(UAT_PAGE_ID, results)
 ```
 
-### Step 3: Update Phase Task List Status and Description
+## Step 5: Finalize UAT Results in Mosic
 
 ```
-# Build status summary
-issue_count = UAT.md.summary.issues
-passed_count = UAT.md.summary.passed
-total_count = UAT.md.summary.total
+passed = results.filter(r => r.status == "passed").length
+failed = results.filter(r => r.status == "failed").length
+total = results.length
 
-IF issue_count == 0:
-  # All tests passed - update description with success indicator
-  verification_status = "✅ UAT Verified (" + passed_count + "/" + total_count + " tests passed)"
+# Build final UAT content
+uat_content = build_uat_content(results, {
+  phase: PHASE_TITLE,
+  passed: passed,
+  failed: failed,
+  total: total
+})
 
-  mosic_update_document("MTask List", task_list_id, {
-    description: original_description + "\n\n---\n" + verification_status,
+# Update UAT page with final results
+mosic_update_content_blocks(UAT_PAGE_ID, {
+  blocks: uat_content.blocks,
+  replace: true
+})
+
+# Update page status
+mosic_update_document("M Page", UAT_PAGE_ID, {
+  status: "Published"
+})
+
+# Update phase task list based on results
+IF failed == 0:
+  mosic_update_document("MTask List", PHASE_ID, {
     status: "Completed"
   })
 
   # Add success comment
   mosic_create_document("M Comment", {
-    workspace_id: workspace_id,
-    ref_doc: "MTask List",
-    ref_name: task_list_id,
-    content: "✅ UAT Complete\n\nAll " + total_count + " tests passed."
+    workspace_id: WORKSPACE_ID,
+    reference_doctype: "MTask List",
+    reference_name: PHASE_ID,
+    content: "✅ **UAT Complete**\n\nAll " + total + " tests passed.\n\nUAT Report: [View](https://mosic.pro/app/page/" + UAT_PAGE_ID + ")"
   })
-
 ELSE:
-  # Issues found - update description with warning
-  verification_status = "⚠️ UAT Issues Found\n\n" +
-    "- Passed: " + passed_count + "/" + total_count + "\n" +
-    "- Issues: " + issue_count + " (see linked fix tasks)"
-
-  mosic_update_document("MTask List", task_list_id, {
-    description: original_description + "\n\n---\n" + verification_status,
+  mosic_update_document("MTask List", PHASE_ID, {
     status: "In Review"
   })
 
   # Add issues comment
   mosic_create_document("M Comment", {
-    workspace_id: workspace_id,
-    ref_doc: "MTask List",
-    ref_name: task_list_id,
-    content: "⚠️ UAT Found Issues\n\n" +
-      issue_count + " issues require fixes before phase completion.\n\n" +
-      "Run `/gsd:execute-phase " + PHASE + " --gaps-only` after fix plans are ready."
+    workspace_id: WORKSPACE_ID,
+    reference_doctype: "MTask List",
+    reference_name: PHASE_ID,
+    content: "⚠️ **UAT Found Issues**\n\n" + failed + "/" + total + " tests failed.\n\nRun `/gsd:execute-phase " + PHASE_IDENTIFIER + " --gaps-only` after fix plans are ready.\n\nUAT Report: [View](https://mosic.pro/app/page/" + UAT_PAGE_ID + ")"
   })
 ```
 
-### Step 4: Link Fix Plans to Issue Tasks (After Planning)
+## Step 6: Create Issue Tasks for Failed Tests
 
 ```
-# After gsd-planner creates fix plans, link them to issue tasks
-FOR each fix_plan in new_plans:
-  IF fix_plan.gap_closure == true:
-    # Find the issue task this plan addresses
-    related_issue = find_issue_for_plan(fix_plan, issues)
+IF failed > 0:
+  # Severity to priority mapping
+  severity_to_priority = {
+    "blocker": "Critical",
+    "major": "High",
+    "minor": "Normal",
+    "cosmetic": "Low"
+  }
 
-    IF related_issue:
-      issue_task_id = mosic.tasks["phase-" + PHASE + "-fix-" + related_issue.test]
+  issue_tasks = []
 
-      # Create Depends relation (fix plan depends on issue being understood)
+  FOR each result in results.filter(r => r.status == "failed"):
+    # Create MTask for the issue fix
+    issue_task = mosic_create_document("MTask", {
+      workspace_id: WORKSPACE_ID,
+      task_list: PHASE_ID,
+      title: "Fix: " + result.test.test.substring(0, 80),
+      description: build_issue_description(result),
+      icon: "lucide:bug",
+      status: "Backlog",
+      priority: severity_to_priority[result.severity]
+    })
+
+    # Tag as issue fix
+    mosic_batch_add_tags_to_document("MTask", issue_task.name, [
+      config.mosic.tags.gsd_managed,
+      config.mosic.tags.fix
+    ])
+
+    # Create Blocker relation to original task
+    IF result.test.task_id:
       mosic_create_document("M Relation", {
-        workspace_id: workspace_id,
+        workspace_id: WORKSPACE_ID,
         source_doctype: "MTask",
-        source_name: fix_plan.mosic_task_id,
+        source_name: issue_task.name,
         target_doctype: "MTask",
-        target_name: issue_task_id,
-        relation_type: "Related"
+        target_name: result.test.task_id,
+        relation_type: "Blocker"
       })
+
+    # Create Related relation to UAT page
+    mosic_create_document("M Relation", {
+      workspace_id: WORKSPACE_ID,
+      source_doctype: "M Page",
+      source_name: UAT_PAGE_ID,
+      target_doctype: "MTask",
+      target_name: issue_task.name,
+      relation_type: "Related"
+    })
+
+    issue_tasks.push(issue_task)
+
+  DISPLAY: "Created " + issue_tasks.length + " fix tasks in Mosic"
 ```
 
-**Error handling:**
+## Step 7: Diagnose Issues and Create Fix Plans (if needed)
+
 ```
-IF mosic sync fails:
-  - Log warning: "Mosic verification sync failed: [error]"
-  - Add failed items to mosic.pending_sync array
-  - Continue (don't block verification flow)
+IF failed > 0:
+  DISPLAY: "Spawning parallel debug agents to diagnose root causes..."
+
+  # Spawn gsd-debugger for each unique issue
+  FOR each issue_task in issue_tasks:
+    Task(
+      prompt="
+        <objective>
+        Diagnose root cause for UAT failure.
+
+        **Issue:** " + issue_task.title + "
+        **Description:** " + issue_task.description + "
+        </objective>
+
+        <context>
+        Phase: " + PHASE_TITLE + "
+        UAT Page: https://mosic.pro/app/page/" + UAT_PAGE_ID + "
+        </context>
+
+        <output>
+        Update the issue task description with root cause analysis.
+        Task ID: " + issue_task.name + "
+        </output>
+      ",
+      subagent_type="gsd-debugger",
+      model="{debugger_model}",
+      description="Diagnose: " + issue_task.title
+    )
+
+  # Spawn gsd-planner in gaps mode
+  DISPLAY: "Creating fix plans..."
+
+  Task(
+    prompt="
+      <planning_context>
+      **Mode:** gaps
+      **Phase:** " + PHASE_ID + "
+      **Issue Tasks:** " + issue_tasks.map(t => t.name).join(", ") + "
+      </planning_context>
+
+      <constraints>
+      - Create fix plans for each issue task
+      - Plans should be atomic and testable
+      - Link plans to issue tasks via M Relation
+      </constraints>
+    ",
+    subagent_type="gsd-planner",
+    model="{planner_model}",
+    description="Fix plans for UAT issues"
+  )
 ```
-</sync_verification>
+
+## Step 8: Update config.json
+
+```
+# Update config with UAT page reference
+config.mosic.pages["phase-" + PHASE_IDENTIFIER + "-uat"] = UAT_PAGE_ID
+config.mosic.session.last_action = "verify-work"
+config.mosic.session.last_updated = ISO_TIMESTAMP
+
+write config.json
+```
+
+</process>
 
 <anti_patterns>
-- Don't use AskUserQuestion for test responses — plain text conversation
-- Don't ask severity — infer from description
-- Don't present full checklist upfront — one test at a time
-- Don't run automated tests — this is manual user validation
-- Don't fix issues during testing — log as gaps, diagnose after all tests complete
+- Don't use AskUserQuestion for test responses - plain text conversation
+- Don't ask severity - infer from description
+- Don't present full checklist upfront - one test at a time
+- Don't run automated tests - this is manual user validation
+- Don't fix issues during testing - log as gaps, diagnose after all tests complete
+- Don't create local markdown files - all documentation lives in Mosic
 </anti_patterns>
 
 <offer_next>
@@ -271,59 +461,25 @@ Output this markdown directly (not as a code block). Route based on UAT results:
 **Route A: All tests pass, more phases remain**
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► PHASE {Z} VERIFIED ✓
+ GSD > PHASE {PHASE_IDENTIFIER} VERIFIED
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-**Phase {Z}: {Name}**
+**Phase:** {PHASE_TITLE}
 
-{N}/{N} tests passed
-UAT complete ✓
+{passed}/{total} tests passed
+UAT complete
 
-───────────────────────────────────────────────────────────────
-
-## ▶ Next Up
-
-**Phase {Z+1}: {Name}** — {Goal from ROADMAP.md}
-
-/gsd:discuss-phase {Z+1} — gather context and clarify approach
-
-<sub>/clear first → fresh context window</sub>
+Mosic: https://mosic.pro/app/page/{UAT_PAGE_ID}
 
 ───────────────────────────────────────────────────────────────
 
-**Also available:**
-- /gsd:plan-phase {Z+1} — skip discussion, plan directly
-- /gsd:execute-phase {Z+1} — skip to execution (if already planned)
+## Next Up
 
-───────────────────────────────────────────────────────────────
+**Next Phase:** {next_phase.title}
 
----
+/gsd:discuss-phase {next_phase.identifier} - gather context and clarify approach
 
-**Route B: All tests pass, milestone complete**
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► PHASE {Z} VERIFIED ✓
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**Phase {Z}: {Name}**
-
-{N}/{N} tests passed
-Final phase verified ✓
-
-───────────────────────────────────────────────────────────────
-
-## ▶ Next Up
-
-**Audit milestone** — verify requirements, cross-phase integration, E2E flows
-
-/gsd:audit-milestone
-
-<sub>/clear first → fresh context window</sub>
-
-───────────────────────────────────────────────────────────────
-
-**Also available:**
-- /gsd:complete-milestone — skip audit, archive directly
+<sub>/clear first - fresh context window</sub>
 
 ───────────────────────────────────────────────────────────────
 
@@ -332,87 +488,46 @@ Final phase verified ✓
 **Route C: Issues found, fix plans ready**
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► PHASE {Z} ISSUES FOUND ⚠
+ GSD > PHASE {PHASE_IDENTIFIER} ISSUES FOUND
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-**Phase {Z}: {Name}**
+**Phase:** {PHASE_TITLE}
 
-{N}/{M} tests passed
-{X} issues diagnosed
-Fix plans verified ✓
+{passed}/{total} tests passed
+{failed} issues diagnosed
+Fix plans verified
 
 ### Issues Found
 
-{List issues with severity from UAT.md}
+{List issues with severity}
+
+Mosic: https://mosic.pro/app/page/{UAT_PAGE_ID}
 
 ───────────────────────────────────────────────────────────────
 
-## ▶ Next Up
+## Next Up
 
-**Execute fix plans** — run diagnosed fixes
+**Execute fix plans** - run diagnosed fixes
 
-/gsd:execute-phase {Z} --gaps-only
+/gsd:execute-phase {PHASE_IDENTIFIER} --gaps-only
 
-<sub>/clear first → fresh context window</sub>
-
-───────────────────────────────────────────────────────────────
-
-**Also available:**
-- cat .planning/phases/{phase_dir}/*-PLAN.md — review fix plans
-- /gsd:plan-phase {Z} --gaps — regenerate fix plans
-
-───────────────────────────────────────────────────────────────
-
----
-
-**Route D: Issues found, planning blocked**
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► PHASE {Z} BLOCKED ✗
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**Phase {Z}: {Name}**
-
-{N}/{M} tests passed
-Fix planning blocked after {X} iterations
-
-### Unresolved Issues
-
-{List blocking issues from planner/checker output}
-
-───────────────────────────────────────────────────────────────
-
-## ▶ Next Up
-
-**Manual intervention required**
-
-Review the issues above and either:
-1. Provide guidance for fix planning
-2. Manually address blockers
-3. Accept current state and continue
-
-───────────────────────────────────────────────────────────────
-
-**Options:**
-- /gsd:plan-phase {Z} --gaps — retry fix planning with guidance
-- /gsd:discuss-phase {Z} — gather more context before replanning
+<sub>/clear first - fresh context window</sub>
 
 ───────────────────────────────────────────────────────────────
 </offer_next>
 
 <success_criteria>
-- [ ] UAT.md created with tests from SUMMARY.md
+- [ ] Phase resolved from Mosic (by identifier or UUID)
+- [ ] Testable items extracted from completed tasks and summary pages
+- [ ] UAT page created in Mosic linked to phase
 - [ ] Tests presented one at a time with expected behavior
 - [ ] Plain text responses (no structured forms)
 - [ ] Severity inferred, never asked
-- [ ] Batched writes: on issue, every 5 passes, or completion
-- [ ] Committed on completion
+- [ ] UAT page updated with results
+- [ ] If issues: fix tasks created with Blocker relations
 - [ ] If issues: parallel debug agents diagnose root causes
-- [ ] If issues: gsd-planner creates fix plans from diagnosed gaps
-- [ ] If issues: gsd-plan-checker verifies fix plans (max 3 iterations)
-- [ ] Mosic sync (if enabled):
-  - [ ] UAT page created linked to phase task list
-  - [ ] Issue tasks created with Blocker relations
-  - [ ] Phase task list status updated
+- [ ] If issues: gsd-planner creates fix plans
+- [ ] Phase status updated in Mosic
+- [ ] config.json updated with UAT page reference
 - [ ] Ready for `/gsd:execute-phase` when complete
 </success_criteria>

@@ -1,6 +1,6 @@
 ---
 name: gsd:execute-phase
-description: Execute all plans in a phase with wave-based parallelization
+description: Execute all plans in a phase with wave-based parallelization (Mosic-native)
 argument-hint: "<phase-number> [--gaps-only]"
 allowed-tools:
   - Read
@@ -12,14 +12,16 @@ allowed-tools:
   - Task
   - TodoWrite
   - AskUserQuestion
+  - ToolSearch
+  - mcp__mosic_pro__*
 ---
 
 <objective>
-Execute all plans in a phase using wave-based parallel execution.
+Execute all plan tasks in a phase using wave-based parallel execution.
 
-Orchestrator stays lean: discover plans, analyze dependencies, group into waves, spawn subagents, collect results. Each subagent loads the full execute-plan context and handles its own plan.
+Orchestrator stays lean: load plans from Mosic, analyze dependencies, group into waves, spawn subagents, collect results, update Mosic state.
 
-Context budget: ~15% orchestrator, 100% fresh per subagent.
+**Architecture:** Plans are MTasks in Mosic. Status updates go to Mosic. Summaries become M Pages linked to tasks. config.json stores session context only.
 </objective>
 
 <execution_context>
@@ -31,402 +33,530 @@ Context budget: ~15% orchestrator, 100% fresh per subagent.
 Phase: $ARGUMENTS
 
 **Flags:**
-- `--gaps-only` — Execute only gap closure plans (plans with `gap_closure: true` in frontmatter). Use after verify-work creates fix plans.
-
-@.planning/ROADMAP.md
-@.planning/STATE.md
+- `--gaps-only` - Execute only gap closure plans (plans with gap_closure tag)
 </context>
 
 <process>
-0. **Resolve Model Profile**
 
-   Read model profile for agent spawning:
-   ```bash
-   MODEL_PROFILE=$(cat .planning/config.json 2>/dev/null | grep -o '"model_profile"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || echo "balanced")
-   ```
+## 0. Load Config and Resolve Model Profile
 
-   Default to "balanced" if not set.
+```bash
+CONFIG=$(cat config.json 2>/dev/null)
+```
 
-   **Model lookup table:**
+If missing: Error - run `/gsd:new-project` first.
 
-   | Agent | quality | balanced | budget |
-   |-------|---------|----------|--------|
-   | gsd-executor | opus | sonnet | sonnet |
-   | gsd-verifier | sonnet | sonnet | haiku |
+```
+workspace_id = config.mosic.workspace_id
+project_id = config.mosic.project_id
+model_profile = config.model_profile or "balanced"
 
-   Store resolved models for use in Task calls below.
+Model lookup:
+| Agent | quality | balanced | budget |
+|-------|---------|----------|--------|
+| gsd-executor | opus | sonnet | sonnet |
+| gsd-verifier | sonnet | sonnet | haiku |
+```
 
-1. **Validate phase exists**
-   - Find phase directory matching argument
-   - Count PLAN.md files
-   - Error if no plans found
+## 1. Validate and Load Phase from Mosic
 
-2. **Discover plans**
-   - List all *-PLAN.md files in phase directory
-   - Check which have *-SUMMARY.md (already complete)
-   - If `--gaps-only`: filter to only plans with `gap_closure: true`
-   - Build list of incomplete plans
+**Normalize phase:**
+```
+IF PHASE is integer: PHASE = printf("%02d", PHASE)
+```
 
-3. **Group by wave**
-   - Read `wave` from each plan's frontmatter
-   - Group plans by wave number
-   - Report wave structure to user
+**Load phase:**
+```
+phase_key = "phase-" + PHASE
+task_list_id = config.mosic.task_lists[phase_key]
 
-4. **Execute waves**
-   For each wave in order:
-   - Spawn `gsd-executor` for each plan in wave (parallel Task calls)
-   - Wait for completion (Task blocks)
-   - Verify SUMMARYs created
-   - Proceed to next wave
+IF not task_list_id:
+  ERROR: Phase {PHASE} not found in config. Run /gsd:add-phase first.
 
-5. **Aggregate results**
-   - Collect summaries from all plans
-   - Report phase completion status
+# Load phase with tasks
+phase = mosic_get_task_list(task_list_id, {
+  include_tasks: true
+})
 
-6. **Commit any orchestrator corrections**
-   Check for uncommitted changes before verification:
-   ```bash
-   git status --porcelain
-   ```
+# Filter to plan tasks only
+plan_tasks = phase.tasks.filter(t => t.title starts with "Plan")
 
-   **If changes exist:** Orchestrator made corrections between executor completions. Commit them:
-   ```bash
-   git add -u && git commit -m "fix({phase}): orchestrator corrections"
-   ```
+IF plan_tasks.length == 0:
+  ERROR: No plans found for Phase {PHASE}. Run /gsd:plan-phase first.
+```
 
-   **If clean:** Continue to verification.
+## 2. Discover Incomplete Plans
 
-7. **Verify phase goal**
-   Check config: `WORKFLOW_VERIFIER=$(cat .planning/config.json 2>/dev/null | grep -o '"verifier"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "true")`
+```
+# Get plan tasks with their status
+incomplete_plans = []
+complete_plans = []
 
-   **If `workflow.verifier` is `false`:** Skip to step 8 (treat as passed).
+FOR each task in plan_tasks:
+  IF task.done OR task.status == "Completed":
+    complete_plans.push(task)
+  ELSE:
+    incomplete_plans.push(task)
 
-   **Otherwise:**
-   - Spawn `gsd-verifier` subagent with phase directory and goal
-   - Verifier checks must_haves against actual codebase (not SUMMARY claims)
-   - Creates VERIFICATION.md with detailed report
-   - Route by status:
-     - `passed` → continue to step 8
-     - `human_needed` → present items, get approval or feedback
-     - `gaps_found` → present gaps, offer `/gsd:plan-phase {X} --gaps`
+# If --gaps-only, filter to gap closure plans
+IF --gaps-only:
+  gap_tag = config.mosic.tags.fix or "fix"
+  incomplete_plans = incomplete_plans.filter(t =>
+    t has tag gap_tag or t has tag "gap_closure"
+  )
 
-8. **Update roadmap and state**
-   - Update ROADMAP.md, STATE.md
+IF incomplete_plans.length == 0:
+  Display: "All plans in Phase {PHASE} are complete!"
+  Skip to step 6 (verify phase goal)
+```
 
-9. **Update requirements**
-   Mark phase requirements as Complete:
-   - Read ROADMAP.md, find this phase's `Requirements:` line (e.g., "AUTH-01, AUTH-02")
-   - Read REQUIREMENTS.md traceability table
-   - For each REQ-ID in this phase: change Status from "Pending" to "Complete"
-   - Write updated REQUIREMENTS.md
-   - Skip if: REQUIREMENTS.md doesn't exist, or phase has no Requirements line
+Display:
+```
+Phase {PHASE}: {phase.title}
+- Total plans: {plan_tasks.length}
+- Complete: {complete_plans.length}
+- Remaining: {incomplete_plans.length}
+```
 
-10. **Commit phase completion**
-    Check `COMMIT_PLANNING_DOCS` from config.json (default: true).
-    If false: Skip git operations for .planning/ files.
-    If true: Bundle all phase metadata updates in one commit:
-    - Stage: `git add .planning/ROADMAP.md .planning/STATE.md`
-    - Stage REQUIREMENTS.md if updated: `git add .planning/REQUIREMENTS.md`
-    - Commit: `docs({phase}): complete {phase-name} phase`
+## 3. Group by Wave
 
-11. **Offer next steps**
-    - Route to next action (see `<offer_next>`)
+```
+# Load plan pages to get wave info
+waves = {}
+
+FOR each plan_task in incomplete_plans:
+  # Get plan page linked to task
+  task_pages = mosic_get_entity_pages("MTask", plan_task.name, {
+    include_subtree: false
+  })
+  plan_page = task_pages.find(p => p.title contains "Plan" or p.page_type == "Spec")
+
+  IF plan_page:
+    plan_content = mosic_get_page(plan_page.name, {
+      content_format: "markdown"
+    })
+    # Extract wave from content (look for "wave: N" in frontmatter or content)
+    wave = extract_wave(plan_content) or 1
+  ELSE:
+    wave = 1
+
+  waves[wave] = waves[wave] or []
+  waves[wave].push({
+    task: plan_task,
+    page: plan_page,
+    content: plan_content
+  })
+
+# Sort waves
+sorted_waves = Object.keys(waves).sort()
+```
+
+Display:
+```
+Wave structure:
+| Wave | Plans | Status |
+|------|-------|--------|
+| 1    | 01, 02 | Pending |
+| 2    | 03     | Waiting |
+```
+
+## 4. Execute Waves
+
+For each wave in order:
+
+Display:
+```
+-------------------------------------------
+ GSD > EXECUTING WAVE {wave_num}
+-------------------------------------------
+```
+
+### 4.1 Update Task Status to In Progress
+
+```
+FOR each plan in wave:
+  mosic_update_document("MTask", plan.task.name, {
+    status: "In Progress"
+  })
+
+  # Add execution started comment
+  mosic_create_document("M Comment", {
+    workspace: workspace_id,
+    reference_doctype: "MTask",
+    reference_name: plan.task.name,
+    content: "Execution started"
+  })
+```
+
+### 4.2 Spawn Executors (Parallel)
+
+```
+# Build executor prompts with inlined content
+executor_prompts = []
+
+FOR each plan in wave:
+  prompt = build_executor_prompt(
+    plan_path: "Mosic task: " + plan.task.name,
+    plan_content: plan.content,
+    phase_info: phase.title,
+    workspace_id: workspace_id,
+    task_id: plan.task.name
+  )
+  executor_prompts.push(prompt)
+
+# Spawn all plans in wave in parallel
+Task(prompt=executor_prompts[0], subagent_type="gsd-executor", model="{executor_model}")
+Task(prompt=executor_prompts[1], subagent_type="gsd-executor", model="{executor_model}")
+...
+```
+
+### 4.3 Handle Executor Results
+
+After each executor completes:
+
+```
+FOR each completed_plan:
+  # Mark task complete
+  mosic_complete_task(plan.task.name)
+
+  # Update task metadata
+  mosic_update_document("MTask", plan.task.name, {
+    status: "Completed"
+  })
+
+  # Update checklist items based on summary
+  task_with_checklists = mosic_get_task(plan.task.name, {
+    include_checklists: true
+  })
+
+  FOR each completed_item in executor_summary.completed_tasks:
+    matching_checklist = task_with_checklists.checklists.find(
+      c => c.title == completed_item
+    )
+    IF matching_checklist:
+      mosic_update_document("MTask CheckList", matching_checklist.name, {
+        done: true
+      })
+
+  # Create summary page linked to task
+  summary_page = mosic_create_entity_page("MTask", plan.task.name, {
+    workspace_id: workspace_id,
+    title: "Execution Summary",
+    page_type: "Document",
+    icon: config.mosic.page_icons.summary,
+    status: "Published",
+    content: convert_to_editorjs(executor_summary),
+    relation_type: "Related"
+  })
+
+  # Tag summary page
+  mosic_batch_add_tags_to_document("M Page", summary_page.name, [
+    config.mosic.tags.gsd_managed,
+    config.mosic.tags.summary,
+    config.mosic.tags.phase_tags[phase_key]
+  ])
+
+  # Store in config
+  config.mosic.pages["phase-" + PHASE + "-summary-" + plan.number] = summary_page.name
+
+  # Add completion comment with commit info
+  mosic_create_document("M Comment", {
+    workspace: workspace_id,
+    reference_doctype: "MTask",
+    reference_name: plan.task.name,
+    content: "Completed\n\n**Commits:**\n" + format_commits(executor_summary.commits)
+  })
+
+  # Create relation between plan page and summary page
+  plan_page_id = config.mosic.pages["phase-" + PHASE + "-plan-" + plan.number]
+  IF plan_page_id:
+    mosic_create_document("M Relation", {
+      workspace: workspace_id,
+      source_doctype: "M Page",
+      source_name: plan_page_id,
+      target_doctype: "M Page",
+      target_name: summary_page.name,
+      relation_type: "Related"
+    })
+```
+
+### 4.4 Proceed to Next Wave
+
+After all plans in wave complete, proceed to next wave.
+
+## 5. Aggregate Results
+
+```
+# Collect summaries from all plans
+all_summaries = []
+
+FOR each plan_task in plan_tasks:
+  summary_page_id = config.mosic.pages["phase-" + PHASE + "-summary-" + plan.number]
+  IF summary_page_id:
+    summary = mosic_get_page(summary_page_id, {
+      content_format: "markdown"
+    })
+    all_summaries.push(summary)
+
+# Report phase execution status
+Display:
+"All {incomplete_plans.length} plans executed. Checking phase goal..."
+```
+
+## 6. Verify Phase Goal
+
+**Check config:**
+```
+workflow_verifier = config.workflow.verifier (default: true)
+IF workflow_verifier == false: Skip to step 7 (treat as passed)
+```
+
+Display:
+```
+-------------------------------------------
+ GSD > VERIFYING PHASE GOAL
+-------------------------------------------
+
+Spawning verifier...
+```
+
+**Build verification context from Mosic:**
+
+```
+# Get phase goal from task list description
+phase_goal = phase.description
+
+# Get all must_haves from plan pages
+must_haves = []
+FOR each plan_page_id in config.mosic.pages matching "phase-{PHASE}-plan-*":
+  plan_content = mosic_get_page(plan_page_id, {
+    content_format: "markdown"
+  })
+  must_haves.push(extract_must_haves(plan_content))
+
+# Get requirements for this phase
+requirements_content = ""
+IF config.mosic.pages.requirements:
+  requirements_content = mosic_get_page(config.mosic.pages.requirements, {
+    content_format: "markdown"
+  }).content
+```
+
+**Spawn gsd-verifier:**
+
+```markdown
+<verification_context>
+
+**Phase:** {PHASE}
+**Phase Goal:** {phase_goal}
+
+**Must-Haves to Verify:**
+{must_haves}
+
+**Execution Summaries:**
+{all_summaries}
+
+**Requirements:**
+{requirements_content}
+
+</verification_context>
+
+<instructions>
+Verify must_haves against actual codebase (not summary claims).
+Return structured verification report.
+</instructions>
+```
+
+```
+Task(
+  prompt=verifier_prompt,
+  subagent_type="gsd-verifier",
+  model="{verifier_model}",
+  description="Verify Phase {PHASE}"
+)
+```
+
+**Handle verifier return:**
+
+```
+# Create verification page
+verification_page = mosic_create_entity_page("MTask List", task_list_id, {
+  workspace_id: workspace_id,
+  title: "Phase " + PHASE + " Verification",
+  page_type: "Document",
+  icon: config.mosic.page_icons.verification,
+  status: "Published",
+  content: convert_to_editorjs(verifier_output),
+  relation_type: "Related"
+})
+
+# Tag verification page
+mosic_batch_add_tags_to_document("M Page", verification_page.name, [
+  config.mosic.tags.gsd_managed,
+  config.mosic.tags.verification,
+  config.mosic.tags.phase_tags[phase_key]
+])
+
+config.mosic.pages["phase-" + PHASE + "-verification"] = verification_page.name
+```
+
+**Route by status:**
+- `passed` -> Continue to step 7
+- `human_needed` -> Present items, get approval or feedback
+- `gaps_found` -> Route C (see offer_next)
+
+## 7. Update Phase Status
+
+```
+# Mark phase task list as complete
+mosic_update_document("MTask List", task_list_id, {
+  status: "Completed",
+  done: true
+})
+
+# Update config session
+config.mosic.session.last_action = "execute-phase"
+config.mosic.session.last_updated = "[ISO timestamp]"
+
+write config.json
+```
+
+## 8. Update Requirements (if applicable)
+
+```
+# Get requirements page
+IF config.mosic.pages.requirements:
+  requirements_page = mosic_get_page(config.mosic.pages.requirements, {
+    content_format: "markdown"
+  })
+
+  # Find phase requirements section and mark as Complete
+  updated_requirements = mark_phase_requirements_complete(
+    requirements_page.content,
+    PHASE
+  )
+
+  mosic_update_document("M Page", config.mosic.pages.requirements, {
+    content: convert_to_editorjs(updated_requirements)
+  })
+```
+
+## 9. Commit Phase Completion (Code Changes)
+
+```bash
+# Check for uncommitted changes in codebase
+git status --porcelain
+```
+
+**If changes exist:** Orchestrator made corrections between executor completions. Commit them:
+```bash
+git add -u && git commit -m "fix({phase}): orchestrator corrections"
+```
+
+## 10. Offer Next Steps
+
 </process>
 
 <offer_next>
-Output this markdown directly (not as a code block). Route based on status:
-
-| Status | Route |
-|--------|-------|
-| `gaps_found` | Route C (gap closure) |
-| `human_needed` | Present checklist, then re-route based on approval |
-| `passed` + more phases | Route A (next phase) |
-| `passed` + last phase | Route B (milestone complete) |
-
----
+Output based on verification status:
 
 **Route A: Phase verified, more phases remain**
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► PHASE {Z} COMPLETE ✓
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+-------------------------------------------
+ GSD > PHASE {PHASE} COMPLETE
+-------------------------------------------
 
-**Phase {Z}: {Name}**
+**Phase {PHASE}: {phase.title}**
 
-{Y} plans executed
-Goal verified ✓
+{N} plans executed
+Goal verified
 
-───────────────────────────────────────────────────────────────
-
-## ▶ Next Up
-
-**Phase {Z+1}: {Name}** — {Goal from ROADMAP.md}
-
-/gsd:discuss-phase {Z+1} — gather context and clarify approach
-
-<sub>/clear first → fresh context window</sub>
-
-───────────────────────────────────────────────────────────────
-
-**Also available:**
-- /gsd:plan-phase {Z+1} — skip discussion, plan directly
-- /gsd:verify-work {Z} — manual acceptance testing before continuing
-
-───────────────────────────────────────────────────────────────
+Mosic: https://mosic.pro/app/MTask%20List/{task_list_id}
 
 ---
+
+## Next Up
+
+**Phase {PHASE+1}: {next_phase.title}**
+
+`/gsd:discuss-phase {PHASE+1}` - gather context and clarify approach
+
+<sub>`/clear` first -> fresh context window</sub>
+
+---
+
+**Also available:**
+- `/gsd:plan-phase {PHASE+1}` - skip discussion, plan directly
+- `/gsd:verify-work {PHASE}` - manual acceptance testing
+
+---
+```
 
 **Route B: Phase verified, milestone complete**
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► MILESTONE COMPLETE 🎉
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+-------------------------------------------
+ GSD > MILESTONE COMPLETE
+-------------------------------------------
 
-**v1.0**
+**{project.title}**
 
 {N} phases completed
-All phase goals verified ✓
+All phase goals verified
 
-───────────────────────────────────────────────────────────────
-
-## ▶ Next Up
-
-**Audit milestone** — verify requirements, cross-phase integration, E2E flows
-
-/gsd:audit-milestone
-
-<sub>/clear first → fresh context window</sub>
-
-───────────────────────────────────────────────────────────────
-
-**Also available:**
-- /gsd:verify-work — manual acceptance testing
-- /gsd:complete-milestone — skip audit, archive directly
-
-───────────────────────────────────────────────────────────────
+Mosic: https://mosic.pro/app/MProject/{project_id}
 
 ---
 
-**Route C: Gaps found — need additional planning**
+## Next Up
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► PHASE {Z} GAPS FOUND ⚠
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+**Audit milestone** - verify requirements, cross-phase integration
 
-**Phase {Z}: {Name}**
+`/gsd:audit-milestone`
+
+<sub>`/clear` first -> fresh context window</sub>
+
+---
+```
+
+**Route C: Gaps found**
+
+```
+-------------------------------------------
+ GSD > PHASE {PHASE} GAPS FOUND
+-------------------------------------------
+
+**Phase {PHASE}: {phase.title}**
 
 Score: {N}/{M} must-haves verified
-Report: .planning/phases/{phase_dir}/{phase}-VERIFICATION.md
+Report: https://mosic.pro/app/page/{verification_page.name}
 
 ### What's Missing
 
-{Extract gap summaries from VERIFICATION.md}
-
-───────────────────────────────────────────────────────────────
-
-## ▶ Next Up
-
-**Plan gap closure** — create additional plans to complete the phase
-
-/gsd:plan-phase {Z} --gaps
-
-<sub>/clear first → fresh context window</sub>
-
-───────────────────────────────────────────────────────────────
-
-**Also available:**
-- cat .planning/phases/{phase_dir}/{phase}-VERIFICATION.md — see full report
-- /gsd:verify-work {Z} — manual testing before planning
-
-───────────────────────────────────────────────────────────────
+{gap_summaries}
 
 ---
 
-After user runs /gsd:plan-phase {Z} --gaps:
-1. Planner reads VERIFICATION.md gaps
-2. Creates plans 04, 05, etc. to close gaps
-3. User runs /gsd:execute-phase {Z} again
-4. Execute-phase runs incomplete plans (04, 05...)
-5. Verifier runs again → loop until passed
+## Next Up
+
+**Plan gap closure** - create additional plans
+
+`/gsd:plan-phase {PHASE} --gaps`
+
+<sub>`/clear` first -> fresh context window</sub>
+
+---
+```
 </offer_next>
 
-<wave_execution>
-**Parallel spawning:**
-
-Before spawning, read file contents. The `@` syntax does not work across Task() boundaries.
-
-```bash
-# Read each plan and STATE.md
-PLAN_01_CONTENT=$(cat "{plan_01_path}")
-PLAN_02_CONTENT=$(cat "{plan_02_path}")
-PLAN_03_CONTENT=$(cat "{plan_03_path}")
-STATE_CONTENT=$(cat .planning/STATE.md)
-
-# Check Mosic status and load config
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-```
-
-**Mosic task status update (before spawning):**
-
-If mosic.enabled = true:
-```
-FOR each plan being spawned:
-  # Get mosic_task_id from plan frontmatter or config.json
-  TASK_ID=$(grep "mosic_task_id:" ${plan_path} | cut -d: -f2 | tr -d ' ')
-
-  IF TASK_ID exists:
-    # Update task status to In Progress
-    mosic_update_document("MTask", task_id, {
-      status: "In Progress",
-      executing_start_date: "[ISO timestamp now]"
-    })
-
-    # Add execution started comment
-    mosic_create_document("M Comment", {
-      workspace_id: workspace_id,
-      ref_doc: "MTask",
-      ref_name: task_id,
-      content: "🚀 Execution started at " + timestamp
-    })
-```
-
-Spawn all plans in a wave with a single message containing multiple Task calls, with inlined content:
-
-```
-Task(prompt="Execute plan at {plan_01_path}\n\nPlan:\n{plan_01_content}\n\nProject state:\n{state_content}", subagent_type="gsd-executor", model="{executor_model}")
-Task(prompt="Execute plan at {plan_02_path}\n\nPlan:\n{plan_02_content}\n\nProject state:\n{state_content}", subagent_type="gsd-executor", model="{executor_model}")
-Task(prompt="Execute plan at {plan_03_path}\n\nPlan:\n{plan_03_content}\n\nProject state:\n{state_content}", subagent_type="gsd-executor", model="{executor_model}")
-```
-
-All three run in parallel. Task tool blocks until all complete.
-
-**Mosic sync after each plan completes (Deep Integration):**
-
-If mosic.enabled = true:
-```
-FOR each completed plan:
-  TASK_ID=$(grep "mosic_task_id:" ${plan_path} | cut -d: -f2 | tr -d ' ')
-  SUMMARY_PATH="${PHASE_DIR}/${PLAN_NUM}-SUMMARY.md"
-
-  IF TASK_ID exists:
-    # 1. Mark task complete with proper metadata
-    mosic_complete_task(task_id)
-
-    mosic_update_document("MTask", task_id, {
-      executing_end_date: "[ISO timestamp now]"
-    })
-
-    # 2. Update checklist items from SUMMARY.md
-    IF SUMMARY.md exists:
-      completed_tasks = extract_completed_tasks(SUMMARY.md)
-
-      # First, fetch all checklist items for this task
-      task_with_checklists = mosic_get_document("MTask", task_id, {
-        include_checklists: true
-      })
-      checklist_items = task_with_checklists.checklists or []
-
-      # Alternatively, use stored IDs from config.json if available
-      stored_checklist_ids = config.mosic.checklists["phase-" + PHASE + "-plan-" + PLAN_NUM] or []
-
-      FOR each task_item in completed_tasks:
-        # Find matching checklist item by title
-        matching_checklist = checklist_items.find(c => c.title == task_item.name)
-
-        IF matching_checklist:
-          mosic_update_document("MTask CheckList", matching_checklist.name, {
-            done: true
-          })
-        ELSE IF stored_checklist_ids has matching entry:
-          mosic_update_document("MTask CheckList", stored_checklist_ids[task_item.name], {
-            done: true
-          })
-
-    # 3. Add commit hash as structured comment
-    commit_hash = extract_from_SUMMARY.md("commit_history")
-    mosic_create_document("M Comment", {
-      workspace_id: workspace_id,
-      ref_doc: "MTask",
-      ref_name: task_id,
-      content: "✅ Completed\n\n**Commits:**\n" + format_commits(commit_hash)
-    })
-
-    # 4. Create Summary page (type: Document) linked to task
-    IF SUMMARY.md exists:
-      summary_page = mosic_create_entity_page("MTask", task_id, {
-        workspace_id: workspace_id,
-        title: "Execution Summary",
-        page_type: "Document",  # Summaries are documentation
-        icon: mosic.page_icons.summary,  # "lucide:check-circle"
-        status: "Published",
-        content: convert_to_editorjs(SUMMARY.md content),
-        relation_type: "Related"
-      })
-
-      # Tag summary page with appropriate tags
-      SUMMARY_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.summary")
-      PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PHASE}\"]")
-
-      mosic_batch_add_tags_to_document("M Page", summary_page.name, [
-        GSD_MANAGED_TAG,
-        SUMMARY_TAG,
-        PHASE_TAG
-      ])
-
-      # Store page ID
-      mosic.pages["phase-" + PHASE + "-summary-" + PLAN_NUM] = summary_page.name
-
-    # 5. Create Related relation between Plan page and Summary page
-    plan_page_id = mosic.pages["phase-" + PHASE + "-plan-" + PLAN_NUM]
-    IF plan_page_id AND summary_page:
-      mosic_create_document("M Relation", {
-        workspace_id: workspace_id,
-        source_doctype: "M Page",
-        source_name: plan_page_id,
-        target_doctype: "M Page",
-        target_name: summary_page.name,
-        relation_type: "Related"
-      })
-
-**Mosic Error Handling:**
-
-```
-TRY:
-  [all Mosic operations above]
-CATCH mosic_error:
-  # Log warning but don't block execution
-  Display: "⚠ Mosic sync warning: " + mosic_error.message
-
-  # Add failed operation to pending_sync queue
-  pending_item = {
-    type: "plan_completion",
-    phase: PHASE,
-    plan: PLAN_NUM,
-    task_id: task_id,
-    error: mosic_error.message,
-    timestamp: "[ISO timestamp now]"
-  }
-
-  # Update config.json with pending sync
-  config.mosic.pending_sync = config.mosic.pending_sync or []
-  config.mosic.pending_sync.push(pending_item)
-  write_config(config)
-
-  # Continue execution - Mosic failures should never block local work
-  Display: "  Execution continues. Sync will retry on next /gsd:progress or manual /gsd:sync"
-```
-
-**No polling.** No background agents. No TaskOutput loops.
-</wave_execution>
-
 <checkpoint_handling>
-Plans with `autonomous: false` have checkpoints. The execute-phase.md workflow handles the full checkpoint flow:
+Plans with `autonomous: false` have checkpoints. The execute-phase workflow handles:
 - Subagent pauses at checkpoint, returns structured state
 - Orchestrator presents to user, collects response
-- Spawns fresh continuation agent (not resume)
+- Spawns fresh continuation agent
 
-See `@~/.claude/get-shit-done/workflows/execute-phase.md` step `checkpoint_handling` for complete details.
+See `@~/.claude/get-shit-done/workflows/execute-phase.md` for complete details.
 </checkpoint_handling>
 
 <deviation_rules>
@@ -442,28 +572,13 @@ Only rule 4 requires user intervention.
 
 <commit_rules>
 **Per-Task Commits:**
-
 After each task completes:
 1. Stage only files modified by that task
 2. Commit with format: `{type}({phase}-{plan}): {task-name}`
 3. Types: feat, fix, test, refactor, perf, chore
-4. Record commit hash for SUMMARY.md
+4. Record commit hash for summary
 
-**Plan Metadata Commit:**
-
-After all tasks in a plan complete:
-1. Stage plan artifacts only: PLAN.md, SUMMARY.md
-2. Commit with format: `docs({phase}-{plan}): complete [plan-name] plan`
-3. NO code files (already committed per-task)
-
-**Phase Completion Commit:**
-
-After all plans in phase complete (step 7):
-1. Stage: ROADMAP.md, STATE.md, REQUIREMENTS.md (if updated), VERIFICATION.md
-2. Commit with format: `docs({phase}): complete {phase-name} phase`
-3. Bundles all phase-level state updates in one commit
-
-**NEVER use:**
+**Never use:**
 - `git add .`
 - `git add -A`
 - `git add src/` or any broad directory
@@ -471,18 +586,37 @@ After all plans in phase complete (step 7):
 **Always stage files individually.**
 </commit_rules>
 
+<error_handling>
+```
+IF mosic operation fails:
+  Display: "Mosic sync warning: {error}"
+
+  # Add to pending sync queue
+  config.mosic.pending_sync = config.mosic.pending_sync or []
+  config.mosic.pending_sync.push({
+    type: "plan_completion",
+    phase: PHASE,
+    plan: plan_number,
+    task_id: task_id,
+    error: error_message,
+    timestamp: now
+  })
+
+  write config.json
+
+  Display: "Execution continues. Sync will retry on next /gsd:progress"
+```
+</error_handling>
+
 <success_criteria>
 - [ ] All incomplete plans in phase executed
-- [ ] Each plan has SUMMARY.md
-- [ ] Phase goal verified (must_haves checked against codebase)
-- [ ] VERIFICATION.md created in phase directory
-- [ ] STATE.md reflects phase completion
-- [ ] ROADMAP.md updated
-- [ ] REQUIREMENTS.md updated (phase requirements marked Complete)
-- [ ] Mosic sync (if enabled):
-  - [ ] Task statuses updated to "In Progress" on start
-  - [ ] Tasks marked complete via mosic_complete_task
-  - [ ] Commit hashes added as comments
-  - [ ] Summary pages created and tagged
-- [ ] User informed of next steps
+- [ ] Each plan task marked complete in Mosic
+- [ ] Checklist items updated based on summaries
+- [ ] Summary pages created and linked to plan tasks
+- [ ] Phase goal verified (must_haves checked)
+- [ ] Verification page created in Mosic
+- [ ] Phase task list marked complete
+- [ ] Requirements page updated (phase requirements marked Complete)
+- [ ] config.json updated with all page IDs
+- [ ] User informed of next steps with Mosic URLs
 </success_criteria>

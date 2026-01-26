@@ -1,24 +1,30 @@
 ---
 name: gsd:add-phase
-description: Add phase to end of current milestone in roadmap
+description: Add phase to end of current milestone in roadmap (Mosic-native)
 argument-hint: <description>
 allowed-tools:
   - Read
   - Write
-  - Bash
+  - ToolSearch
+  - mcp__mosic_pro__*
 ---
 
 <objective>
-Add a new integer phase to the end of the current milestone in the roadmap.
+Add a new phase to the project by creating an MTask List in Mosic with linked overview page.
 
-This command appends sequential phases to the current milestone's phase list, automatically calculating the next phase number based on existing phases.
+This command:
+1. Creates MTask List in Mosic for the new phase
+2. Creates phase overview page linked to the task list
+3. Updates the project roadmap page in Mosic
+4. Updates config.json with new phase IDs
 
 Purpose: Add planned work discovered during execution that belongs at the end of current milestone.
+
+**Architecture:** Mosic is the source of truth. Local config.json stores session context and entity IDs only.
 </objective>
 
 <execution_context>
-@.planning/ROADMAP.md
-@.planning/STATE.md
+Load from Mosic via MCP tools - no local file dependencies.
 </execution_context>
 
 <process>
@@ -26,8 +32,7 @@ Purpose: Add planned work discovered during execution that belongs at the end of
 <step name="parse_arguments">
 Parse the command arguments:
 - All arguments become the phase description
-- Example: `/gsd:add-phase Add authentication` → description = "Add authentication"
-- Example: `/gsd:add-phase Fix critical performance issues` → description = "Fix critical performance issues"
+- Example: `/gsd:add-phase Add authentication` -> description = "Add authentication"
 
 If no arguments provided:
 
@@ -40,214 +45,148 @@ Example: /gsd:add-phase Add authentication system
 Exit.
 </step>
 
-<step name="load_roadmap">
-Load the roadmap file:
+<step name="load_config">
+Load config.json for Mosic entity IDs:
 
 ```bash
-if [ -f .planning/ROADMAP.md ]; then
-  ROADMAP=".planning/ROADMAP.md"
-else
-  echo "ERROR: No roadmap found (.planning/ROADMAP.md)"
-  exit 1
-fi
+CONFIG=$(cat config.json 2>/dev/null)
 ```
 
-Read roadmap content for parsing.
+If config.json missing:
+```
+ERROR: No project initialized. Run /gsd:new-project first.
+```
+
+Extract Mosic configuration:
+```
+workspace_id = config.mosic.workspace_id
+project_id = config.mosic.project_id
+
+IF not project_id:
+  ERROR: No project found in config.json. Run /gsd:new-project first.
+```
 </step>
 
-<step name="find_current_milestone">
-Parse the roadmap to find the current milestone section:
-
-1. Locate the "## Current Milestone:" heading
-2. Extract milestone name and version
-3. Identify all phases under this milestone (before next "---" separator or next milestone heading)
-4. Parse existing phase numbers (including decimals if present)
-
-Example structure:
+<step name="load_project_from_mosic">
+Load project context from Mosic:
 
 ```
-## Current Milestone: v1.0 Foundation
+project = mosic_get_project(project_id, {
+  include_task_lists: true
+})
 
-### Phase 4: Focused Command System
-### Phase 5: Path Routing & Validation
-### Phase 6: Documentation & Distribution
+# Get existing phases (task lists)
+existing_phases = project.task_lists or []
+
+# Find highest integer phase number
+highest_phase = 0
+FOR each task_list in existing_phases:
+  IF task_list.title matches "Phase N:":
+    phase_num = extract_phase_number(task_list.title)
+    IF phase_num > highest_phase:
+      highest_phase = phase_num
+
+next_phase = highest_phase + 1
+PHASE = printf("%02d", next_phase)
 ```
-
 </step>
 
-<step name="calculate_next_phase">
-Find the highest integer phase number in the current milestone:
-
-1. Extract all phase numbers from phase headings (### Phase N:)
-2. Filter to integer phases only (ignore decimals like 4.1, 4.2)
-3. Find the maximum integer value
-4. Add 1 to get the next phase number
-
-Example: If phases are 4, 5, 5.1, 6 → next is 7
-
-Format as two-digit: `printf "%02d" $next_phase`
-</step>
-
-<step name="generate_slug">
-Convert the phase description to a kebab-case slug:
-
-```bash
-# Example transformation:
-# "Add authentication" → "add-authentication"
-# "Fix critical performance issues" → "fix-critical-performance-issues"
-
-slug=$(echo "$description" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
-```
-
-Phase directory name: `{two-digit-phase}-{slug}`
-Example: `07-add-authentication`
-</step>
-
-<step name="create_phase_directory">
-Create the phase directory structure:
-
-```bash
-phase_dir=".planning/phases/${phase_num}-${slug}"
-mkdir -p "$phase_dir"
-```
-
-Confirm: "Created directory: $phase_dir"
-</step>
-
-<step name="update_roadmap">
-Add the new phase entry to the roadmap:
-
-1. Find the insertion point (after last phase in current milestone, before "---" separator)
-2. Insert new phase heading:
-
-   ```
-   ### Phase {N}: {Description}
-
-   **Goal:** [To be planned]
-   **Depends on:** Phase {N-1}
-   **Plans:** 0 plans
-
-   Plans:
-   - [ ] TBD (run /gsd:plan-phase {N} to break down)
-
-   **Details:**
-   [To be added during planning]
-   ```
-
-3. Write updated roadmap back to file
-
-Preserve all other content exactly (formatting, spacing, other phases).
-</step>
-
-<step name="update_project_state">
-Update STATE.md to reflect the new phase:
-
-1. Read `.planning/STATE.md`
-2. Under "## Current Position" → "**Next Phase:**" add reference to new phase
-3. Under "## Accumulated Context" → "### Roadmap Evolution" add entry:
-   ```
-   - Phase {N} added: {description}
-   ```
-
-If "Roadmap Evolution" section doesn't exist, create it.
-</step>
-
-<step name="sync_to_mosic">
-**Sync new phase to Mosic (Deep Integration):**
-
-Check Mosic status:
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true:**
-
-Display:
-```
-◆ Syncing new phase to Mosic...
-```
-
-### Step 1: Load Mosic Config
-
-```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-PREV_PHASE_NUM=$((phase_num - 1))
-PREV_PHASE_TASK_LIST=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-$(printf '%02d' $PREV_PHASE_NUM)\"]")
-```
-
-### Step 2: Create or Find Phase Tag
+<step name="find_or_create_phase_tag">
+Find or create phase tag:
 
 ```
 # Search for existing phase tag
-existing_tag = mosic_search_tags({
+existing_tags = mosic_search_tags({
   workspace_id: workspace_id,
-  query: "phase-" + phase_num
+  query: "phase-" + PHASE
 })
 
-IF existing_tag.length == 0:
+IF existing_tags.length == 0:
   # Create new phase tag
   phase_tag = mosic_create_document("M Tag", {
-    workspace_id: workspace_id,
-    name: "phase-" + phase_num,
+    workspace: workspace_id,
+    tag_name: "phase-" + PHASE,
     color: "blue"
   })
   PHASE_TAG_ID = phase_tag.name
 ELSE:
-  PHASE_TAG_ID = existing_tag[0].name
-
-# Store in config
-mosic.tags.phase_tags["phase-" + phase_num] = PHASE_TAG_ID
+  PHASE_TAG_ID = existing_tags[0].name
 ```
+</step>
 
-### Step 3: Create MTask List with Rich Metadata
+<step name="get_previous_phase">
+Get previous phase for dependency:
+
+```
+PREV_PHASE_NUM = next_phase - 1
+IF PREV_PHASE_NUM > 0:
+  PREV_PHASE_KEY = "phase-" + printf("%02d", PREV_PHASE_NUM)
+  PREV_PHASE_ID = config.mosic.task_lists[PREV_PHASE_KEY]
+ELSE:
+  PREV_PHASE_ID = null
+```
+</step>
+
+<step name="create_task_list">
+Create MTask List in Mosic:
 
 ```
 task_list = mosic_create_document("MTask List", {
-  workspace_id: workspace_id,
+  workspace: workspace_id,
   project: project_id,
-  title: "Phase " + phase_num + ": " + phase_description,
-  description: "**Goal:** [To be planned]\n\n**Status:** Not planned yet\n\nRun `/gsd:plan-phase " + phase_num + "` to create execution plans.",
+  title: "Phase " + PHASE + ": " + phase_description,
+  description: "**Goal:** [To be planned]\n\n**Status:** Not planned yet\n\nRun `/gsd:plan-phase " + PHASE + "` to create execution plans.",
   icon: "lucide:layers",
   color: "slate",
   status: "Backlog",
-  prefix: "P" + phase_num
+  prefix: "P" + PHASE
 })
 
-task_list_id = task_list.name
+TASK_LIST_ID = task_list.name
 ```
 
-### Step 4: Tag the Task List
+Display:
+```
+Created phase task list: Phase {PHASE}: {description}
+```
+</step>
+
+<step name="tag_task_list">
+Tag the task list:
 
 ```
-mosic_batch_add_tags_to_document("MTask List", task_list_id, [
+GSD_MANAGED_TAG = config.mosic.tags.gsd_managed
+
+mosic_batch_add_tags_to_document("MTask List", TASK_LIST_ID, [
   GSD_MANAGED_TAG,
   PHASE_TAG_ID
 ])
 ```
+</step>
 
-### Step 5: Create Depends Relation to Previous Phase (if exists)
+<step name="create_dependency">
+Create Depends relation to previous phase (if exists):
 
 ```
-IF PREV_PHASE_TASK_LIST is not null:
+IF PREV_PHASE_ID:
   mosic_create_document("M Relation", {
-    workspace_id: workspace_id,
+    workspace: workspace_id,
     source_doctype: "MTask List",
-    source_name: task_list_id,
+    source_name: TASK_LIST_ID,
     target_doctype: "MTask List",
-    target_name: PREV_PHASE_TASK_LIST,
+    target_name: PREV_PHASE_ID,
     relation_type: "Depends"
   })
 ```
+</step>
 
-### Step 6: Create Phase Overview Page
+<step name="create_overview_page">
+Create phase overview page linked to task list:
 
 ```
-# Create placeholder overview page
-overview_page = mosic_create_entity_page("MTask List", task_list_id, {
+overview_page = mosic_create_entity_page("MTask List", TASK_LIST_ID, {
   workspace_id: workspace_id,
-  title: "Phase " + phase_num + " Overview",
+  title: "Phase " + PHASE + " Overview",
   page_type: "Document",
   icon: "lucide:file-text",
   status: "Draft",
@@ -255,11 +194,11 @@ overview_page = mosic_create_entity_page("MTask List", task_list_id, {
     blocks: [
       {
         type: "header",
-        data: { text: "Phase " + phase_num + ": " + phase_description, level: 1 }
+        data: { text: "Phase " + PHASE + ": " + phase_description, level: 1 }
       },
       {
         type: "paragraph",
-        data: { text: "This phase has not been planned yet. Run `/gsd:plan-phase " + phase_num + "` to create execution plans." }
+        data: { text: "This phase has not been planned yet." }
       },
       {
         type: "header",
@@ -268,6 +207,21 @@ overview_page = mosic_create_entity_page("MTask List", task_list_id, {
       {
         type: "paragraph",
         data: { text: "[To be defined during planning]" }
+      },
+      {
+        type: "header",
+        data: { text: "Next Steps", level: 2 }
+      },
+      {
+        type: "list",
+        data: {
+          style: "ordered",
+          items: [
+            "Run `/gsd:discuss-phase " + PHASE + "` to gather context",
+            "Run `/gsd:plan-phase " + PHASE + "` to create execution plans",
+            "Run `/gsd:execute-phase " + PHASE + "` to implement"
+          ]
+        }
       }
     ]
   },
@@ -280,64 +234,103 @@ mosic_batch_add_tags_to_document("M Page", overview_page.name, [
   PHASE_TAG_ID
 ])
 ```
+</step>
 
-### Step 7: Update config.json with Mappings
+<step name="update_roadmap_page">
+Update roadmap page in Mosic to include new phase:
 
-```bash
-# Update config.json with:
-# mosic.task_lists["phase-NN"] = task_list_id
-# mosic.pages["phase-NN-overview"] = overview_page.name
-# mosic.tags.phase_tags["phase-NN"] = PHASE_TAG_ID
+```
+# Get roadmap page ID from config
+roadmap_page_id = config.mosic.pages.roadmap
+
+IF roadmap_page_id:
+  # Get current roadmap content
+  roadmap_page = mosic_get_page(roadmap_page_id, {
+    content_format: "full"
+  })
+
+  # Add new phase entry to content blocks
+  new_phase_blocks = [
+    {
+      type: "header",
+      data: { text: "Phase " + PHASE + ": " + phase_description, level: 3 }
+    },
+    {
+      type: "paragraph",
+      data: { text: "**Goal:** [To be planned]" }
+    },
+    {
+      type: "paragraph",
+      data: { text: "**Depends on:** Phase " + (next_phase - 1) }
+    },
+    {
+      type: "paragraph",
+      data: { text: "**Plans:** 0 plans (run /gsd:plan-phase " + PHASE + " to break down)" }
+    }
+  ]
+
+  # Append to existing content
+  mosic_update_content_blocks(roadmap_page_id, {
+    operation: "append",
+    blocks: new_phase_blocks
+  })
+```
+</step>
+
+<step name="update_config">
+Update config.json with new mappings:
+
+```json
+{
+  "mosic": {
+    "task_lists": {
+      "phase-{PHASE}": "{TASK_LIST_ID}"
+    },
+    "pages": {
+      "phase-{PHASE}-overview": "{overview_page.name}"
+    },
+    "tags": {
+      "phase_tags": {
+        "phase-{PHASE}": "{PHASE_TAG_ID}"
+      }
+    },
+    "session": {
+      "last_action": "add-phase",
+      "last_updated": "[ISO timestamp]"
+    }
+  }
+}
 ```
 
-Display:
-```
-✓ Phase synced to Mosic
-  Task List: https://mosic.pro/app/MTask%20List/[task_list_id]
-  Overview: https://mosic.pro/app/page/[overview_page.name]
-```
-
-**Error handling:**
-```
-IF mosic sync fails:
-  - Log warning: "Mosic sync failed: [error]. Phase created locally."
-  - Add to mosic.pending_sync array for retry
-  - Continue to completion step (don't block)
-```
-
-**If mosic.enabled = false:** Skip to completion step.
+Write updated config.json.
 </step>
 
 <step name="completion">
 Present completion summary:
 
 ```
-Phase {N} added to current milestone:
-- Description: {description}
-- Directory: .planning/phases/{phase-num}-{slug}/
-- Status: Not planned yet
-[IF mosic.enabled:]
-- Mosic: https://mosic.pro/app/MTask%20List/[task_list_id]
-[END IF]
+Phase {PHASE} added to project:
 
-Roadmap updated: {roadmap-path}
-Project state updated: .planning/STATE.md
+- Description: {description}
+- Task List: https://mosic.pro/app/MTask%20List/{TASK_LIST_ID}
+- Overview: https://mosic.pro/app/page/{overview_page.name}
+- Status: Not planned yet
 
 ---
 
-## ▶ Next Up
+## Next Up
 
-**Phase {N}: {description}**
+**Phase {PHASE}: {description}**
 
-`/gsd:plan-phase {N}`
+`/gsd:discuss-phase {PHASE}` - gather context and clarify approach
 
-<sub>`/clear` first → fresh context window</sub>
+<sub>`/clear` first -> fresh context window</sub>
 
 ---
 
 **Also available:**
-- `/gsd:add-phase <description>` — add another phase
-- Review roadmap
+- `/gsd:plan-phase {PHASE}` - skip discussion, plan directly
+- `/gsd:add-phase <description>` - add another phase
 
 ---
 ```
@@ -345,26 +338,42 @@ Project state updated: .planning/STATE.md
 
 </process>
 
-<anti_patterns>
+<error_handling>
+**Mosic API errors:**
+```
+IF mosic operation fails:
+  - Display: "ERROR: Mosic operation failed: [error_message]"
+  - IF task_list already created:
+    - Store partial state in config.json with pending_sync flag
+    - Display: "Partial state saved. Retry with /gsd:sync-mosic"
+  - ELSE:
+    - Clean exit with error message
+```
 
-- Don't modify phases outside current milestone
+**Config validation:**
+```
+IF config.mosic.enabled != true:
+  ERROR: Mosic integration is not enabled. Check config.json.
+```
+</error_handling>
+
+<anti_patterns>
+- Don't create local phase directories (use Mosic only)
+- Don't modify local ROADMAP.md or STATE.md files (use Mosic pages)
 - Don't renumber existing phases
 - Don't use decimal numbering (that's /gsd:insert-phase)
 - Don't create plans yet (that's /gsd:plan-phase)
-- Don't commit changes (user decides when to commit)
-  </anti_patterns>
+- Don't commit changes (no local files to commit)
+</anti_patterns>
 
 <success_criteria>
 Phase addition is complete when:
 
-- [ ] Phase directory created: `.planning/phases/{NN}-{slug}/`
-- [ ] Roadmap updated with new phase entry
-- [ ] STATE.md updated with roadmap evolution note
-- [ ] New phase appears at end of current milestone
-- [ ] Next phase number calculated correctly (ignoring decimals)
-- [ ] Mosic sync (if enabled):
-  - [ ] MTask List created for new phase
-  - [ ] Tags applied (gsd-managed, phase-NN)
-  - [ ] config.json updated with task_list_id
-- [ ] User informed of next steps
-      </success_criteria>
+- [ ] MTask List created in Mosic for new phase
+- [ ] Phase overview page created and linked to task list
+- [ ] Tags applied (gsd-managed, phase-NN)
+- [ ] Depends relation created to previous phase (if exists)
+- [ ] Roadmap page updated with new phase entry
+- [ ] config.json updated with task_list_id, page_id, tag_id
+- [ ] User informed of next steps with Mosic URLs
+</success_criteria>

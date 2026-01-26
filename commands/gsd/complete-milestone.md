@@ -1,266 +1,515 @@
 ---
 type: prompt
 name: gsd:complete-milestone
-description: Archive completed milestone and prepare for next version
+description: Archive completed milestone in Mosic and prepare for next version
 argument-hint: <version>
 allowed-tools:
   - Read
   - Write
   - Bash
+  - ToolSearch
   - mcp__mosic_pro__*
 ---
 
 <objective>
-Mark milestone {{version}} complete, archive to milestones/, and update ROADMAP.md and REQUIREMENTS.md.
+Mark milestone {{version}} complete in Mosic, archive project state, and prepare for next milestone.
 
-Purpose: Create historical record of shipped version, archive milestone artifacts (roadmap + requirements), and prepare for next milestone.
-Output: Milestone archived (roadmap + requirements), PROJECT.md evolved, git tagged.
+Purpose: Create historical record of shipped version, archive project documentation, and prepare Mosic project for next milestone.
+
+Output: Project marked complete in Mosic, milestone archive page created, git tagged.
 </objective>
 
 <execution_context>
-**Load these files NOW (before proceeding):**
-
-- @~/.claude/get-shit-done/workflows/complete-milestone.md (main workflow)
-- @~/.claude/get-shit-done/templates/milestone-archive.md (archive template)
-  </execution_context>
+@~/.claude/get-shit-done/workflows/complete-milestone.md
+@~/.claude/get-shit-done/templates/milestone-archive.md
+</execution_context>
 
 <context>
-**Project files:**
-- `.planning/ROADMAP.md`
-- `.planning/REQUIREMENTS.md`
-- `.planning/STATE.md`
-- `.planning/PROJECT.md`
-
 **User input:**
-
 - Version: {{version}} (e.g., "1.0", "1.1", "2.0")
-  </context>
+
+**Config file:** config.json (local file with Mosic entity IDs)
+</context>
 
 <process>
 
-**Follow complete-milestone.md workflow:**
+## Step 0: Load Configuration and Mosic Tools
 
-0. **Check for audit:**
+```bash
+# Load config.json
+CONFIG=$(cat config.json 2>/dev/null || echo '{}')
+WORKSPACE_ID=$(echo "$CONFIG" | jq -r '.mosic.workspace_id // empty')
+PROJECT_ID=$(echo "$CONFIG" | jq -r '.mosic.project_id // empty')
+```
 
-   - Look for `.planning/v{{version}}-MILESTONE-AUDIT.md`
-   - If missing or stale: recommend `/gsd:audit-milestone` first
-   - If audit status is `gaps_found`: recommend `/gsd:plan-milestone-gaps` first
-   - If audit status is `passed`: proceed to step 1
+Validate:
+```
+IF WORKSPACE_ID is empty OR PROJECT_ID is empty:
+  ERROR: "No Mosic project configured. Run /gsd:new-project first."
+  EXIT
+```
 
-   ```markdown
-   ## Pre-flight Check
+Load Mosic tools:
+```
+ToolSearch("mosic project task page entity complete")
+```
 
-   {If no v{{version}}-MILESTONE-AUDIT.md:}
-   ⚠ No milestone audit found. Run `/gsd:audit-milestone` first to verify
-   requirements coverage, cross-phase integration, and E2E flows.
+---
 
-   {If audit has gaps:}
-   ⚠ Milestone audit found gaps. Run `/gsd:plan-milestone-gaps` to create
-   phases that close the gaps, or proceed anyway to accept as tech debt.
+## Step 1: Load Project State from Mosic
 
-   {If audit passed:}
-   ✓ Milestone audit passed. Proceeding with completion.
-   ```
+```
+# Get project with all task lists
+project = mosic_get_project(PROJECT_ID, {
+  include_task_lists: true
+})
 
-1. **Verify readiness:**
+# Get all task lists with tasks
+phase_stats = []
+total_tasks = 0
+completed_tasks = 0
 
-   - Check all phases in milestone have completed plans (SUMMARY.md exists)
-   - Present milestone scope and stats
-   - Wait for confirmation
+FOR each task_list in project.task_lists:
+  tl = mosic_get_task_list(task_list.name, { include_tasks: true })
 
-2. **Gather stats:**
+  phase_stats.push({
+    identifier: tl.identifier,
+    title: tl.title,
+    status: tl.status,
+    total_tasks: tl.tasks.length,
+    completed_tasks: tl.tasks.filter(t => t.done).length
+  })
 
-   - Count phases, plans, tasks
-   - Calculate git range, file changes, LOC
-   - Extract timeline from git log
-   - Present summary, confirm
+  total_tasks += tl.tasks.length
+  completed_tasks += tl.tasks.filter(t => t.done).length
 
-3. **Extract accomplishments:**
+DISPLAY:
+"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ GSD > COMPLETE MILESTONE v{version}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-   - Read all phase SUMMARY.md files in milestone range
-   - Extract 4-6 key accomplishments
-   - Present for approval
+Project: {project.title}
 
-4. **Archive milestone:**
+Phases: {phase_stats.length}
+Tasks: {completed_tasks}/{total_tasks} completed
 
-   - Create `.planning/milestones/v{{version}}-ROADMAP.md`
-   - Extract full phase details from ROADMAP.md
-   - Fill milestone-archive.md template
-   - Update ROADMAP.md to one-line summary with link
+───────────────────────────────────────────────────────────────
+"""
+```
 
-5. **Archive requirements:**
+---
 
-   - Create `.planning/milestones/v{{version}}-REQUIREMENTS.md`
-   - Mark all v1 requirements as complete (checkboxes checked)
-   - Note requirement outcomes (validated, adjusted, dropped)
-   - Delete `.planning/REQUIREMENTS.md` (fresh one created for next milestone)
+## Step 2: Check for Milestone Audit
 
-6. **Update PROJECT.md:**
+```
+# Search for audit page
+audit_pages = mosic_search_pages({
+  workspace_id: WORKSPACE_ID,
+  query: "Milestone Audit v" + version,
+  limit: 5
+})
 
-   - Add "Current State" section with shipped version
-   - Add "Next Milestone Goals" section
-   - Archive previous content in `<details>` (if v1.1+)
+audit_page = audit_pages.find(p => p.title.includes("Audit"))
 
-7. **Commit and tag:**
+IF audit_page is null:
+  DISPLAY:
+  """
+  Pre-flight Check
 
-   - Stage: MILESTONES.md, PROJECT.md, ROADMAP.md, STATE.md, archive files
-   - Commit: `chore: archive v{{version}} milestone`
-   - Tag: `git tag -a v{{version}} -m "[milestone summary]"`
-   - Ask about pushing tag
+  No milestone audit found. Run `/gsd:audit-milestone` first to verify
+  requirements coverage, cross-phase integration, and E2E flows.
 
-8. **Sync milestone completion to Mosic:**
+  Continue anyway? (yes/no)
+  """
 
-   **Check if Mosic is enabled:**
+  IF user_response != "yes":
+    EXIT
+ELSE:
+  # Check audit status from page content
+  audit_content = mosic_get_page(audit_page.name, { content_format: "plain" })
 
-   ```bash
-   MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-   ```
+  IF audit_content.includes("gaps_found") OR audit_content.includes("GAPS FOUND"):
+    DISPLAY:
+    """
+    Pre-flight Check
 
-   **If mosic.enabled = true:**
+    Milestone audit found gaps. Run `/gsd:plan-milestone-gaps` to create
+    phases that close the gaps, or proceed anyway to accept as tech debt.
 
-   ```bash
-   WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-   PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
-   GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-   SUMMARY_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.summary")
-   ```
+    Continue anyway? (yes/no)
+    """
 
-   ### Step 8.1: Update MProject Status
+    IF user_response != "yes":
+      EXIT
 
-   ```
-   mosic_update_document("MProject", PROJECT_ID, {
-     status: "Completed"
-   })
-   ```
+DISPLAY: "Milestone audit passed. Proceeding with completion."
+```
 
-   ### Step 8.2: Create Milestone Archive Page
+---
 
-   ```
-   milestone_page = mosic_create_entity_page("MProject", PROJECT_ID, {
-     workspace_id: WORKSPACE_ID,
-     title: "Milestone v" + version + " Archive",
-     page_type: "Document",
-     icon: "lucide:archive",
-     status: "Published",
-     content: convert_to_editorjs(milestone_archive_content),
-     relation_type: "Related"
-   })
+## Step 3: Verify All Phases Ready
 
-   mosic_batch_add_tags_to_document("M Page", milestone_page.name, [
-     GSD_MANAGED_TAG,
-     SUMMARY_TAG
-   ])
-   ```
+```
+incomplete_phases = phase_stats.filter(p =>
+  p.status != "Completed" AND
+  p.completed_tasks < p.total_tasks
+)
 
-   ### Step 8.3: Mark All Phase Task Lists as Completed
+IF incomplete_phases.length > 0:
+  DISPLAY:
+  """
+  Incomplete Phases Found
 
-   ```
-   # Get all phase task lists for this milestone
-   FOR each phase in milestone_phases:
-     task_list_id = config.mosic.task_lists["phase-" + phase.number]
-     IF task_list_id:
-       mosic_update_document("MTask List", task_list_id, {
-         status: "Completed"
-       })
+  The following phases have incomplete tasks:
+  """
 
-       # Mark all tasks in the list as completed
-       tasks = mosic_search_tasks({
-         workspace_id: WORKSPACE_ID,
-         task_list_id: task_list_id,
-         status__in: ["Backlog", "ToDo", "In Progress"]
-       })
+  FOR each phase in incomplete_phases:
+    DISPLAY: "- {phase.identifier}: {phase.title} ({phase.completed_tasks}/{phase.total_tasks} tasks)"
 
-       FOR each task in tasks:
-         mosic_complete_task(task.name)
-   ```
+  DISPLAY:
+  """
+  Mark these as complete anyway? (yes/no)
+  """
 
-   ### Step 8.4: Create Milestone Summary with Stats
+  IF user_response != "yes":
+    EXIT
+```
 
-   ```
-   # Add completion comment with stats
-   mosic_create_document("M Comment", {
-     workspace_id: WORKSPACE_ID,
-     ref_doc: "MProject",
-     ref_name: PROJECT_ID,
-     content: "## Milestone v" + version + " Completed\n\n" +
-       "**Phases:** " + phase_count + "\n" +
-       "**Tasks:** " + task_count + "\n" +
-       "**Timeline:** " + start_date + " - " + end_date + "\n\n" +
-       "**Key Accomplishments:**\n" + accomplishments_list
-   })
-   ```
+---
 
-   ### Step 8.5: Update config.json
+## Step 4: Gather Milestone Statistics
 
-   ```json
-   {
-     "mosic": {
-       "completed_milestones": {
-         "v{{version}}": {
-           "completed_at": "[ISO timestamp]",
-           "archive_page": "[milestone_page.name]",
-           "phase_count": N,
-           "task_count": M
-         }
-       }
-     }
-   }
-   ```
+```
+# Get git statistics
+git_stats = {}
 
-   Display:
-   ```
-   ✓ Milestone synced to Mosic
+```bash
+# Get first commit of milestone (if tags exist)
+if git tag -l "v*" | grep -q .; then
+  PREV_TAG=$(git tag -l "v*" --sort=-v:refname | head -1)
+  FIRST_COMMIT=$(git log ${PREV_TAG}..HEAD --reverse --format="%H" | head -1)
+else
+  FIRST_COMMIT=$(git rev-list --max-parents=0 HEAD)
+fi
 
-     Project: https://mosic.pro/app/Project/[PROJECT_ID] (Completed)
-     Archive: https://mosic.pro/app/page/[milestone_page.name]
-     Phases: [N] task lists marked completed
-     Tasks: [M] tasks marked completed
-   ```
+# Statistics
+FILES_CHANGED=$(git diff ${FIRST_COMMIT}..HEAD --stat | tail -1 | grep -oE '[0-9]+ files changed' | grep -oE '[0-9]+' || echo "0")
+INSERTIONS=$(git diff ${FIRST_COMMIT}..HEAD --stat | tail -1 | grep -oE '[0-9]+ insertions' | grep -oE '[0-9]+' || echo "0")
+DELETIONS=$(git diff ${FIRST_COMMIT}..HEAD --stat | tail -1 | grep -oE '[0-9]+ deletions' | grep -oE '[0-9]+' || echo "0")
+COMMIT_COUNT=$(git rev-list ${FIRST_COMMIT}..HEAD --count)
+START_DATE=$(git log ${FIRST_COMMIT} --format="%Y-%m-%d" -1)
+END_DATE=$(date +%Y-%m-%d)
+```
 
-   **Error handling:**
+DISPLAY:
+"""
+Milestone Statistics
 
-   ```
-   IF mosic sync fails:
-     - Display warning: "Mosic milestone sync failed: [error]. Local archive created."
-     - Add to mosic.pending_sync array:
-       { type: "milestone_complete", version: version }
-     - Continue (don't block)
-   ```
+Timeline: {START_DATE} to {END_DATE}
+Commits: {COMMIT_COUNT}
+Files changed: {FILES_CHANGED}
+Lines: +{INSERTIONS} / -{DELETIONS}
+Phases: {phase_stats.length}
+Tasks: {completed_tasks}
 
-   **If mosic.enabled = false:** Skip Mosic sync.
+Confirm these stats? (yes/no)
+"""
 
-9. **Offer next steps:**
-   - `/gsd:new-milestone` — start next milestone (questioning → research → requirements → roadmap)
+IF user_response != "yes":
+  EXIT
+```
+
+---
+
+## Step 5: Extract Key Accomplishments from Mosic
+
+```
+# Get all summary pages from the project
+summary_pages = []
+
+FOR each phase in project.task_lists:
+  pages = mosic_get_entity_pages("MTask List", phase.name, { include_subtree: false })
+  summaries = pages.filter(p => p.title.includes("Summary"))
+  summary_pages.push(...summaries)
+
+# Extract accomplishments from summaries
+accomplishments = []
+
+FOR each page in summary_pages.slice(0, 10):  # Limit to 10 most recent
+  content = mosic_get_page(page.name, { content_format: "plain" })
+
+  # Extract key accomplishments (lines starting with - or *)
+  lines = content.split("\n").filter(l => l.match(/^[\-\*]\s/))
+  accomplishments.push(...lines.slice(0, 2))  # Top 2 from each
+
+# Take top 6 unique accomplishments
+top_accomplishments = deduplicate(accomplishments).slice(0, 6)
+
+DISPLAY:
+"""
+Key Accomplishments
+
+{top_accomplishments.join("\n")}
+
+Edit these accomplishments? (yes to edit, no to continue)
+"""
+
+IF user_response == "yes":
+  PROMPT: "Enter accomplishments (one per line):"
+  top_accomplishments = user_response.split("\n")
+```
+
+---
+
+## Step 6: Create Milestone Archive Page in Mosic
+
+```
+# Build archive content
+archive_content = {
+  blocks: [
+    {
+      type: "header",
+      data: { text: "Milestone v" + version + " Archive", level: 1 }
+    },
+    {
+      type: "paragraph",
+      data: { text: "**Project:** " + project.title }
+    },
+    {
+      type: "paragraph",
+      data: { text: "**Completed:** " + END_DATE }
+    },
+    {
+      type: "header",
+      data: { text: "Statistics", level: 2 }
+    },
+    {
+      type: "table",
+      data: {
+        content: [
+          ["Metric", "Value"],
+          ["Timeline", START_DATE + " to " + END_DATE],
+          ["Commits", COMMIT_COUNT],
+          ["Phases", phase_stats.length],
+          ["Tasks", completed_tasks],
+          ["Files Changed", FILES_CHANGED],
+          ["Lines Added", INSERTIONS],
+          ["Lines Removed", DELETIONS]
+        ]
+      }
+    },
+    {
+      type: "header",
+      data: { text: "Key Accomplishments", level: 2 }
+    },
+    {
+      type: "list",
+      data: {
+        style: "unordered",
+        items: top_accomplishments
+      }
+    },
+    {
+      type: "header",
+      data: { text: "Phases Completed", level: 2 }
+    }
+  ]
+}
+
+# Add phase summaries
+FOR each phase in phase_stats:
+  archive_content.blocks.push({
+    type: "paragraph",
+    data: { text: "**" + phase.identifier + ":** " + phase.title + " (" + phase.completed_tasks + " tasks)" }
+  })
+
+# Create archive page
+archive_page = mosic_create_entity_page("MProject", PROJECT_ID, {
+  workspace_id: WORKSPACE_ID,
+  title: "Milestone v" + version + " Archive",
+  page_type: "Document",
+  icon: "lucide:archive",
+  status: "Published",
+  content: archive_content,
+  relation_type: "Related"
+})
+
+ARCHIVE_PAGE_ID = archive_page.name
+
+# Tag the archive page
+mosic_batch_add_tags_to_document("M Page", ARCHIVE_PAGE_ID, [
+  config.mosic.tags.gsd_managed,
+  config.mosic.tags.summary
+])
+
+DISPLAY: "Archive page created: https://mosic.pro/app/page/" + ARCHIVE_PAGE_ID
+```
+
+---
+
+## Step 7: Mark All Phase Task Lists as Completed
+
+```
+FOR each task_list in project.task_lists:
+  # Update task list status
+  mosic_update_document("MTask List", task_list.name, {
+    status: "Completed"
+  })
+
+  # Mark any remaining incomplete tasks as done
+  tl = mosic_get_task_list(task_list.name, { include_tasks: true })
+
+  FOR each task in tl.tasks.filter(t => !t.done):
+    mosic_complete_task(task.name)
+
+DISPLAY: "All " + project.task_lists.length + " phases marked completed"
+```
+
+---
+
+## Step 8: Update Project Status
+
+```
+# Update project status to Completed
+mosic_update_document("MProject", PROJECT_ID, {
+  status: "Completed"
+})
+
+# Add completion comment
+mosic_create_document("M Comment", {
+  workspace_id: WORKSPACE_ID,
+  reference_doctype: "MProject",
+  reference_name: PROJECT_ID,
+  content: "## Milestone v" + version + " Completed\n\n" +
+    "**Phases:** " + phase_stats.length + "\n" +
+    "**Tasks:** " + completed_tasks + "\n" +
+    "**Timeline:** " + START_DATE + " - " + END_DATE + "\n\n" +
+    "**Key Accomplishments:**\n" + top_accomplishments.map(a => "- " + a).join("\n") + "\n\n" +
+    "[View Archive](https://mosic.pro/app/page/" + ARCHIVE_PAGE_ID + ")"
+})
+
+DISPLAY: "Project marked completed: https://mosic.pro/app/MProject/" + PROJECT_ID
+```
+
+---
+
+## Step 9: Git Tag and Commit
+
+```bash
+# Create git tag
+TAG_MESSAGE="Milestone v${version}
+
+Phases: ${phase_stats.length}
+Tasks: ${completed_tasks}
+Timeline: ${START_DATE} - ${END_DATE}
+
+Key accomplishments:
+${top_accomplishments.join('\n')}
+
+Mosic Archive: https://mosic.pro/app/page/${ARCHIVE_PAGE_ID}"
+
+git tag -a "v${version}" -m "$TAG_MESSAGE"
+```
+
+DISPLAY:
+"""
+Git tag v{version} created.
+
+Push tag to remote? (yes/no)
+"""
+
+IF user_response == "yes":
+  ```bash
+  git push origin "v${version}"
+  ```
+  DISPLAY: "Tag pushed to remote"
+```
+
+---
+
+## Step 10: Update config.json
+
+```
+# Store milestone completion in config
+IF config.mosic.completed_milestones is null:
+  config.mosic.completed_milestones = {}
+
+config.mosic.completed_milestones["v" + version] = {
+  "completed_at": ISO_TIMESTAMP,
+  "archive_page": ARCHIVE_PAGE_ID,
+  "phase_count": phase_stats.length,
+  "task_count": completed_tasks,
+  "git_tag": "v" + version
+}
+
+config.mosic.session = {
+  "last_action": "complete-milestone",
+  "last_updated": ISO_TIMESTAMP
+}
+
+write config.json
+```
+
+---
+
+## Step 11: Display Completion and Next Steps
+
+```
+DISPLAY:
+"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ GSD > MILESTONE v{version} COMPLETE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Project: {project.title}
+
+Phases: {phase_stats.length}
+Tasks: {completed_tasks}
+Timeline: {START_DATE} - {END_DATE}
+
+Mosic:
+  Project: https://mosic.pro/app/MProject/{PROJECT_ID}
+  Archive: https://mosic.pro/app/page/{ARCHIVE_PAGE_ID}
+
+Git: v{version} tagged
+
+───────────────────────────────────────────────────────────────
+
+## Next Up
+
+Start new milestone with fresh project:
+
+/gsd:new-project
+
+<sub>/clear first - fresh context window</sub>
+
+───────────────────────────────────────────────────────────────
+"""
+```
 
 </process>
 
 <success_criteria>
-
-- Milestone archived to `.planning/milestones/v{{version}}-ROADMAP.md`
-- Requirements archived to `.planning/milestones/v{{version}}-REQUIREMENTS.md`
-- `.planning/REQUIREMENTS.md` deleted (fresh for next milestone)
-- ROADMAP.md collapsed to one-line entry
-- PROJECT.md updated with current state
-- Git tag v{{version}} created
-- Commit successful
-- Mosic sync (if enabled):
-  - [ ] MProject status updated to Completed
-  - [ ] Milestone archive page created
-  - [ ] All phase MTask Lists marked Completed
-  - [ ] All MTasks marked completed
-  - [ ] Completion comment added with stats
-  - [ ] config.json updated with completed_milestones
-  - [ ] Sync failures handled gracefully (added to pending_sync)
-- User knows next steps (including need for fresh requirements)
-  </success_criteria>
+- [ ] Project loaded from Mosic with all phases
+- [ ] Milestone audit checked (warning if missing/gaps)
+- [ ] All phases verified complete (or user confirmed)
+- [ ] Statistics gathered from git and Mosic
+- [ ] Accomplishments extracted from summary pages
+- [ ] Milestone archive page created in Mosic
+- [ ] All phase task lists marked Completed
+- [ ] All tasks marked completed
+- [ ] Project status updated to Completed
+- [ ] Completion comment added with stats
+- [ ] Git tag created
+- [ ] config.json updated with completed_milestones
+- [ ] User knows next steps
+</success_criteria>
 
 <critical_rules>
-
-- **Load workflow first:** Read complete-milestone.md before executing
-- **Verify completion:** All phases must have SUMMARY.md files
+- **Verify completion:** Check audit exists before completing
 - **User confirmation:** Wait for approval at verification gates
-- **Archive before deleting:** Always create archive files before updating/deleting originals
-- **One-line summary:** Collapsed milestone in ROADMAP.md should be single line with link
-- **Context efficiency:** Archive keeps ROADMAP.md and REQUIREMENTS.md constant size per milestone
-- **Fresh requirements:** Next milestone starts with `/gsd:new-milestone` which includes requirements definition
-  </critical_rules>
+- **Archive before updating:** Create archive page before changing statuses
+- **Git tag:** Always create annotated tag with milestone info
+- **Fresh start:** Next milestone starts with /gsd:new-project (new Mosic project)
+</critical_rules>
