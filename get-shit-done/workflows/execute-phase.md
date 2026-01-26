@@ -398,6 +398,13 @@ config.last_sync = new Date().toISOString()
 // Write config.json
 ```
 
+**Confirm commit with user:**
+
+Use AskUserQuestion:
+- Question: "Commit phase completion to git?"
+- Options: "Yes, commit" / "No, skip commit"
+
+**If user approves:**
 ```bash
 git add config.json
 git commit -m "chore(phase-${PHASE_ARG}): complete phase execution"

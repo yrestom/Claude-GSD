@@ -409,6 +409,13 @@ config.last_sync = new Date().toISOString()
 // Write config.json
 ```
 
+**Confirm commit with user:**
+
+Use AskUserQuestion:
+- Question: "Commit UAT results to git?"
+- Options: "Yes, commit" / "No, skip commit"
+
+**If user approves:**
 ```bash
 git add config.json
 git commit -m "test(phase-${PHASE_ARG}): complete UAT - ${passed_count} passed, ${issues_count} issues"

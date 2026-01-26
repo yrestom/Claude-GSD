@@ -362,6 +362,13 @@ If "address first": Gather user input on questions, update discovery page.
 <step name="update_config">
 **Update config.json with discovery page ID:**
 
+**Confirm commit with user:**
+
+Use AskUserQuestion:
+- Question: "Commit discovery results to git?"
+- Options: "Yes, commit" / "No, skip commit"
+
+**If user approves:**
 ```bash
 git add config.json
 git commit -m "$(cat <<'EOF'

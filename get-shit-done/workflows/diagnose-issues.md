@@ -367,6 +367,13 @@ config.last_sync = new Date().toISOString()
 // Write config.json
 ```
 
+**Confirm commit with user:**
+
+Use AskUserQuestion:
+- Question: "Commit diagnosis results to git?"
+- Options: "Yes, commit" / "No, skip commit"
+
+**If user approves:**
 ```bash
 git add config.json
 git commit -m "docs(phase-${PHASE_NUM}): add root causes from diagnosis"

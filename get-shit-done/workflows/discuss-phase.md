@@ -439,6 +439,16 @@ Update config.json with context page reference:
 ```bash
 # Update config.json with page ID
 # Write updated config.json
+```
+
+**Confirm commit with user:**
+
+Use AskUserQuestion:
+- Question: "Commit phase context to git?"
+- Options: "Yes, commit" / "No, skip commit"
+
+**If user approves:**
+```bash
 git add config.json
 git commit -m "$(cat <<'EOF'
 docs(phase-${PHASE}): capture phase context
