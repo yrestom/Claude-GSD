@@ -8,6 +8,7 @@ allowed-tools:
   - Bash
   - Glob
   - AskUserQuestion
+  - mcp__mosic_pro__*
 ---
 
 <objective>
@@ -23,13 +24,45 @@ Enables reviewing captured ideas and deciding what to work on next.
 
 <process>
 
+<step name="check_mosic_enabled">
+**Check if Mosic is enabled:**
+
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+Store for later use in listing and syncing steps.
+</step>
+
 <step name="check_exist">
 ```bash
 TODO_COUNT=$(ls .planning/todos/pending/*.md 2>/dev/null | wc -l | tr -d ' ')
 echo "Pending todos: $TODO_COUNT"
 ```
 
-If count is 0:
+**If Mosic enabled, also fetch from Mosic:**
+
+```
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+
+# Search for todo tasks in Mosic that may not be local
+mosic_todos = mosic_search_tasks({
+  workspace_id: WORKSPACE_ID,
+  project_id: PROJECT_ID,
+  status__in: ["Backlog", "ToDo"],
+  tag_ids: [GSD_MANAGED_TAG]
+})
+
+# Filter to tasks with "lucide:lightbulb" icon (todo marker) or in Backlog
+mosic_only_todos = mosic_todos.filter(t =>
+  t.icon == "lucide:lightbulb" &&
+  !local_todos.find(lt => lt.mosic_task_id == t.name)
+)
+```
+
+If local count is 0 AND no Mosic-only todos:
 ```
 No pending todos.
 
@@ -58,11 +91,33 @@ for file in .planning/todos/pending/*.md; do
   created=$(grep "^created:" "$file" | cut -d' ' -f2)
   title=$(grep "^title:" "$file" | cut -d':' -f2- | xargs)
   area=$(grep "^area:" "$file" | cut -d' ' -f2)
-  echo "$created|$title|$area|$file"
+  mosic_id=$(grep "^mosic_task_id:" "$file" | cut -d' ' -f2)
+  echo "$created|$title|$area|$file|$mosic_id"
 done | sort
 ```
 
 Apply area filter if specified. Display as numbered list:
+
+**If Mosic enabled, show sync status:**
+
+```
+Pending Todos:
+
+1. Add auth token refresh (api, 2d ago) [synced]
+2. Fix modal z-index issue (ui, 1d ago) [synced]
+3. Refactor database connection pool (database, 5h ago) [local only]
+4. [Mosic] Review performance metrics (ops, 3d ago) [Mosic only]
+
+---
+
+Sync Status: 2/3 local todos synced to Mosic | 1 Mosic-only todo
+
+Reply with a number to view details, or:
+- `/gsd:check-todos [area]` to filter by area
+- `q` to exit
+```
+
+**If Mosic not enabled:**
 
 ```
 Pending Todos:
@@ -97,12 +152,28 @@ Read the todo file completely. Display:
 **Area:** [area]
 **Created:** [date] ([relative time] ago)
 **Files:** [list or "None"]
+[IF mosic_task_id:] **Mosic:** https://mosic.pro/app/MTask/[mosic_task_id]
 
 ### Problem
 [problem section content]
 
 ### Solution
 [solution section content]
+```
+
+**If Mosic enabled and todo has mosic_task_id, fetch additional context:**
+
+```
+mosic_task = mosic_get_task(mosic_task_id, {
+  description_format: "markdown",
+  include_comments: true
+})
+
+# Show any comments/updates made in Mosic
+IF mosic_task.comments.length > 0:
+  Display:
+  ### Mosic Updates
+  [list recent comments]
 ```
 
 If `files` field has entries, read and briefly summarize each.
@@ -150,8 +221,27 @@ mv ".planning/todos/pending/[filename]" ".planning/todos/done/"
 ```
 Update STATE.md todo count. Present problem/solution context. Begin work or ask how to proceed.
 
+**If Mosic enabled and todo has mosic_task_id:**
+```
+# Update task status in Mosic
+mosic_update_document("MTask", mosic_task_id, {
+  status: "In Progress"
+})
+```
+
 **Add to phase plan:**
 Note todo reference in phase planning notes. Keep in pending. Return to list or exit.
+
+**If Mosic enabled:**
+```
+# Add comment to Mosic task noting phase assignment
+mosic_create_document("M Comment", {
+  workspace_id: WORKSPACE_ID,
+  ref_doc: "MTask",
+  ref_name: mosic_task_id,
+  content: "Assigned to Phase [N] planning"
+})
+```
 
 **Create a phase:**
 Display: `/gsd:add-phase [description from todo]`
@@ -203,11 +293,49 @@ EOF
 Confirm: "Committed: docs: start work on todo - [title]"
 </step>
 
+<step name="sync_completion_to_mosic">
+**If Mosic enabled and todo has mosic_task_id:**
+
+When todo is moved to done/ (work starting):
+
+```
+# Update task status in Mosic
+mosic_update_document("MTask", mosic_task_id, {
+  status: "In Progress",
+  start_date: "[today's date]"
+})
+
+# Add progress comment
+mosic_create_document("M Comment", {
+  workspace_id: WORKSPACE_ID,
+  ref_doc: "MTask",
+  ref_name: mosic_task_id,
+  content: "Work started via /gsd:check-todos"
+})
+```
+
+Display:
+```
+✓ Mosic task updated to "In Progress"
+```
+
+**Error handling:**
+
+```
+IF mosic sync fails:
+  - Display warning: "Mosic status update failed: [error]. Continuing locally."
+  - Add to mosic.pending_sync array:
+    { type: "todo_status", task_id: mosic_task_id, status: "In Progress" }
+  - Continue (don't block)
+```
+</step>
+
 </process>
 
 <output>
 - Moved todo to `.planning/todos/done/` (if "Work on it now")
 - Updated `.planning/STATE.md` (if todo count changed)
+- Mosic MTask status updated (if enabled and todo synced)
 </output>
 
 <anti_patterns>
@@ -218,11 +346,17 @@ Confirm: "Committed: docs: start work on todo - [title]"
 
 <success_criteria>
 - [ ] All pending todos listed with title, area, age
+- [ ] Mosic sync status shown (if enabled)
+- [ ] Mosic-only todos included in list (if any)
 - [ ] Area filter applied if specified
-- [ ] Selected todo's full context loaded
+- [ ] Selected todo's full context loaded (including Mosic comments)
 - [ ] Roadmap context checked for phase match
 - [ ] Appropriate actions offered
 - [ ] Selected action executed
 - [ ] STATE.md updated if todo count changed
 - [ ] Changes committed to git (if todo moved to done/)
+- [ ] Mosic sync (if enabled):
+  - [ ] Task status updated when work starts
+  - [ ] Comments added for phase assignments
+  - [ ] Sync failures handled gracefully (added to pending_sync)
 </success_criteria>

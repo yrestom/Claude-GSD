@@ -170,6 +170,137 @@ If "Roadmap Evolution" section doesn't exist, create it.
 Add note about insertion reason if appropriate.
 </step>
 
+<step name="sync_to_mosic">
+**Sync inserted phase to Mosic (Deep Integration):**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+Display:
+```
+◆ Syncing inserted phase to Mosic...
+```
+
+### Step 1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+AFTER_PHASE_TASK_LIST=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-$(printf '%02d' $after_phase)\"]")
+NEXT_PHASE_TASK_LIST=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-$(printf '%02d' $((after_phase + 1)))\"]")
+```
+
+### Step 2: Create Phase Tag for Decimal Phase
+
+```
+# Create tag for decimal phase (e.g., "phase-06.1")
+phase_tag = mosic_create_document("M Tag", {
+  workspace_id: workspace_id,
+  name: "phase-" + decimal_phase,
+  color: "orange"  # Orange to indicate inserted/urgent
+})
+PHASE_TAG_ID = phase_tag.name
+
+# Store in config
+mosic.tags.phase_tags["phase-" + decimal_phase] = PHASE_TAG_ID
+```
+
+### Step 3: Create MTask List with INSERTED Marker
+
+```
+task_list = mosic_create_document("MTask List", {
+  workspace_id: workspace_id,
+  project: PROJECT_ID,
+  title: "Phase " + decimal_phase + ": " + description + " (INSERTED)",
+  description: "**Goal:** [Urgent work - to be planned]\n\n**Status:** Not planned yet\n\n**INSERTED:** This phase was inserted between Phase " + after_phase + " and Phase " + (after_phase + 1) + " for urgent work.\n\nRun `/gsd:plan-phase " + decimal_phase + "` to create execution plans.",
+  icon: "lucide:alert-triangle",  # Alert icon for urgent
+  color: "orange",
+  status: "Backlog",
+  prefix: "P" + decimal_phase.replace(".", "")
+})
+
+task_list_id = task_list.name
+```
+
+### Step 4: Tag the Task List
+
+```
+mosic_batch_add_tags_to_document("MTask List", task_list_id, [
+  GSD_MANAGED_TAG,
+  PHASE_TAG_ID
+])
+```
+
+### Step 5: Create Depends Relation to After Phase
+
+```
+# Inserted phase depends on the phase it comes after
+IF AFTER_PHASE_TASK_LIST:
+  mosic_create_document("M Relation", {
+    workspace_id: workspace_id,
+    source_doctype: "MTask List",
+    source_name: task_list_id,
+    target_doctype: "MTask List",
+    target_name: AFTER_PHASE_TASK_LIST,
+    relation_type: "Depends"
+  })
+```
+
+### Step 6: Update Next Phase to Depend on Inserted Phase
+
+```
+# The next integer phase now depends on this inserted phase instead of the after phase
+IF NEXT_PHASE_TASK_LIST:
+  # First, remove old dependency (next → after)
+  # Search for existing relation
+  existing_relations = mosic_get_document_relations("MTask List", NEXT_PHASE_TASK_LIST)
+  FOR each relation in existing_relations:
+    IF relation.target_name == AFTER_PHASE_TASK_LIST AND relation.relation_type == "Depends":
+      mosic_delete_document("M Relation", relation.name)
+
+  # Create new dependency (next → inserted)
+  mosic_create_document("M Relation", {
+    workspace_id: workspace_id,
+    source_doctype: "MTask List",
+    source_name: NEXT_PHASE_TASK_LIST,
+    target_doctype: "MTask List",
+    target_name: task_list_id,
+    relation_type: "Depends"
+  })
+```
+
+### Step 7: Update config.json with Mappings
+
+```bash
+# Update config.json with:
+# mosic.task_lists["phase-NN.M"] = task_list_id
+# mosic.tags.phase_tags["phase-NN.M"] = PHASE_TAG_ID
+```
+
+Display:
+```
+✓ Phase synced to Mosic
+  Task List: https://mosic.pro/app/MTask%20List/[task_list_id]
+  Depends on: Phase {after_phase}
+  Next phase updated: Phase {next_integer} now depends on {decimal_phase}
+```
+
+**Error handling:**
+```
+IF mosic sync fails:
+  - Log warning: "Mosic sync failed: [error]. Phase inserted locally."
+  - Add to mosic.pending_sync array for retry
+  - Continue to completion step (don't block)
+```
+
+**If mosic.enabled = false:** Skip to completion step.
+</step>
+
 <step name="completion">
 Present completion summary:
 
@@ -179,6 +310,9 @@ Phase {decimal_phase} inserted after Phase {after_phase}:
 - Directory: .planning/phases/{decimal-phase}-{slug}/
 - Status: Not planned yet
 - Marker: (INSERTED) - indicates urgent work
+[IF mosic.enabled:]
+- Mosic: https://mosic.pro/app/MTask%20List/[task_list_id]
+[END IF]
 
 Roadmap updated: {roadmap-path}
 Project state updated: .planning/STATE.md
@@ -223,5 +357,12 @@ Phase insertion is complete when:
 - [ ] Phase inserted in correct position (after target phase, before next integer phase)
 - [ ] STATE.md updated with roadmap evolution note
 - [ ] Decimal number calculated correctly (based on existing decimals)
+- [ ] Mosic sync (if enabled):
+  - [ ] MTask List created with (INSERTED) marker
+  - [ ] Phase tag created for decimal phase
+  - [ ] Depends relation created (inserted → after phase)
+  - [ ] Next phase dependency updated (next → inserted instead of next → after)
+  - [ ] Tags applied (gsd-managed, phase-NN.M)
+  - [ ] config.json updated with task_list_id
 - [ ] User informed of next steps and dependency implications
       </success_criteria>

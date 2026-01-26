@@ -7,6 +7,7 @@ allowed-tools:
   - Read
   - Write
   - Bash
+  - mcp__mosic_pro__*
 ---
 
 <objective>
@@ -107,7 +108,128 @@ Output: Milestone archived (roadmap + requirements), PROJECT.md evolved, git tag
    - Tag: `git tag -a v{{version}} -m "[milestone summary]"`
    - Ask about pushing tag
 
-8. **Offer next steps:**
+8. **Sync milestone completion to Mosic:**
+
+   **Check if Mosic is enabled:**
+
+   ```bash
+   MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+   ```
+
+   **If mosic.enabled = true:**
+
+   ```bash
+   WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+   PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
+   GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+   SUMMARY_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.summary")
+   ```
+
+   ### Step 8.1: Update MProject Status
+
+   ```
+   mosic_update_document("MProject", PROJECT_ID, {
+     status: "Completed"
+   })
+   ```
+
+   ### Step 8.2: Create Milestone Archive Page
+
+   ```
+   milestone_page = mosic_create_entity_page("MProject", PROJECT_ID, {
+     workspace_id: WORKSPACE_ID,
+     title: "Milestone v" + version + " Archive",
+     page_type: "Document",
+     icon: "lucide:archive",
+     status: "Published",
+     content: convert_to_editorjs(milestone_archive_content),
+     relation_type: "Related"
+   })
+
+   mosic_batch_add_tags_to_document("M Page", milestone_page.name, [
+     GSD_MANAGED_TAG,
+     SUMMARY_TAG
+   ])
+   ```
+
+   ### Step 8.3: Mark All Phase Task Lists as Completed
+
+   ```
+   # Get all phase task lists for this milestone
+   FOR each phase in milestone_phases:
+     task_list_id = config.mosic.task_lists["phase-" + phase.number]
+     IF task_list_id:
+       mosic_update_document("MTask List", task_list_id, {
+         status: "Completed"
+       })
+
+       # Mark all tasks in the list as completed
+       tasks = mosic_search_tasks({
+         workspace_id: WORKSPACE_ID,
+         task_list_id: task_list_id,
+         status__in: ["Backlog", "ToDo", "In Progress"]
+       })
+
+       FOR each task in tasks:
+         mosic_complete_task(task.name)
+   ```
+
+   ### Step 8.4: Create Milestone Summary with Stats
+
+   ```
+   # Add completion comment with stats
+   mosic_create_document("M Comment", {
+     workspace_id: WORKSPACE_ID,
+     ref_doc: "MProject",
+     ref_name: PROJECT_ID,
+     content: "## Milestone v" + version + " Completed\n\n" +
+       "**Phases:** " + phase_count + "\n" +
+       "**Tasks:** " + task_count + "\n" +
+       "**Timeline:** " + start_date + " - " + end_date + "\n\n" +
+       "**Key Accomplishments:**\n" + accomplishments_list
+   })
+   ```
+
+   ### Step 8.5: Update config.json
+
+   ```json
+   {
+     "mosic": {
+       "completed_milestones": {
+         "v{{version}}": {
+           "completed_at": "[ISO timestamp]",
+           "archive_page": "[milestone_page.name]",
+           "phase_count": N,
+           "task_count": M
+         }
+       }
+     }
+   }
+   ```
+
+   Display:
+   ```
+   ✓ Milestone synced to Mosic
+
+     Project: https://mosic.pro/app/Project/[PROJECT_ID] (Completed)
+     Archive: https://mosic.pro/app/page/[milestone_page.name]
+     Phases: [N] task lists marked completed
+     Tasks: [M] tasks marked completed
+   ```
+
+   **Error handling:**
+
+   ```
+   IF mosic sync fails:
+     - Display warning: "Mosic milestone sync failed: [error]. Local archive created."
+     - Add to mosic.pending_sync array:
+       { type: "milestone_complete", version: version }
+     - Continue (don't block)
+   ```
+
+   **If mosic.enabled = false:** Skip Mosic sync.
+
+9. **Offer next steps:**
    - `/gsd:new-milestone` — start next milestone (questioning → research → requirements → roadmap)
 
 </process>
@@ -121,6 +243,14 @@ Output: Milestone archived (roadmap + requirements), PROJECT.md evolved, git tag
 - PROJECT.md updated with current state
 - Git tag v{{version}} created
 - Commit successful
+- Mosic sync (if enabled):
+  - [ ] MProject status updated to Completed
+  - [ ] Milestone archive page created
+  - [ ] All phase MTask Lists marked Completed
+  - [ ] All MTasks marked completed
+  - [ ] Completion comment added with stats
+  - [ ] config.json updated with completed_milestones
+  - [ ] Sync failures handled gracefully (added to pending_sync)
 - User knows next steps (including need for fresh requirements)
   </success_criteria>
 

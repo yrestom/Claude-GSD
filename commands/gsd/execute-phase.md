@@ -261,6 +261,34 @@ PLAN_01_CONTENT=$(cat "{plan_01_path}")
 PLAN_02_CONTENT=$(cat "{plan_02_path}")
 PLAN_03_CONTENT=$(cat "{plan_03_path}")
 STATE_CONTENT=$(cat .planning/STATE.md)
+
+# Check Mosic status and load config
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+```
+
+**Mosic task status update (before spawning):**
+
+If mosic.enabled = true:
+```
+FOR each plan being spawned:
+  # Get mosic_task_id from plan frontmatter or config.json
+  TASK_ID=$(grep "mosic_task_id:" ${plan_path} | cut -d: -f2 | tr -d ' ')
+
+  IF TASK_ID exists:
+    # Update task status to In Progress
+    mosic_update_document("MTask", task_id, {
+      status: "In Progress",
+      executing_start_date: "[ISO timestamp now]"
+    })
+
+    # Add execution started comment
+    mosic_create_document("M Comment", {
+      workspace_id: workspace_id,
+      ref_doc: "MTask",
+      ref_name: task_id,
+      content: "🚀 Execution started at " + timestamp
+    })
 ```
 
 Spawn all plans in a wave with a single message containing multiple Task calls, with inlined content:
@@ -272,6 +300,122 @@ Task(prompt="Execute plan at {plan_03_path}\n\nPlan:\n{plan_03_content}\n\nProje
 ```
 
 All three run in parallel. Task tool blocks until all complete.
+
+**Mosic sync after each plan completes (Deep Integration):**
+
+If mosic.enabled = true:
+```
+FOR each completed plan:
+  TASK_ID=$(grep "mosic_task_id:" ${plan_path} | cut -d: -f2 | tr -d ' ')
+  SUMMARY_PATH="${PHASE_DIR}/${PLAN_NUM}-SUMMARY.md"
+
+  IF TASK_ID exists:
+    # 1. Mark task complete with proper metadata
+    mosic_complete_task(task_id)
+
+    mosic_update_document("MTask", task_id, {
+      executing_end_date: "[ISO timestamp now]"
+    })
+
+    # 2. Update checklist items from SUMMARY.md
+    IF SUMMARY.md exists:
+      completed_tasks = extract_completed_tasks(SUMMARY.md)
+
+      # First, fetch all checklist items for this task
+      task_with_checklists = mosic_get_document("MTask", task_id, {
+        include_checklists: true
+      })
+      checklist_items = task_with_checklists.checklists or []
+
+      # Alternatively, use stored IDs from config.json if available
+      stored_checklist_ids = config.mosic.checklists["phase-" + PHASE + "-plan-" + PLAN_NUM] or []
+
+      FOR each task_item in completed_tasks:
+        # Find matching checklist item by title
+        matching_checklist = checklist_items.find(c => c.title == task_item.name)
+
+        IF matching_checklist:
+          mosic_update_document("MTask CheckList", matching_checklist.name, {
+            done: true
+          })
+        ELSE IF stored_checklist_ids has matching entry:
+          mosic_update_document("MTask CheckList", stored_checklist_ids[task_item.name], {
+            done: true
+          })
+
+    # 3. Add commit hash as structured comment
+    commit_hash = extract_from_SUMMARY.md("commit_history")
+    mosic_create_document("M Comment", {
+      workspace_id: workspace_id,
+      ref_doc: "MTask",
+      ref_name: task_id,
+      content: "✅ Completed\n\n**Commits:**\n" + format_commits(commit_hash)
+    })
+
+    # 4. Create Summary page (type: Document) linked to task
+    IF SUMMARY.md exists:
+      summary_page = mosic_create_entity_page("MTask", task_id, {
+        workspace_id: workspace_id,
+        title: "Execution Summary",
+        page_type: "Document",  # Summaries are documentation
+        icon: mosic.page_icons.summary,  # "lucide:check-circle"
+        status: "Published",
+        content: convert_to_editorjs(SUMMARY.md content),
+        relation_type: "Related"
+      })
+
+      # Tag summary page with appropriate tags
+      SUMMARY_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.summary")
+      PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PHASE}\"]")
+
+      mosic_batch_add_tags_to_document("M Page", summary_page.name, [
+        GSD_MANAGED_TAG,
+        SUMMARY_TAG,
+        PHASE_TAG
+      ])
+
+      # Store page ID
+      mosic.pages["phase-" + PHASE + "-summary-" + PLAN_NUM] = summary_page.name
+
+    # 5. Create Related relation between Plan page and Summary page
+    plan_page_id = mosic.pages["phase-" + PHASE + "-plan-" + PLAN_NUM]
+    IF plan_page_id AND summary_page:
+      mosic_create_document("M Relation", {
+        workspace_id: workspace_id,
+        source_doctype: "M Page",
+        source_name: plan_page_id,
+        target_doctype: "M Page",
+        target_name: summary_page.name,
+        relation_type: "Related"
+      })
+
+**Mosic Error Handling:**
+
+```
+TRY:
+  [all Mosic operations above]
+CATCH mosic_error:
+  # Log warning but don't block execution
+  Display: "⚠ Mosic sync warning: " + mosic_error.message
+
+  # Add failed operation to pending_sync queue
+  pending_item = {
+    type: "plan_completion",
+    phase: PHASE,
+    plan: PLAN_NUM,
+    task_id: task_id,
+    error: mosic_error.message,
+    timestamp: "[ISO timestamp now]"
+  }
+
+  # Update config.json with pending sync
+  config.mosic.pending_sync = config.mosic.pending_sync or []
+  config.mosic.pending_sync.push(pending_item)
+  write_config(config)
+
+  # Continue execution - Mosic failures should never block local work
+  Display: "  Execution continues. Sync will retry on next /gsd:progress or manual /gsd:sync"
+```
 
 **No polling.** No background agents. No TaskOutput loops.
 </wave_execution>
@@ -335,5 +479,10 @@ After all plans in phase complete (step 7):
 - [ ] STATE.md reflects phase completion
 - [ ] ROADMAP.md updated
 - [ ] REQUIREMENTS.md updated (phase requirements marked Complete)
+- [ ] Mosic sync (if enabled):
+  - [ ] Task statuses updated to "In Progress" on start
+  - [ ] Tasks marked complete via mosic_complete_task
+  - [ ] Commit hashes added as comments
+  - [ ] Summary pages created and tagged
 - [ ] User informed of next steps
 </success_criteria>

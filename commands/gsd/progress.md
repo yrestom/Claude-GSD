@@ -52,8 +52,159 @@ If missing both ROADMAP.md and PROJECT.md: suggest `/gsd:new-project`.
 - Read `.planning/STATE.md` for living memory (position, decisions, issues)
 - Read `.planning/ROADMAP.md` for phase structure and objectives
 - Read `.planning/PROJECT.md` for current state (What This Is, Core Value, Requirements)
-- Read `.planning/config.json` for settings (model_profile, workflow toggles)
-  </step>
+- Read `.planning/config.json` for settings (model_profile, workflow toggles, mosic config)
+</step>
+
+<step name="enrich_from_mosic">
+**Enrich context from Mosic (Deep Integration):**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+Load Mosic config:
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+```
+
+### Step 1: Fetch Project Overview
+```
+project = mosic_get_project(project_id, {
+  include_task_lists: true,
+  include_comments: true
+})
+
+# Get all pages linked to project
+project_pages = mosic_get_entity_pages("MProject", project_id, {
+  include_subtree: true,
+  include_content: false
+})
+```
+
+### Step 2: Fetch Task Statistics by Phase
+```
+# Search for all tasks across all phases
+all_tasks = mosic_search_tasks({
+  workspace_id: workspace_id,
+  project_id: project_id,
+  limit: 100
+})
+
+# Group by status
+task_by_status = {
+  "Backlog": [],
+  "ToDo": [],
+  "In Progress": [],
+  "In Review": [],
+  "Blocked": [],
+  "Completed": []
+}
+
+FOR each task in all_tasks:
+  task_by_status[task.status].push(task)
+
+# Search for blocked tasks specifically (important for routing)
+blocked_tasks = mosic_search_tasks({
+  workspace_id: workspace_id,
+  project_id: project_id,
+  status: "Blocked"
+})
+
+# Get blocked task details including relations
+FOR each blocked_task:
+  relations = mosic_get_document_relations("MTask", blocked_task.name, {
+    relation_types: ["Blocker"]
+  })
+  blocked_task.blockers = relations.incoming  # What's blocking this
+```
+
+### Step 3: Calculate Phase-Level Progress
+```
+# For each phase task list
+FOR each task_list in project.task_lists:
+  phase_tasks = mosic_search_tasks({
+    workspace_id: workspace_id,
+    task_list_id: task_list.name
+  })
+
+  phase_stats = {
+    name: task_list.title,
+    total: phase_tasks.length,
+    completed: phase_tasks.filter(t => t.done).length,
+    in_progress: phase_tasks.filter(t => t.status == "In Progress").length,
+    blocked: phase_tasks.filter(t => t.status == "Blocked").length,
+    progress_pct: (completed / total * 100).toFixed(0) + "%"
+  }
+
+  # Get phase pages
+  phase_pages = mosic_get_entity_pages("MTask List", task_list.name)
+
+  phase_stats.has_research = phase_pages.find(p => p.title.includes("Research"))
+  phase_stats.has_verification = phase_pages.find(p => p.title.includes("Verification"))
+  phase_stats.has_uat = phase_pages.find(p => p.title.includes("UAT"))
+```
+
+### Step 4: Find Cross-Session Completions
+```
+# Get tasks completed since last local sync
+last_sync = mosic.last_sync from config.json
+
+recent_completions = mosic_advanced_search({
+  workspace_id: workspace_id,
+  doctypes: ["MTask"],
+  filters: {
+    project_id: project_id,
+    done: true,
+    modified: [">=", last_sync]
+  }
+})
+
+# Cross-reference with local STATE.md to find external completions
+# (Tasks completed in other sessions or by other agents)
+```
+
+### Step 5: Get Relation Insights
+```
+# Find dependency paths and blockers
+relation_stats = mosic_get_relation_stats({
+  workspace_id: workspace_id,
+  doctype: "MProject",
+  docname: project_id
+})
+
+# Find blocking chains
+FOR each blocked_task:
+  path = mosic_find_relation_path({
+    from_doctype: "MTask",
+    from_docname: blocked_task.name,
+    to_doctype: "MTask List",
+    to_docname: current_phase_task_list,
+    relation_types: ["Blocker", "Depends"],
+    max_depth: 5
+  })
+  blocked_task.resolution_path = path
+```
+
+Store for display in report step:
+- `mosic_project_url`: `https://mosic.pro/app/Project/${project_id}`
+- `mosic_total_tasks`: all_tasks.length
+- `mosic_completed_tasks`: task_by_status["Completed"].length
+- `mosic_in_progress_tasks`: task_by_status["In Progress"].length
+- `mosic_blocked_tasks`: blocked_tasks with resolution paths
+- `mosic_phase_progress`: Array of phase_stats
+- `mosic_recent_completions`: Completions since last sync
+- `mosic_documentation`: project_pages summary
+- `mosic_relation_stats`: relation_stats
+
+**If Mosic fetch fails:**
+- Log warning, continue with local-only data
+- Display: "(Mosic sync unavailable - showing local state only)"
+</step>
 
 <step name="recent">
 **Gather recent work context:**
@@ -82,6 +233,7 @@ If missing both ROADMAP.md and PROJECT.md: suggest `/gsd:new-project`.
 
 **Progress:** [████████░░] 8/10 plans complete
 **Profile:** [quality/balanced/budget]
+[IF mosic.enabled:] **Mosic:** [mosic_project_url] [END IF]
 
 ## Recent Work
 - [Phase X, Plan Y]: [what was accomplished - 1 line]
@@ -92,12 +244,22 @@ Phase [N] of [total]: [phase-name]
 Plan [M] of [phase-total]: [status]
 CONTEXT: [✓ if CONTEXT.md exists | - if not]
 
+[IF mosic.enabled AND mosic_recent_completions:]
+## Cross-Session Progress (from Mosic)
+Tasks completed in prior sessions:
+- [task_title] — [completion_date]
+- [task_title] — [completion_date]
+[END IF]
+
 ## Key Decisions Made
 - [decision 1 from STATE.md]
 - [decision 2]
 
 ## Blockers/Concerns
 - [any blockers or concerns from STATE.md]
+[IF mosic.enabled AND mosic_blocked_tasks:]
+- [Mosic blocked tasks]
+[END IF]
 
 ## Pending Todos
 - [count] pending — /gsd:check-todos to review

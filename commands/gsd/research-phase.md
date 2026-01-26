@@ -157,11 +157,111 @@ Task(
 
 ## 5. Handle Agent Return
 
-**`## RESEARCH COMPLETE`:** Display summary, offer: Plan phase, Dig deeper, Review full, Done.
+**`## RESEARCH COMPLETE`:** Display summary, proceed to Mosic sync, then offer: Plan phase, Dig deeper, Review full, Done.
 
 **`## CHECKPOINT REACHED`:** Present to user, get response, spawn continuation.
 
 **`## RESEARCH INCONCLUSIVE`:** Show what was attempted, offer: Add context, Try different mode, Manual.
+
+## 5.5. Sync Research to Mosic (Deep Integration)
+
+**Check if Mosic is enabled:**
+
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true AND research completed successfully:**
+
+Display:
+```
+◆ Syncing research to Mosic...
+```
+
+### Step 5.5.1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PHASE}\"]")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+RESEARCH_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.research")
+PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PHASE}\"]")
+```
+
+### Step 5.5.2: Check for Existing Research Page
+
+```
+# Search for existing research page linked to this phase
+existing_pages = mosic_get_entity_pages("MTask List", TASK_LIST_ID, {
+  include_subtree: false
+})
+
+existing_research_page = null
+FOR each page in existing_pages:
+  IF page.title contains "Research":
+    existing_research_page = page.name
+    BREAK
+```
+
+### Step 5.5.3: Create or Update Research Page
+
+```
+research_content = read_file("${PHASE_DIR}/${PHASE}-RESEARCH.md")
+
+IF existing_research_page:
+  # Update existing page
+  mosic_update_document("M Page", existing_research_page, {
+    status: "Published",
+    content: convert_to_editorjs(research_content)
+  })
+  page_id = existing_research_page
+ELSE:
+  # Create new Research page linked to phase task list
+  research_page = mosic_create_entity_page("MTask List", TASK_LIST_ID, {
+    workspace_id: workspace_id,
+    title: "Phase " + PHASE + " Research",
+    page_type: "Document",
+    icon: mosic.page_icons.research,  # "lucide:search"
+    status: "Published",
+    content: convert_to_editorjs(research_content),
+    relation_type: "Related"
+  })
+  page_id = research_page.name
+```
+
+### Step 5.5.4: Tag the Research Page
+
+```
+mosic_batch_add_tags_to_document("M Page", page_id, [
+  GSD_MANAGED_TAG,
+  RESEARCH_TAG,
+  PHASE_TAG
+])
+```
+
+### Step 5.5.5: Update config.json
+
+```bash
+# Update config.json with:
+# mosic.pages["phase-NN-research"] = page_id
+# mosic.last_sync = current timestamp
+```
+
+Display:
+```
+✓ Research synced to Mosic
+  Page: https://mosic.pro/app/page/[page_id]
+```
+
+**Error handling:**
+```
+IF mosic sync fails:
+  - Log warning: "Mosic sync failed: [error]. Research saved locally."
+  - Add to mosic.pending_sync array for retry
+  - Continue (don't block)
+```
+
+**If mosic.enabled = false:** Skip Mosic sync.
 
 ## 6. Spawn Continuation Agent
 
@@ -196,5 +296,9 @@ Task(
 - [ ] Existing research checked
 - [ ] gsd-phase-researcher spawned with context
 - [ ] Checkpoints handled correctly
+- [ ] Mosic sync (if enabled):
+  - [ ] Research page created or updated linked to phase task list
+  - [ ] Tags applied (gsd-managed, research, phase-NN)
+  - [ ] config.json updated with page mapping
 - [ ] User knows next steps
 </success_criteria>

@@ -235,6 +235,294 @@ EOF
 )"
 ```
 
+## Phase 4.5: Mosic Project Setup (Deep Integration)
+
+**Check for Mosic MCP availability:**
+
+```bash
+# Check if .mcp.json exists and contains mosic.pro server
+if [ -f .mcp.json ]; then
+  MOSIC_AVAILABLE=$(grep -l "mosic.pro" .mcp.json 2>/dev/null && echo "yes" || echo "no")
+else
+  MOSIC_AVAILABLE="no"
+fi
+```
+
+**If Mosic available:**
+
+Display:
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ GSD ► MOSIC INTEGRATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Mosic MCP detected. Setting up project sync...
+```
+
+### Step 1: Resolve Workspace and Space
+
+**Get workspace_id from CLAUDE.md or .mcp.json:**
+```
+# Check CLAUDE.md for documented workspace_id first
+workspace_id = extract from CLAUDE.md "Workspace ID:" line
+space_id = extract from CLAUDE.md "Space ID:" line (optional)
+
+# If not found, list available workspaces
+IF workspace_id is null:
+  workspaces = mosic_list_workspaces({ include_stats: true })
+
+  IF workspaces.count == 1:
+    workspace_id = workspaces[0].name
+  ELSE:
+    Use AskUserQuestion to select workspace
+```
+
+### Step 2: Search for Existing Project (Handle Both New & Existing)
+
+```
+# Search by exact name match first
+existing_projects = mosic_advanced_search({
+  workspace_id: workspace_id,
+  doctypes: ["MProject"],
+  query: "[project_name]",
+  limit: 10
+})
+
+# Also search for projects with similar names or GSD-managed tag
+gsd_projects = mosic_search_documents_by_tags({
+  workspace_id: workspace_id,
+  tag_ids: [gsd_managed_tag_id],
+  document_types: ["MProject"],
+  search_query: "[project_name]"
+}) IF gsd_managed_tag exists
+```
+
+### Step 3: Handle Existing Project Discovery
+
+**If existing project found:**
+
+```
+# Analyze existing project structure
+existing = mosic_get_project(project_id, {
+  include_task_lists: true,
+  include_comments: true
+})
+
+existing_pages = mosic_get_entity_pages("MProject", project_id, {
+  include_subtree: true,
+  include_content: false
+})
+
+existing_relations = mosic_get_document_relations("MProject", project_id)
+```
+
+Use AskUserQuestion:
+- header: "Existing Project"
+- question: "Found Mosic project '[name]' with [N] task lists, [M] pages. How to proceed?"
+- options:
+  - "Link & Sync" — Link to existing, sync missing elements only (Recommended)
+  - "Link & Reset" — Link to existing, archive old content, start fresh
+  - "Create New" — Create separate Mosic project
+  - "Skip Mosic" — Don't sync to Mosic
+
+**If "Link & Sync" (Intelligent Merge):**
+```
+# Detect what exists vs what's missing
+existing_elements = {
+  has_overview: existing_pages.find(p => p.title.includes("Overview")),
+  has_requirements: existing_pages.find(p => p.page_type == "Spec" && p.title.includes("Requirements")),
+  has_roadmap: existing_pages.find(p => p.title.includes("Roadmap")),
+  phase_lists: existing.task_lists.filter(tl => tl.title.includes("Phase"))
+}
+
+# Only create what's missing
+IF NOT existing_elements.has_overview:
+  create Overview page
+IF NOT existing_elements.has_requirements:
+  create Requirements page
+# etc.
+
+# Store existing IDs in config.json for mapping
+```
+
+**If "Link & Reset":**
+```
+# Archive existing content (soft delete)
+FOR each task_list in existing.task_lists:
+  mosic_update_document("MTask List", task_list.name, { is_archived: true })
+
+FOR each page in existing_pages:
+  mosic_update_document("M Page", page.name, { is_archived: true })
+
+# Proceed with fresh creation
+```
+
+### Step 4: Create/Ensure GSD Tags Exist
+
+**Tag infrastructure setup (idempotent):**
+```
+# Search for existing GSD tags
+existing_tags = mosic_search_tags({ workspace_id, query: "gsd" })
+
+# Define required tags with colors
+required_tags = [
+  { title: "gsd-managed", color: "#10B981", description: "Managed by GSD framework" },
+  { title: "requirements", color: "#6366F1", description: "Requirements documentation" },
+  { title: "research", color: "#8B5CF6", description: "Research and investigation" },
+  { title: "plan", color: "#F59E0B", description: "Execution plans" },
+  { title: "summary", color: "#22C55E", description: "Completion summaries" },
+  { title: "verification", color: "#06B6D4", description: "Verification reports" },
+  { title: "uat", color: "#EC4899", description: "User acceptance testing" },
+  { title: "quick", color: "#78716C", description: "Quick tasks outside roadmap" },
+  { title: "fix", color: "#EF4444", description: "Bug fixes and issue resolution" }
+]
+
+FOR each required_tag:
+  existing = existing_tags.find(t => t.title == required_tag.title)
+  IF existing:
+    tag_ids[required_tag.title] = existing.name
+  ELSE:
+    new_tag = mosic_create_document("M Tag", {
+      workspace_id: workspace_id,
+      title: required_tag.title,
+      color: required_tag.color,
+      description: required_tag.description
+    })
+    tag_ids[required_tag.title] = new_tag.name
+
+# Store tag IDs in config.json mosic.tags section
+```
+
+### Step 5: Create/Update MProject
+
+**If creating new project:**
+```
+project = mosic_create_document("MProject", {
+  workspace_id: workspace_id,
+  space: space_id,  # Optional: place in specific space
+  title: "[project_name]",
+  description: "[from PROJECT.md 'What This Is' section]",
+  prefix: "GSD",
+  icon: "lucide:rocket",
+  color: "#10B981",
+  status: "Backlog",
+  priority: "Normal",
+  start_date: "[today]",
+  target_date: "[estimated based on phase count, optional]"
+})
+
+project_id = project.name
+```
+
+**Tag the project:**
+```
+mosic_add_tag_to_document("MProject", project_id, tag_ids["gsd-managed"])
+```
+
+### Step 6: Create Project Documentation Pages with Proper Types
+
+**Create Overview page (type: Document):**
+```
+overview_page = mosic_create_entity_page("MProject", project_id, {
+  workspace_id: workspace_id,
+  title: "Project Overview",
+  page_type: "Document",
+  icon: "lucide:book-open",
+  status: "Published",
+  content: "[PROJECT.md content in Editor.js format]",
+  relation_type: "Related"
+})
+
+mosic_batch_add_tags_to_document("M Page", overview_page.name, [
+  tag_ids["gsd-managed"]
+])
+```
+
+**Create Requirements page (type: Spec):**
+```
+IF .planning/REQUIREMENTS.md will be created:
+  # Placeholder - will be populated in Phase 7
+  mosic.pages.requirements = "pending"
+```
+
+### Step 7: Update config.json with Full Mosic State
+
+```json
+{
+  "mosic": {
+    "enabled": true,
+    "workspace_id": "[workspace_id]",
+    "space_id": "[space_id or null]",
+    "project_id": "[project_id]",
+    "sync_on_commit": true,
+    "auto_detect": true,
+    "task_lists": {},
+    "tasks": {},
+    "pages": {
+      "overview": "[overview_page_id]",
+      "requirements": null,
+      "roadmap": null
+    },
+    "tags": {
+      "gsd_managed": "[tag_id]",
+      "requirements": "[tag_id]",
+      "research": "[tag_id]",
+      "plan": "[tag_id]",
+      "summary": "[tag_id]",
+      "verification": "[tag_id]",
+      "uat": "[tag_id]",
+      "quick": "[tag_id]",
+      "fix": "[tag_id]",
+      "phase_tags": {}
+    },
+    "page_types": {
+      "overview": "Document",
+      "requirements": "Spec",
+      "roadmap": "Spec",
+      "research": "Document",
+      "plan": "Spec",
+      "summary": "Document",
+      "verification": "Document",
+      "uat": "Document"
+    },
+    "page_icons": {
+      "overview": "lucide:book-open",
+      "requirements": "lucide:list-checks",
+      "roadmap": "lucide:map",
+      "research": "lucide:search",
+      "plan": "lucide:file-code",
+      "summary": "lucide:check-circle",
+      "verification": "lucide:shield-check",
+      "uat": "lucide:user-check"
+    },
+    "pending_sync": [],
+    "last_sync": "[ISO timestamp]"
+  }
+}
+```
+
+Display:
+```
+✓ Mosic project configured
+  Project: https://mosic.pro/app/Project/[project_id]
+  Tags: [N] GSD tags ready
+  Pages: Overview created
+```
+
+**Error handling:**
+
+```
+IF mosic sync fails:
+  - Display warning: "Mosic sync failed: [error]. Continuing with local-only mode."
+  - Set mosic.enabled = false in config.json
+  - Add to mosic.pending_sync for retry
+  - Continue to Phase 5 (don't block project creation)
+```
+
+**If Mosic not available or "Skip Mosic" selected:**
+- Ensure `mosic.enabled = false` in config.json
+- Continue to Phase 5
+
 ## Phase 5: Workflow Preferences
 
 **Round 1 — Core workflow settings (4 questions):**
@@ -926,6 +1214,199 @@ EOF
 )"
 ```
 
+## Phase 8.5: Sync Roadmap to Mosic (Full Structure)
+
+**Check if Mosic is enabled:**
+
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+Display:
+```
+◆ Syncing roadmap structure to Mosic...
+```
+
+### Step 1: Create Requirements Page (type: Spec)
+
+```
+requirements_page = mosic_create_entity_page("MProject", project_id, {
+  workspace_id: workspace_id,
+  title: "Requirements Specification",
+  page_type: "Spec",
+  icon: "lucide:list-checks",
+  status: "Published",
+  content: "[REQUIREMENTS.md content in Editor.js format]",
+  relation_type: "Related"
+})
+
+mosic_batch_add_tags_to_document("M Page", requirements_page.name, [
+  tag_ids["gsd-managed"],
+  tag_ids["requirements"]
+])
+
+# Update config.json
+mosic.pages.requirements = requirements_page.name
+```
+
+### Step 2: Create Roadmap Page (type: Spec)
+
+```
+roadmap_page = mosic_create_entity_page("MProject", project_id, {
+  workspace_id: workspace_id,
+  title: "Project Roadmap",
+  page_type: "Spec",
+  icon: "lucide:map",
+  status: "Published",
+  content: "[ROADMAP.md content in Editor.js format]",
+  relation_type: "Related"
+})
+
+mosic_batch_add_tags_to_document("M Page", roadmap_page.name, [
+  tag_ids["gsd-managed"]
+])
+
+# Update config.json
+mosic.pages.roadmap = roadmap_page.name
+```
+
+### Step 3: Parse and Create Phase Structure
+
+Extract all phases from ROADMAP.md with:
+- Phase number (NN)
+- Phase name
+- Phase goal
+- Success criteria
+- Mapped requirements (REQ-IDs)
+
+### Step 4: Create MTask Lists for Each Phase
+
+```
+FOR each phase in ROADMAP.md:
+  # Create phase-specific tag first (for filtering)
+  phase_tag_title = "phase-" + phase.number
+  phase_tag = mosic_create_document("M Tag", {
+    workspace_id: workspace_id,
+    title: phase_tag_title,
+    color: "[generate gradient color based on phase number]",
+    description: "Phase " + phase.number + ": " + phase.name
+  })
+
+  # Store tag ID
+  mosic.tags.phase_tags["phase-" + phase.number] = phase_tag.name
+
+  # Create MTask List for this phase with rich metadata
+  task_list = mosic_create_document("MTask List", {
+    workspace_id: workspace_id,
+    project: project_id,
+    title: "Phase " + phase.number + ": " + phase.name,
+    description: "[phase.goal]\n\n**Success Criteria:**\n" + phase.success_criteria.join("\n- "),
+    icon: "lucide:folder-kanban",
+    color: "[phase color]",
+    prefix: "P" + phase.number,
+    status: "Open"
+  })
+
+  # Tag the task list
+  mosic_batch_add_tags_to_document("MTask List", task_list.name, [
+    tag_ids["gsd-managed"],
+    phase_tag.name
+  ])
+
+  # Store mapping in config.json
+  mosic.task_lists["phase-" + phase.number] = task_list.name
+
+  # Create Depends relations between phases
+  IF phase.depends_on:
+    FOR each dependency in phase.depends_on:
+      dep_list_id = mosic.task_lists["phase-" + dependency]
+      IF dep_list_id:
+        mosic_create_document("M Relation", {
+          workspace_id: workspace_id,
+          source_doctype: "MTask List",
+          source_name: task_list.name,
+          target_doctype: "MTask List",
+          target_name: dep_list_id,
+          relation_type: "Depends"
+        })
+```
+
+### Step 5: Create Phase Documentation Pages
+
+```
+FOR each phase:
+  # Create phase overview page linked to task list
+  phase_page = mosic_create_entity_page("MTask List", task_list.name, {
+    workspace_id: workspace_id,
+    title: "Phase " + phase.number + " Overview",
+    page_type: "Document",
+    icon: "lucide:book-open",
+    status: "Draft",
+    content: "[Phase overview: goal, success criteria, requirements mapping]",
+    relation_type: "Related"
+  })
+
+  mosic_batch_add_tags_to_document("M Page", phase_page.name, [
+    tag_ids["gsd-managed"],
+    mosic.tags.phase_tags["phase-" + phase.number]
+  ])
+
+  # Store page ID
+  mosic.pages["phase-" + phase.number + "-overview"] = phase_page.name
+```
+
+### Step 6: Link Requirements to Phases (Traceability)
+
+```
+# Create relations from Requirements page to relevant phase task lists
+FOR each phase:
+  FOR each req_id in phase.requirements:
+    # Create Related relation for traceability
+    mosic_create_document("M Relation", {
+      workspace_id: workspace_id,
+      source_doctype: "M Page",
+      source_name: requirements_page.name,
+      target_doctype: "MTask List",
+      target_name: mosic.task_lists["phase-" + phase.number],
+      relation_type: "Related"
+    })
+```
+
+### Step 7: Update config.json with Full Mappings
+
+Write updated config.json with all IDs stored:
+- `mosic.task_lists`: phase-to-task-list mappings
+- `mosic.pages`: all page IDs
+- `mosic.tags.phase_tags`: phase-specific tag IDs
+
+Display:
+```
+✓ Roadmap synced to Mosic
+
+  Project: https://mosic.pro/app/Project/[project_id]
+  Phases: [N] task lists created
+  Pages: Overview, Requirements, Roadmap + [N] phase pages
+  Relations: [M] dependency links established
+
+  Phase Structure:
+  ├─ Phase 01: [name] (P01-*)
+  ├─ Phase 02: [name] (P02-*) → depends on P01
+  └─ Phase 03: [name] (P03-*) → depends on P02
+```
+
+**Error handling:**
+
+```
+IF mosic sync fails:
+  - Display warning: "Mosic roadmap sync failed: [error]. Local roadmap committed."
+  - Add failed items to mosic.pending_sync array
+  - Continue to Phase 10 (don't block)
+```
+
+**If mosic.enabled = false:** Skip to Phase 10.
+
 ## Phase 10: Done
 
 Present completion with next steps:
@@ -946,6 +1427,10 @@ Present completion with next steps:
 | Roadmap        | `.planning/ROADMAP.md`      |
 
 **[N] phases** | **[X] requirements** | Ready to build ✓
+
+[IF mosic.enabled:]
+**Mosic:** https://mosic.pro/app/Project/[project_id]
+[END IF]
 
 ───────────────────────────────────────────────────────────────
 
@@ -1001,6 +1486,12 @@ Present completion with next steps:
 - [ ] ROADMAP.md created with phases, requirement mappings, success criteria
 - [ ] STATE.md initialized
 - [ ] REQUIREMENTS.md traceability updated
+- [ ] Mosic integration (if .mcp.json with mosic.pro detected):
+  - [ ] MProject created or linked
+  - [ ] Overview page created
+  - [ ] MTask Lists created for each phase
+  - [ ] Tags applied (gsd-managed, phase-NN)
+  - [ ] config.json updated with mosic.project_id and task_lists
 - [ ] User knows next step is `/gsd:discuss-phase 1`
 
 **Atomic commits:** Each phase commits its artifacts immediately. If context is lost, artifacts persist.

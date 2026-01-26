@@ -249,6 +249,146 @@ grep -r "Phase 19" .planning/phases/18-*/ 2>/dev/null
 Update any internal references to reflect new numbering.
 </step>
 
+<step name="sync_removal_to_mosic">
+**Sync phase removal to Mosic (Deep Integration):**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+Display:
+```
+◆ Syncing phase removal to Mosic...
+```
+
+### Step 1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+TARGET_TASK_LIST=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${target}\"]")
+```
+
+### Step 2: Archive or Delete the MTask List
+
+```
+IF TARGET_TASK_LIST:
+  # Option 1: Archive (soft delete - preserves history)
+  mosic_update_document("MTask List", TARGET_TASK_LIST, {
+    status: "Cancelled",
+    title: "[REMOVED] " + original_title,
+    description: original_description + "\n\n---\n**REMOVED:** This phase was removed from the roadmap. Historical record preserved."
+  })
+
+  # Option 2: Delete (hard delete - if user prefers clean state)
+  # mosic_delete_document("MTask List", TARGET_TASK_LIST)
+
+  # Remove from config
+  delete mosic.task_lists["phase-" + target]
+```
+
+### Step 3: Update Dependency Relations
+
+```
+# Find the phases that depended on the removed phase
+next_phase_num = target + 1  # For integer removal
+prev_phase_num = target - 1
+
+# Get task list IDs
+PREV_TASK_LIST = mosic.task_lists["phase-" + prev_phase_num]
+NEXT_TASK_LIST = mosic.task_lists["phase-" + next_phase_num]
+
+IF NEXT_TASK_LIST AND PREV_TASK_LIST:
+  # Remove old dependency (next → removed)
+  existing_relations = mosic_get_document_relations("MTask List", NEXT_TASK_LIST)
+  FOR each relation in existing_relations:
+    IF relation.target_name == TARGET_TASK_LIST AND relation.relation_type == "Depends":
+      mosic_delete_document("M Relation", relation.name)
+
+  # Create new dependency (next → prev, skipping removed)
+  mosic_create_document("M Relation", {
+    workspace_id: workspace_id,
+    source_doctype: "MTask List",
+    source_name: NEXT_TASK_LIST,
+    target_doctype: "MTask List",
+    target_name: PREV_TASK_LIST,
+    relation_type: "Depends"
+  })
+```
+
+### Step 4: Update Task List Mappings for Renumbered Phases
+
+```
+# For each renumbered phase, update the config mapping
+FOR each renumbered phase (old_num → new_num):
+  old_task_list = mosic.task_lists["phase-" + old_num]
+
+  IF old_task_list:
+    # Update the task list title in Mosic
+    mosic_update_document("MTask List", old_task_list, {
+      title: "Phase " + new_num + ": " + phase_name,
+      prefix: "P" + new_num
+    })
+
+    # Update config mapping
+    delete mosic.task_lists["phase-" + old_num]
+    mosic.task_lists["phase-" + new_num] = old_task_list
+
+    # Update phase tag reference
+    old_tag = mosic.tags.phase_tags["phase-" + old_num]
+    delete mosic.tags.phase_tags["phase-" + old_num]
+    mosic.tags.phase_tags["phase-" + new_num] = old_tag
+```
+
+### Step 5: Archive Related Pages
+
+```
+# Archive pages linked to removed phase
+removed_pages = [
+  mosic.pages["phase-" + target + "-overview"],
+  mosic.pages["phase-" + target + "-research"],
+  mosic.pages["phase-" + target + "-plan-*"]
+]
+
+FOR each page_id in removed_pages:
+  IF page_id:
+    mosic_update_document("M Page", page_id, {
+      status: "Archived",
+      title: "[REMOVED] " + original_title
+    })
+    delete mosic.pages[page_key]
+```
+
+### Step 6: Update config.json
+
+```bash
+# Update config.json with:
+# - Removed phase task_list and pages deleted from mappings
+# - Renumbered phases with updated keys
+# - mosic.last_sync = current timestamp
+```
+
+Display:
+```
+✓ Phase removal synced to Mosic
+  Archived: Phase {target} task list
+  Dependencies: Phase {next} now depends on Phase {prev}
+  Renumbered: {N} task lists updated
+```
+
+**Error handling:**
+```
+IF mosic sync fails:
+  - Log warning: "Mosic sync failed: [error]. Phase removed locally."
+  - Add to mosic.pending_sync array for retry
+  - Continue to commit step (don't block)
+```
+
+**If mosic.enabled = false:** Skip to commit step.
+</step>
+
 <step name="commit">
 Stage and commit the removal:
 
@@ -343,6 +483,12 @@ Phase removal is complete when:
 - [ ] ROADMAP.md updated (section removed, all references renumbered)
 - [ ] STATE.md updated (phase count, progress percentage)
 - [ ] Dependency references updated in subsequent phases
+- [ ] Mosic sync (if enabled):
+  - [ ] MTask List archived/cancelled with [REMOVED] prefix
+  - [ ] Dependency relations updated (next phase now depends on prev)
+  - [ ] Renumbered phase task lists updated with new titles
+  - [ ] Related pages archived
+  - [ ] config.json mappings updated (removed and renumbered)
 - [ ] Changes committed with descriptive message
 - [ ] No gaps in phase numbering
 - [ ] User informed of changes

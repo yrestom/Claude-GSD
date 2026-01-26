@@ -5,12 +5,14 @@ allowed-tools:
   - Read
   - Write
   - Bash
+  - ToolSearch
 ---
 
 <objective>
 Create `.continue-here.md` handoff file to preserve complete work state across sessions.
 
 Enables seamless resumption in fresh session with full context restoration.
+Also updates Mosic task status to "Blocked" or "On Hold" if integration enabled.
 </objective>
 
 <context>
@@ -107,6 +109,96 @@ git commit -m "wip: [phase-name] paused at task [X]/[Y]"
 ```
 </step>
 
+<step name="sync_to_mosic">
+**Sync pause status to Mosic:**
+
+Check Mosic status:
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+Display:
+```
+◆ Syncing pause status to Mosic...
+```
+
+### Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+CURRENT_PLAN=$(grep "plan:" .planning/phases/${PHASE_DIR}/.continue-here.md | cut -d: -f2 | tr -d ' ')
+TASK_ID=$(cat .planning/config.json | jq -r ".mosic.tasks[\"phase-${PHASE_NUM}-plan-${CURRENT_PLAN}\"]")
+```
+
+### Update Task Status to Blocked/On Hold
+
+```
+# Load Mosic tools
+ToolSearch("mosic task update")
+
+IF TASK_ID is not null:
+  # Determine status based on blockers
+  IF blockers exist in .continue-here.md:
+    new_status = "Blocked"
+  ELSE:
+    new_status = "On Hold"
+
+  # Update task status
+  mosic_update_document("MTask", TASK_ID, {
+    status: new_status
+  })
+
+  # Add pause comment with context
+  pause_reason = extract_context_from_continue_here()
+  next_action = extract_next_action_from_continue_here()
+
+  mosic_create_document("M Comment", {
+    workspace_id: WORKSPACE_ID,
+    ref_doc: "MTask",
+    ref_name: TASK_ID,
+    content: "⏸️ **Work Paused**\n\n**Status:** " + new_status + "\n**Progress:** Task " + task_num + "/" + total_tasks + "\n\n**Context:**\n" + pause_reason + "\n\n**Next Action:**\n" + next_action + "\n\n**Paused at:** " + timestamp
+  })
+```
+
+### Update Phase (Task List) Status if All Tasks Paused
+
+```
+TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PHASE_NUM}\"]")
+
+IF TASK_LIST_ID is not null:
+  # Check if any tasks still in progress
+  active_tasks = mosic_search_tasks({
+    task_list: TASK_LIST_ID,
+    status__in: ["In Progress"]
+  })
+
+  IF active_tasks.length == 0:
+    # Update task list status to On Hold
+    mosic_update_document("MTask List", TASK_LIST_ID, {
+      status: "On Hold"
+    })
+```
+
+Display:
+```
+✓ Mosic updated
+  Task status: {Blocked/On Hold}
+  Pause comment added
+```
+
+**Error handling:**
+```
+IF mosic sync fails:
+  - Log warning: "Mosic sync failed: [error]. Local handoff created."
+  - Add to mosic.pending_sync array for retry
+  - Continue to confirmation (don't block)
+```
+
+**If mosic.enabled = false:** Skip to confirmation step.
+</step>
+
 <step name="confirm">
 ```
 ✓ Handoff created: .planning/phases/[XX-name]/.continue-here.md
@@ -117,6 +209,9 @@ Current state:
 - Task: [X] of [Y]
 - Status: [in_progress/blocked]
 - Committed as WIP
+[IF mosic.enabled:]
+- Mosic: Task marked as {Blocked/On Hold}
+[END IF]
 
 To resume: /gsd:resume-work
 
@@ -129,6 +224,9 @@ To resume: /gsd:resume-work
 - [ ] .continue-here.md created in correct phase directory
 - [ ] All sections filled with specific content
 - [ ] Committed as WIP
+- [ ] Mosic sync (if enabled):
+  - [ ] Task status updated to Blocked/On Hold
+  - [ ] Pause comment added with context
+  - [ ] Task list status updated if no active tasks
 - [ ] User knows location and how to resume
 </success_criteria>
-```

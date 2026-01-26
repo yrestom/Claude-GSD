@@ -662,7 +662,196 @@ EOF
 )"
 ```
 
-## Phase 10: Done
+## Phase 10: Sync Milestone to Mosic (Deep Integration)
+
+**Check if Mosic is enabled:**
+
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+Display:
+```
+◆ Syncing milestone to Mosic...
+```
+
+### Step 10.1: Load Mosic Config
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+```
+
+### Step 10.2: Update or Create MProject
+
+```
+IF PROJECT_ID exists:
+  # Update existing project with new milestone info
+  mosic_update_document("MProject", PROJECT_ID, {
+    title: project_name + " - " + milestone_version,
+    description: "Current Milestone: v" + milestone_version + " " + milestone_name + "\n\n" + milestone_goal,
+    status: "Active"
+  })
+ELSE:
+  # Create new project for this milestone
+  project = mosic_create_document("MProject", {
+    workspace_id: workspace_id,
+    title: project_name + " - " + milestone_version,
+    description: "Milestone: v" + milestone_version + " " + milestone_name + "\n\n" + milestone_goal,
+    icon: "lucide:rocket",
+    color: "blue",
+    status: "Active",
+    prefix: "MS" + milestone_version.replace(".", "")
+  })
+  PROJECT_ID = project.name
+
+  # Update config with project ID
+  mosic.project_id = PROJECT_ID
+```
+
+### Step 10.3: Tag the Project
+
+```
+mosic_add_tag_to_document("MProject", PROJECT_ID, GSD_MANAGED_TAG)
+```
+
+### Step 10.4: Create Milestone Overview Page
+
+```
+overview_page = mosic_create_entity_page("MProject", PROJECT_ID, {
+  workspace_id: workspace_id,
+  title: "Milestone v" + milestone_version + " Overview",
+  page_type: "Document",
+  icon: mosic.page_icons.overview,
+  status: "Published",
+  content: {
+    blocks: [
+      { type: "header", data: { text: "Milestone v" + milestone_version + ": " + milestone_name, level: 1 } },
+      { type: "paragraph", data: { text: milestone_goal } },
+      { type: "header", data: { text: "Target Features", level: 2 } },
+      { type: "list", data: { style: "unordered", items: milestone_features } },
+      { type: "header", data: { text: "Phases", level: 2 } },
+      { type: "paragraph", data: { text: "See linked Task Lists for phase details." } }
+    ]
+  },
+  relation_type: "Related"
+})
+
+mosic_add_tag_to_document("M Page", overview_page.name, GSD_MANAGED_TAG)
+mosic.pages["milestone-" + milestone_version + "-overview"] = overview_page.name
+```
+
+### Step 10.5: Create Requirements Page
+
+```
+IF REQUIREMENTS.md was created:
+  req_page = mosic_create_entity_page("MProject", PROJECT_ID, {
+    workspace_id: workspace_id,
+    title: "Milestone v" + milestone_version + " Requirements",
+    page_type: "Spec",
+    icon: mosic.page_icons.requirements,
+    status: "Published",
+    content: convert_to_editorjs(REQUIREMENTS.md content),
+    relation_type: "Related"
+  })
+
+  mosic_batch_add_tags_to_document("M Page", req_page.name, [
+    GSD_MANAGED_TAG,
+    mosic.tags.requirements
+  ])
+
+  mosic.pages["milestone-" + milestone_version + "-requirements"] = req_page.name
+```
+
+### Step 10.6: Create Task Lists for Each Phase
+
+```
+FOR each phase in ROADMAP.md:
+  # Create phase tag if not exists
+  phase_tag = mosic_search_tags({ workspace_id, query: "phase-" + phase_num })
+  IF phase_tag.length == 0:
+    phase_tag = mosic_create_document("M Tag", {
+      workspace_id: workspace_id,
+      name: "phase-" + phase_num,
+      color: "blue"
+    })
+
+  # Create MTask List for phase
+  task_list = mosic_create_document("MTask List", {
+    workspace_id: workspace_id,
+    project: PROJECT_ID,
+    title: "Phase " + phase_num + ": " + phase_name,
+    description: phase_goal,
+    icon: "lucide:layers",
+    color: "slate",
+    status: "Backlog",
+    prefix: "P" + phase_num
+  })
+
+  # Tag the task list
+  mosic_batch_add_tags_to_document("MTask List", task_list.name, [
+    GSD_MANAGED_TAG,
+    phase_tag.name
+  ])
+
+  # Create Depends relation to previous phase
+  IF prev_phase_task_list:
+    mosic_create_document("M Relation", {
+      workspace_id: workspace_id,
+      source_doctype: "MTask List",
+      source_name: task_list.name,
+      target_doctype: "MTask List",
+      target_name: prev_phase_task_list,
+      relation_type: "Depends"
+    })
+
+  # Store mapping
+  mosic.task_lists["phase-" + phase_num] = task_list.name
+  mosic.tags.phase_tags["phase-" + phase_num] = phase_tag.name
+  prev_phase_task_list = task_list.name
+```
+
+### Step 10.7: Update config.json with Mappings
+
+```bash
+# Update config.json with:
+# mosic.project_id
+# mosic.task_lists["phase-NN"] for each phase
+# mosic.pages["milestone-X.Y-overview"]
+# mosic.pages["milestone-X.Y-requirements"]
+# mosic.tags.phase_tags["phase-NN"]
+# mosic.last_sync = current timestamp
+```
+
+Display:
+```
+✓ Milestone synced to Mosic
+
+  Project: https://mosic.pro/app/MProject/[PROJECT_ID]
+  Phases: [N] task lists created
+  Pages: Overview + Requirements
+
+  Phase Structure:
+  ├─ Phase [N]: [name]
+  ├─ Phase [N+1]: [name] → depends on Phase [N]
+  └─ Phase [N+2]: [name] → depends on Phase [N+1]
+```
+
+**Error handling:**
+
+```
+IF mosic sync fails:
+  - Log warning: "Mosic sync failed: [error]. Milestone created locally."
+  - Add to mosic.pending_sync array for retry
+  - Continue to completion step (don't block)
+```
+
+**If mosic.enabled = false:** Skip to Phase 11.
+
+## Phase 11: Done
 
 Present completion with next steps:
 
@@ -679,6 +868,9 @@ Present completion with next steps:
 | Research       | `.planning/research/`       |
 | Requirements   | `.planning/REQUIREMENTS.md` |
 | Roadmap        | `.planning/ROADMAP.md`      |
+[IF mosic.enabled:]
+| Mosic Project  | https://mosic.pro/app/MProject/[PROJECT_ID] |
+[END IF]
 
 **[N] phases** | **[X] requirements** | Ready to build ✓
 
@@ -715,6 +907,14 @@ Present completion with next steps:
 - [ ] User feedback incorporated (if any)
 - [ ] ROADMAP.md created with phases continuing from previous milestone
 - [ ] All commits made (if planning docs committed)
+- [ ] Mosic sync (if enabled):
+  - [ ] MProject created or updated with milestone info
+  - [ ] Overview page created for milestone
+  - [ ] Requirements page created (if REQUIREMENTS.md exists)
+  - [ ] MTask Lists created for each phase
+  - [ ] Depends relations created between phases
+  - [ ] Tags applied (gsd-managed, phase-NN)
+  - [ ] config.json updated with all mappings
 - [ ] User knows next step is `/gsd:discuss-phase [N]`
 
 **Atomic commits:** Each phase commits its artifacts immediately. If context is lost, artifacts persist.

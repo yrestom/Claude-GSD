@@ -467,7 +467,241 @@ Offer options:
 
 Wait for user response.
 
-## 13. Present Final Status
+## 13. Sync Plans to Mosic (Deep Integration)
+
+**Check if Mosic is enabled:**
+
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+Display:
+```
+◆ Syncing plans to Mosic...
+```
+
+### Step 13.1: Get Phase Context from Mosic
+
+```bash
+# Get task_list_id for this phase
+TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PHASE}\"]")
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+
+# Get tag IDs from config
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+PLAN_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.plan")
+PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PHASE}\"]")
+```
+
+### Step 13.2: Check for Existing Tasks in Mosic
+
+```
+# Search for existing tasks in this phase's task list
+existing_tasks = mosic_search_tasks({
+  workspace_id: workspace_id,
+  task_list_id: task_list_id,
+  status__in: ["Backlog", "ToDo", "In Progress"]
+})
+
+# Build mapping of existing plan tasks
+existing_plan_map = {}
+FOR each task in existing_tasks:
+  IF task.title matches "Plan {NN}:" pattern:
+    existing_plan_map[plan_number] = task.name
+```
+
+### Step 13.3: Create/Update MTasks for Each Plan
+
+```
+FOR each PLAN.md in ${PHASE_DIR}:
+  # Extract plan metadata from frontmatter
+  plan_number = extract from filename (e.g., "01" from "01-PLAN.md")
+  plan_objective = extract from <objective> section
+  plan_wave = extract from frontmatter "wave:"
+  plan_autonomous = extract from frontmatter "autonomous:"
+  plan_depends_on = extract from frontmatter "depends_on:"
+  plan_files_modified = extract from frontmatter "files_modified:"
+
+  # Check if task already exists
+  existing_task_id = existing_plan_map[plan_number]
+
+  IF existing_task_id:
+    # Update existing task
+    mosic_update_document("MTask", existing_task_id, {
+      description: "[Updated plan summary with wave, files, etc.]",
+      status: "ToDo"
+    })
+    task_id = existing_task_id
+  ELSE:
+    # Create new MTask with rich metadata
+    task = mosic_create_document("MTask", {
+      workspace_id: workspace_id,
+      task_list: task_list_id,
+      title: "Plan " + plan_number + ": " + plan_objective.substring(0, 100),
+      description: build_task_description(plan),
+      icon: "lucide:file-code",
+      status: "ToDo",
+      priority: determine_priority(plan_wave),  # Wave 1 = High, later waves = Normal
+      start_date: null,
+      due_date: null
+    })
+    task_id = task.name
+```
+
+### Step 13.4: Create Plan Page with Proper Type
+
+```
+  # Create Plan page (type: Spec) linked to task
+  plan_page = mosic_create_entity_page("MTask", task_id, {
+    workspace_id: workspace_id,
+    title: "Execution Plan",
+    page_type: "Spec",  # Plans are specifications
+    icon: mosic.page_icons.plan,  # "lucide:file-code"
+    status: "Published",
+    content: convert_to_editorjs(PLAN.md content),
+    relation_type: "Related"
+  })
+
+  # Tag the page with appropriate tags
+  mosic_batch_add_tags_to_document("M Page", plan_page.name, [
+    GSD_MANAGED_TAG,
+    PLAN_TAG,
+    PHASE_TAG
+  ])
+
+  # Store page ID
+  mosic.pages["phase-" + PHASE + "-plan-" + plan_number] = plan_page.name
+```
+
+### Step 13.5: Create Task Dependencies (Depends Relations)
+
+```
+  # Create Depends relations based on plan.depends_on
+  IF plan_depends_on AND plan_depends_on != "none":
+    FOR each dependency in plan_depends_on:
+      dep_task_id = mosic.tasks["phase-" + PHASE + "-plan-" + dependency]
+      IF dep_task_id:
+        mosic_create_document("M Relation", {
+          workspace_id: workspace_id,
+          source_doctype: "MTask",
+          source_name: task_id,
+          target_doctype: "MTask",
+          target_name: dep_task_id,
+          relation_type: "Depends"
+        })
+
+  # Tag the task
+  mosic_batch_add_tags_to_document("MTask", task_id, [
+    GSD_MANAGED_TAG,
+    PLAN_TAG,
+    PHASE_TAG
+  ])
+
+  # Store task ID in config and update PLAN.md frontmatter
+  mosic.tasks["phase-" + PHASE + "-plan-" + plan_number] = task_id
+
+  # Update PLAN.md frontmatter with mosic_task_id
+  Add to PLAN.md frontmatter: mosic_task_id: task_id
+```
+
+### Step 13.6: Create Checklist Items for Plan Tasks
+
+```
+  # Extract tasks from PLAN.md and create checklists
+  plan_tasks = extract_tasks_from_plan(PLAN.md)
+
+  # Initialize checklist storage for this plan
+  checklist_ids = {}
+
+  FOR each task in plan_tasks:
+    checklist = mosic_create_document("MTask CheckList", {
+      workspace_id: workspace_id,
+      task: task_id,
+      title: task.name,
+      done: false
+    })
+
+    # Store checklist ID mapped to task name for execute-phase lookup
+    checklist_ids[task.name] = checklist.name
+
+  # Store checklist IDs in config.json for later lookup by execute-phase
+  mosic.checklists = mosic.checklists or {}
+  mosic.checklists["phase-" + PHASE + "-plan-" + plan_number] = checklist_ids
+```
+
+### Step 13.7: Update Research Page (if exists)
+
+```
+  IF ${PHASE_DIR}/${PHASE}-RESEARCH.md exists:
+    # Create or update Research page linked to phase
+    research_page = mosic_create_entity_page("MTask List", task_list_id, {
+      workspace_id: workspace_id,
+      title: "Phase Research",
+      page_type: "Document",  # Research is documentation
+      icon: mosic.page_icons.research,  # "lucide:search"
+      status: "Published",
+      content: convert_to_editorjs(RESEARCH.md content),
+      relation_type: "Related"
+    })
+
+    mosic_batch_add_tags_to_document("M Page", research_page.name, [
+      GSD_MANAGED_TAG,
+      mosic.tags.research,
+      PHASE_TAG
+    ])
+
+    # Store page ID
+    mosic.pages["phase-" + PHASE + "-research"] = research_page.name
+```
+
+### Step 13.8: Update config.json with All Mappings
+
+```json
+{
+  "mosic": {
+    "tasks": {
+      "phase-01-plan-01": "task_id_1",
+      "phase-01-plan-02": "task_id_2"
+    },
+    "pages": {
+      "phase-01-plan-01": "page_id_1",
+      "phase-01-plan-02": "page_id_2",
+      "phase-01-research": "research_page_id"
+    },
+    "last_sync": "[ISO timestamp]"
+  }
+}
+```
+
+Display:
+```
+✓ Plans synced to Mosic
+
+  Task List: https://mosic.pro/app/MTask%20List/[task_list_id]
+  Tasks: [N] created/updated
+  Pages: [M] plan pages + research page
+  Relations: [R] dependency links
+
+  Plan Structure:
+  ├─ Plan 01: [objective] (Wave 1)
+  ├─ Plan 02: [objective] (Wave 1)
+  └─ Plan 03: [objective] (Wave 2) → depends on 01, 02
+```
+
+**Error handling:**
+
+```
+IF mosic sync fails:
+  - Display warning: "Mosic plan sync failed: [error]. Plans created locally."
+  - Add failed items to mosic.pending_sync array
+  - Continue to step 14 (don't block)
+```
+
+**If mosic.enabled = false:** Skip to step 14.
+
+## 14. Present Final Status
 
 Route to `<offer_next>`.
 
@@ -520,6 +754,11 @@ Verification: {Passed | Passed with override | Skipped}
 - [ ] Plans created (PLANNING COMPLETE or CHECKPOINT handled)
 - [ ] gsd-plan-checker spawned (unless --skip-verify)
 - [ ] Verification passed OR user override OR max iterations with user decision
+- [ ] Mosic sync (if enabled):
+  - [ ] MTasks created for each plan
+  - [ ] Plan pages attached to tasks
+  - [ ] Tags applied (gsd-managed, plan, phase-NN)
+  - [ ] Task IDs stored in config.json
 - [ ] User sees status between agent spawns
 - [ ] User knows next steps (execute or review)
 </success_criteria>

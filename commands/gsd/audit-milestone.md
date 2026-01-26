@@ -9,6 +9,7 @@ allowed-tools:
   - Bash
   - Task
   - Write
+  - mcp__mosic_pro__*
 ---
 
 <objective>
@@ -121,7 +122,7 @@ For each requirement in REQUIREMENTS.md mapped to this milestone:
 
 ## 6. Aggregate into v{version}-MILESTONE-AUDIT.md
 
-Create `.planning/v{version}-v{version}-MILESTONE-AUDIT.md` with:
+Create `.planning/v{version}-MILESTONE-AUDIT.md` with:
 
 ```yaml
 ---
@@ -154,6 +155,120 @@ Plus full markdown report with tables for requirements, phases, integration, tec
 - `passed` — all requirements met, no critical gaps, minimal tech debt
 - `gaps_found` — critical blockers exist
 - `tech_debt` — no blockers but accumulated deferred items need review
+
+## 6.5. Sync Audit to Mosic
+
+**Check if Mosic is enabled:**
+
+```bash
+MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+```
+
+**If mosic.enabled = true:**
+
+```bash
+WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
+PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
+GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
+VERIFICATION_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.verification")
+```
+
+### Step 6.5.1: Create Audit Page
+
+```
+audit_page = mosic_create_entity_page("MProject", PROJECT_ID, {
+  workspace_id: WORKSPACE_ID,
+  title: "Milestone v" + version + " Audit",
+  page_type: "Document",
+  icon: "lucide:clipboard-check",
+  status: "Published",
+  content: convert_to_editorjs(MILESTONE-AUDIT.md content),
+  relation_type: "Related"
+})
+
+mosic_batch_add_tags_to_document("M Page", audit_page.name, [
+  GSD_MANAGED_TAG,
+  VERIFICATION_TAG
+])
+```
+
+### Step 6.5.2: Update Phase Task Lists with Audit Status
+
+```
+FOR each phase in audit_results:
+  task_list_id = config.mosic.task_lists["phase-" + phase.number]
+  IF task_list_id:
+    # Add audit status as comment
+    mosic_create_document("M Comment", {
+      workspace_id: WORKSPACE_ID,
+      ref_doc: "MTask List",
+      ref_name: task_list_id,
+      content: "**Audit Status:** " + phase.status + "\n\n" +
+        (phase.gaps.length > 0 ? "**Gaps:**\n- " + phase.gaps.join("\n- ") : "No gaps") + "\n\n" +
+        (phase.tech_debt.length > 0 ? "**Tech Debt:**\n- " + phase.tech_debt.join("\n- ") : "No tech debt")
+    })
+
+    # If gaps found, create blocking tasks
+    IF phase.gaps.length > 0:
+      FOR each gap in phase.gaps:
+        gap_task = mosic_create_document("MTask", {
+          workspace_id: WORKSPACE_ID,
+          task_list: task_list_id,
+          title: "Gap: " + gap.description,
+          description: "**Audit Gap**\n\n" + gap.details + "\n\n**Requirement:** " + gap.requirement_id,
+          icon: "lucide:alert-triangle",
+          status: "ToDo",
+          priority: "High"
+        })
+
+        # Create Blocker relation to milestone completion
+        mosic_create_document("M Relation", {
+          workspace_id: WORKSPACE_ID,
+          source_doctype: "MTask",
+          source_name: gap_task.name,
+          target_doctype: "MProject",
+          target_name: PROJECT_ID,
+          relation_type: "Blocker"
+        })
+```
+
+### Step 6.5.3: Update config.json with Audit Info
+
+```json
+{
+  "mosic": {
+    "audits": {
+      "v{version}": {
+        "page_id": "[audit_page.name]",
+        "status": "[passed|gaps_found|tech_debt]",
+        "audited_at": "[ISO timestamp]",
+        "gap_tasks": ["task_id_1", "task_id_2"]
+      }
+    }
+  }
+}
+```
+
+Display:
+```
+✓ Audit synced to Mosic
+
+  Report: https://mosic.pro/app/page/[audit_page.name]
+  Status: [passed|gaps_found|tech_debt]
+  [IF gaps_found:] Gap Tasks: [N] blocking tasks created
+```
+
+**Error handling:**
+
+```
+IF mosic sync fails:
+  - Display warning: "Mosic audit sync failed: [error]. Local audit created."
+  - Add to mosic.pending_sync array:
+    { type: "milestone_audit", version: version }
+  - Continue (don't block)
+```
+
+**If mosic.enabled = false:** Skip Mosic sync.
 
 ## 7. Present Results
 
@@ -273,5 +388,12 @@ All requirements met. No critical blockers. Accumulated tech debt needs review.
 - [ ] Tech debt and deferred gaps aggregated
 - [ ] Integration checker spawned for cross-phase wiring
 - [ ] v{version}-MILESTONE-AUDIT.md created
+- [ ] Mosic sync (if enabled):
+  - [ ] Audit page created linked to MProject
+  - [ ] Tags applied (gsd-managed, verification)
+  - [ ] Phase task lists updated with audit comments
+  - [ ] Gap tasks created with Blocker relations (if gaps_found)
+  - [ ] config.json updated with audit info
+  - [ ] Sync failures handled gracefully (added to pending_sync)
 - [ ] Results presented with actionable next steps
 </success_criteria>
