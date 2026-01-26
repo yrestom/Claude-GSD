@@ -302,21 +302,24 @@ config.pages["phase-" + PHASE_NUM + "-discovery"] = discovery_page.name
 **Update task list with discovery summary:**
 
 ```javascript
+// IMPORTANT: MTask List descriptions use HTML format
 mosic_update_document("MTask List", phase_task_list.name, {
-  description: phase_task_list.description + "\n\n---\n\n**Discovery Summary:**\n" +
-    "Confidence: " + CONFIDENCE_LEVEL + "\n" +
-    "Recommendation: " + RECOMMENDATION
+  description: phase_task_list.description + "<hr>" +
+    "<p><strong>Discovery Summary:</strong></p>" +
+    "<p>Confidence: " + CONFIDENCE_LEVEL + "</p>" +
+    "<p>Recommendation: " + RECOMMENDATION + "</p>"
 })
 
 // Add discovery comment
+// IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
   reference_doctype: "MTask List",
   reference_name: phase_task_list.name,
-  content: "🔍 **Discovery Complete**\n\n" +
-    "Depth: Level " + LEVEL + "\n" +
-    "Confidence: " + CONFIDENCE_LEVEL + "\n\n" +
-    "[Full Discovery](page/" + discovery_page.name + ")"
+  content: "<p><strong>Discovery Complete</strong></p>" +
+    "<p>Depth: Level " + LEVEL + "</p>" +
+    "<p>Confidence: " + CONFIDENCE_LEVEL + "</p>" +
+    "<p><a href=\"page/" + discovery_page.name + "\">Full Discovery</a></p>"
 })
 ```
 

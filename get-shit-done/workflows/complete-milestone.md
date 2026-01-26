@@ -280,26 +280,33 @@ Update project in Mosic to reflect milestone completion:
 
 ```javascript
 // Update project status
+// IMPORTANT: MProject descriptions use HTML format
 mosic_update_document("MProject", project_id, {
   status: "Completed",
-  description: original_description + "\n\n---\n\n✅ **Milestone " + VERSION + " Complete**\n" +
-    "- Shipped: " + format_date(now) + "\n" +
-    "- Phases: " + PHASE_COUNT + "\n" +
-    "- Tasks: " + TASK_COUNT + "\n"
+  description: original_description + "<hr>" +
+    "<p><strong>Milestone " + VERSION + " Complete</strong></p>" +
+    "<ul>" +
+    "<li>Shipped: " + format_date(now) + "</li>" +
+    "<li>Phases: " + PHASE_COUNT + "</li>" +
+    "<li>Tasks: " + TASK_COUNT + "</li>" +
+    "</ul>"
 })
 
 // Add completion comment
+// IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
   reference_doctype: "MProject",
   reference_name: project_id,
-  content: "🎉 **Milestone " + VERSION + " Complete**\n\n" +
-    "**Delivered:** " + MILESTONE_DESCRIPTION + "\n\n" +
-    "**Stats:**\n" +
-    "- " + PHASE_COUNT + " phases completed\n" +
-    "- " + TASK_COUNT + " tasks total\n" +
-    "- " + DAYS + " days from start to ship\n\n" +
-    "**Git Tag:** `" + VERSION + "`"
+  content: "<p><strong>Milestone " + VERSION + " Complete</strong></p>" +
+    "<p><strong>Delivered:</strong> " + MILESTONE_DESCRIPTION + "</p>" +
+    "<p><strong>Stats:</strong></p>" +
+    "<ul>" +
+    "<li>" + PHASE_COUNT + " phases completed</li>" +
+    "<li>" + TASK_COUNT + " tasks total</li>" +
+    "<li>" + DAYS + " days from start to ship</li>" +
+    "</ul>" +
+    "<p><strong>Git Tag:</strong> <code>" + VERSION + "</code></p>"
 })
 ```
 
@@ -310,11 +317,12 @@ mosic_create_document("M Comment", {
 Ensure all phase task lists are marked complete:
 
 ```javascript
+// IMPORTANT: MTask List descriptions use HTML format
 for (task_list of task_lists) {
   if (task_list.status !== "Completed") {
     mosic_update_document("MTask List", task_list.name, {
       status: "Completed",
-      description: task_list.description + "\n\n---\n✅ Completed in " + VERSION
+      description: task_list.description + "<hr><p><strong>Completed in " + VERSION + "</strong></p>"
     })
   }
 }

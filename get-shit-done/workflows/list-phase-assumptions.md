@@ -224,14 +224,15 @@ mosic_batch_add_tags_to_document("M Page", assumptions_page.name, [
 ])
 
 // Add comment to task list
+// IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
   reference_doctype: "MTask List",
   reference_name: phase_task_list.name,
-  content: "💡 **Assumptions Reviewed**\n\n" +
-    "Key corrections:\n" +
-    corrections.map(c => "- " + c).join("\n") +
-    "\n\n[Full assumptions](page/" + assumptions_page.name + ")"
+  content: "<p><strong>Assumptions Reviewed</strong></p>" +
+    "<p>Key corrections:</p>" +
+    "<ul>" + corrections.map(c => "<li>" + c + "</li>").join("") + "</ul>" +
+    "<p><a href=\"page/" + assumptions_page.name + "\">Full assumptions</a></p>"
 })
 
 // Update config

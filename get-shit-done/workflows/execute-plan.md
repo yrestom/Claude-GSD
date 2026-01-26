@@ -406,24 +406,53 @@ mosic_batch_add_tags_to_document("M Page", summary_page.name, [
 ```javascript
 mosic_complete_task(task_id, true)
 
-// Update task description with summary
+// Update task description with completion summary
+// IMPORTANT: Task descriptions must use Editor.js format
+// Append completion blocks to existing description blocks
+existing_blocks = task.description.blocks || []
 mosic_update_document("MTask", task_id, {
-  description: task.description + "\n\n---\n\n✅ **Completed**\n" +
-    "- Duration: " + DURATION + "\n" +
-    "- Commits: " + commit_count + "\n" +
-    "[Summary](page/" + summary_page.name + ")"
+  description: {
+    blocks: [
+      ...existing_blocks,
+      {
+        type: "delimiter",
+        data: {}
+      },
+      {
+        type: "paragraph",
+        data: { text: "**Completed**" }
+      },
+      {
+        type: "list",
+        data: {
+          style: "unordered",
+          items: [
+            "Duration: " + DURATION,
+            "Commits: " + commit_count
+          ]
+        }
+      },
+      {
+        type: "paragraph",
+        data: { text: "[Summary](page/" + summary_page.name + ")" }
+      }
+    ]
+  }
 })
 
 // Add completion comment
+// IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
   reference_doctype: "MTask",
   reference_name: task_id,
-  content: "✅ **Task Complete**\n\n" +
-    "- Duration: " + DURATION + "\n" +
-    "- Subtasks: " + completed_subtasks + "/" + total_subtasks + "\n" +
-    "- Deviations: " + deviation_count + "\n\n" +
-    "[Summary](page/" + summary_page.name + ")"
+  content: "<p><strong>Task Complete</strong></p>" +
+    "<ul>" +
+    "<li>Duration: " + DURATION + "</li>" +
+    "<li>Subtasks: " + completed_subtasks + "/" + total_subtasks + "</li>" +
+    "<li>Deviations: " + deviation_count + "</li>" +
+    "</ul>" +
+    "<p><a href=\"page/" + summary_page.name + "\">Summary</a></p>"
 })
 ```
 

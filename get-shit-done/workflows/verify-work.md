@@ -309,14 +309,17 @@ mosic_update_content_blocks(uat_page.name, {
 })
 
 // Add completion comment
+// IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
   reference_doctype: "M Page",
   reference_name: uat_page.name,
-  content: "📋 **UAT Complete**\n\n" +
-    "- Passed: " + passed_count + "\n" +
-    "- Issues: " + issues_count + "\n" +
-    "- Skipped: " + skipped_count
+  content: "<p><strong>UAT Complete</strong></p>" +
+    "<ul>" +
+    "<li>Passed: " + passed_count + "</li>" +
+    "<li>Issues: " + issues_count + "</li>" +
+    "<li>Skipped: " + skipped_count + "</li>" +
+    "</ul>"
 })
 ```
 
@@ -329,14 +332,43 @@ Continue to create_issue_tasks.
 ```javascript
 if (issues_count > 0) {
   for (issue of issues_list) {
+    // IMPORTANT: Task descriptions must use Editor.js format
     issue_task = mosic_create_document("MTask", {
       workspace_id: workspace_id,
       task_list: phase_task_list.name,
       title: "Fix: " + issue.truth.substring(0, 80),
-      description: "**Failed UAT Test:** " + issue.test_num + "\n\n" +
-        "**Expected:**\n" + issue.expected + "\n\n" +
-        "**Reported:**\n" + issue.reported + "\n\n" +
-        "**Severity:** " + issue.severity,
+      description: {
+        blocks: [
+          {
+            type: "paragraph",
+            data: { text: "**Failed UAT Test:** " + issue.test_num }
+          },
+          {
+            type: "header",
+            data: { text: "Expected", level: 2 }
+          },
+          {
+            type: "paragraph",
+            data: { text: issue.expected }
+          },
+          {
+            type: "header",
+            data: { text: "Reported", level: 2 }
+          },
+          {
+            type: "paragraph",
+            data: { text: issue.reported }
+          },
+          {
+            type: "header",
+            data: { text: "Severity", level: 2 }
+          },
+          {
+            type: "paragraph",
+            data: { text: issue.severity }
+          }
+        ]
+      },
       icon: "lucide:alert-circle",
       status: "Blocked",  // Blocked until diagnosed
       priority: severity_to_priority(issue.severity)

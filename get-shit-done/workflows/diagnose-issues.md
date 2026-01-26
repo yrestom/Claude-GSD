@@ -266,23 +266,34 @@ for (diagnosed_gap of diagnosed_gaps) {
     issue_task = mosic_get_task(issue_task_id)
 
     // Update task with root cause
+    // IMPORTANT: Task descriptions must use Editor.js format
+    // Append diagnosis blocks to existing description
+    existing_blocks = issue_task.description.blocks || []
     mosic_update_document("MTask", issue_task_id, {
       status: "ToDo",  // Unblock now that we have diagnosis
-      description: issue_task.description + "\n\n---\n\n**Root Cause:**\n" +
-        diagnosed_gap.root_cause + "\n\n" +
-        "**Files Involved:**\n" +
-        diagnosed_gap.files.map(f => "- `" + f.path + "`: " + f.issue).join("\n") +
-        "\n\n**Suggested Fix:**\n" + diagnosed_gap.suggested_fix
+      description: {
+        blocks: [
+          ...existing_blocks,
+          { type: "delimiter", data: {} },
+          { type: "header", data: { text: "Root Cause", level: 2 } },
+          { type: "paragraph", data: { text: diagnosed_gap.root_cause } },
+          { type: "header", data: { text: "Files Involved", level: 2 } },
+          { type: "list", data: { style: "unordered", items: diagnosed_gap.files.map(f => "`" + f.path + "`: " + f.issue) } },
+          { type: "header", data: { text: "Suggested Fix", level: 2 } },
+          { type: "paragraph", data: { text: diagnosed_gap.suggested_fix } }
+        ]
+      }
     })
 
     // Add diagnosis comment
+    // IMPORTANT: Comments must use HTML format
     mosic_create_document("M Comment", {
       workspace_id: workspace_id,
       reference_doctype: "MTask",
       reference_name: issue_task_id,
-      content: "🔍 **Root Cause Diagnosed**\n\n" +
-        diagnosed_gap.root_cause + "\n\n" +
-        "[Debug Session](page/" + diagnosed_gap.debug_page_id + ")"
+      content: "<p><strong>Root Cause Diagnosed</strong></p>" +
+        "<p>" + diagnosed_gap.root_cause + "</p>" +
+        "<p><a href=\"page/" + diagnosed_gap.debug_page_id + "\">Debug Session</a></p>"
     })
 
     // Link debug page to issue task
@@ -328,14 +339,15 @@ mosic_update_content_blocks(uat_page.name, {
 })
 
 // Add diagnosis complete comment
+// IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
   reference_doctype: "M Page",
   reference_name: uat_page.name,
-  content: "🔍 **Diagnosis Complete**\n\n" +
-    diagnosed_count + " gaps diagnosed.\n" +
-    inconclusive_count + " gaps need manual review.\n\n" +
-    "Ready for fix planning."
+  content: "<p><strong>Diagnosis Complete</strong></p>" +
+    "<p>" + diagnosed_count + " gaps diagnosed.</p>" +
+    "<p>" + inconclusive_count + " gaps need manual review.</p>" +
+    "<p>Ready for fix planning.</p>"
 })
 ```
 

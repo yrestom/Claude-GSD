@@ -291,13 +291,14 @@ Before proceeding, update session tracking:
 
 ```javascript
 // Add session resume comment to project
+// IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
   reference_doctype: "MProject",
   reference_name: project_id,
-  content: "📋 **Session Resumed**\n\n" +
-    "Position: Phase " + (completed_phase_count + 1) + " of " + total_phases + "\n" +
-    "Action: " + selected_action
+  content: "<p><strong>Session Resumed</strong></p>" +
+    "<p>Position: Phase " + (completed_phase_count + 1) + " of " + total_phases + "</p>" +
+    "<p>Action: " + selected_action + "</p>"
 })
 
 // Update last sync in config

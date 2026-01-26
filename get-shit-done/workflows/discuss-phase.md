@@ -409,22 +409,25 @@ Update the phase task list with key decisions summary:
 // Extract key decisions for summary
 key_decisions = extract_key_decisions(DECISIONS)
 
+// IMPORTANT: MTask List descriptions use HTML format
 mosic_update_document("MTask List", phase_task_list.name, {
-  description: phase_task_list.description + "\n\n---\n\n**Key Decisions:**\n" +
-    key_decisions.map(d => "- " + d).join("\n") +
-    "\n\n[Full context: Phase Context & Decisions page]"
+  description: phase_task_list.description + "<hr>" +
+    "<p><strong>Key Decisions:</strong></p>" +
+    "<ul>" + key_decisions.map(d => "<li>" + d + "</li>").join("") + "</ul>" +
+    "<p><em>Full context: Phase Context &amp; Decisions page</em></p>"
 })
 
 // Add comment summarizing discussion
+// IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
   reference_doctype: "MTask List",
   reference_name: phase_task_list.name,
-  content: "📝 **Context Gathered**\n\n" +
-    "Implementation decisions documented via `/gsd:discuss-phase`.\n\n" +
-    "**Areas Discussed:**\n" +
-    DISCUSSED_AREAS.map(a => "- " + a).join("\n") +
-    "\n\n**Status:** Ready for planning"
+  content: "<p><strong>Context Gathered</strong></p>" +
+    "<p>Implementation decisions documented via <code>/gsd:discuss-phase</code>.</p>" +
+    "<p><strong>Areas Discussed:</strong></p>" +
+    "<ul>" + DISCUSSED_AREAS.map(a => "<li>" + a + "</li>").join("") + "</ul>" +
+    "<p><strong>Status:</strong> Ready for planning</p>"
 })
 ```
 

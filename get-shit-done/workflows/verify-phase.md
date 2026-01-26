@@ -407,35 +407,52 @@ config.pages["phase-" + PHASE_NUM + "-verification"] = verification_page.name
 Update task list based on verification status:
 
 ```javascript
+// IMPORTANT: MTask List descriptions use HTML format
 if (status === "passed") {
   mosic_update_document("MTask List", phase_task_list.name, {
-    description: phase_task_list.description + "\n\n---\n\n✅ **Verification Passed**\n" +
-      "Score: " + score + "/" + total + " must-haves verified"
+    description: phase_task_list.description + "<hr>" +
+      "<p><strong>Verification Passed</strong></p>" +
+      "<p>Score: " + score + "/" + total + " must-haves verified</p>"
   })
 
+  // IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace_id: workspace_id,
     reference_doctype: "MTask List",
     reference_name: phase_task_list.name,
-    content: "✅ **Phase Verification Passed**\n\n" +
-      "All must-haves verified. Goal achieved.\n\n" +
-      "[Verification Report](page/" + verification_page.name + ")"
+    content: "<p><strong>Phase Verification Passed</strong></p>" +
+      "<p>All must-haves verified. Goal achieved.</p>" +
+      "<p><a href=\"page/" + verification_page.name + "\">Verification Report</a></p>"
   })
 } else if (status === "gaps_found") {
+  // IMPORTANT: MTask List descriptions use HTML format
   mosic_update_document("MTask List", phase_task_list.name, {
     status: "In Review",
-    description: phase_task_list.description + "\n\n---\n\n⚠️ **Gaps Found**\n" +
-      "Score: " + score + "/" + total + " must-haves verified\n" +
-      "Gaps: " + gaps.length + " items need fixing"
+    description: phase_task_list.description + "<hr>" +
+      "<p><strong>Gaps Found</strong></p>" +
+      "<p>Score: " + score + "/" + total + " must-haves verified</p>" +
+      "<p>Gaps: " + gaps.length + " items need fixing</p>"
   })
 
   // Create gap tasks
+  // IMPORTANT: Task descriptions must use Editor.js format
   for (gap of gaps) {
     gap_task = mosic_create_document("MTask", {
       workspace_id: workspace_id,
       task_list: phase_task_list.name,
       title: "Gap: " + gap.truth.substring(0, 80),
-      description: "**Failed Verification:**\n\n" + gap.details,
+      description: {
+        blocks: [
+          {
+            type: "paragraph",
+            data: { text: "**Failed Verification:**" }
+          },
+          {
+            type: "paragraph",
+            data: { text: gap.details }
+          }
+        ]
+      },
       icon: "lucide:alert-triangle",
       status: "ToDo",
       priority: gap.severity === "blocker" ? "Critical" : "High"

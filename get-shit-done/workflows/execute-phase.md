@@ -296,11 +296,15 @@ Verify what actually exists in the code.`,
 
 ```javascript
 // Update phase task list status
+// IMPORTANT: MTask List descriptions use HTML format
 mosic_update_document("MTask List", phase_task_list.name, {
   status: "Completed",
-  description: phase.description + "\n\n---\n\n✅ **Phase Complete**\n" +
-    "- Tasks: " + completed_tasks + "/" + total_tasks + "\n" +
-    "- Completed: " + format_date(now)
+  description: phase.description + "<hr>" +
+    "<p><strong>Phase Complete</strong></p>" +
+    "<ul>" +
+    "<li>Tasks: " + completed_tasks + "/" + total_tasks + "</li>" +
+    "<li>Completed: " + format_date(now) + "</li>" +
+    "</ul>"
 })
 ```
 
@@ -367,15 +371,18 @@ mosic_batch_add_tags_to_document("M Page", phase_summary_page.name, [
 **Add phase completion comment:**
 
 ```javascript
+// IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
   reference_doctype: "MTask List",
   reference_name: phase_task_list.name,
-  content: "✅ **Phase Execution Complete**\n\n" +
-    "- Waves: " + wave_count + "\n" +
-    "- Tasks: " + completed_tasks + "/" + total_tasks + "\n" +
-    "- Verification: " + verification_status + "\n\n" +
-    "[Execution Summary](page/" + phase_summary_page.name + ")"
+  content: "<p><strong>Phase Execution Complete</strong></p>" +
+    "<ul>" +
+    "<li>Waves: " + wave_count + "</li>" +
+    "<li>Tasks: " + completed_tasks + "/" + total_tasks + "</li>" +
+    "<li>Verification: " + verification_status + "</li>" +
+    "</ul>" +
+    "<p><a href=\"page/" + phase_summary_page.name + "\">Execution Summary</a></p>"
 })
 ```
 

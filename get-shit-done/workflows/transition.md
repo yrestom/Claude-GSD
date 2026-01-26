@@ -117,21 +117,26 @@ Wait for user decision.
 
 ```javascript
 // Update phase task list status
+// IMPORTANT: MTask List descriptions use HTML format
 mosic_update_document("MTask List", current_phase_list.name, {
   status: "Completed",
-  description: current_phase.description + "\n\n---\n\n✅ **Phase Complete**\n" +
-    "- Tasks: " + completed_tasks + "/" + total_tasks + "\n" +
-    "- Completed: " + format_date(now)
+  description: current_phase.description + "<hr>" +
+    "<p><strong>Phase Complete</strong></p>" +
+    "<ul>" +
+    "<li>Tasks: " + completed_tasks + "/" + total_tasks + "</li>" +
+    "<li>Completed: " + format_date(now) + "</li>" +
+    "</ul>"
 })
 
 // Add completion comment
+// IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
   reference_doctype: "MTask List",
   reference_name: current_phase_list.name,
-  content: "✅ **Phase Complete**\n\n" +
-    "All " + completed_tasks + " tasks finished.\n" +
-    "Transitioning to next phase."
+  content: "<p><strong>Phase Complete</strong></p>" +
+    "<p>All " + completed_tasks + " tasks finished.</p>" +
+    "<p>Transitioning to next phase.</p>"
 })
 ```
 
@@ -176,13 +181,14 @@ if (!MILESTONE_COMPLETE) {
   })
 
   // Add transition comment
+  // IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace_id: workspace_id,
     reference_doctype: "MTask List",
     reference_name: next_phase_list.name,
-    content: "🚀 **Phase Started**\n\n" +
-      "Transitioned from Phase " + extract_phase_number(current_phase_list) + ".\n" +
-      "Ready for planning."
+    content: "<p><strong>Phase Started</strong></p>" +
+      "<p>Transitioned from Phase " + extract_phase_number(current_phase_list) + ".</p>" +
+      "<p>Ready for planning.</p>"
   })
 }
 ```
@@ -233,15 +239,18 @@ if (requirements_page && has_requirement_changes) {
   })
 
   // Add evolution comment
+  // IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace_id: workspace_id,
     reference_doctype: "M Page",
     reference_name: requirements_page.name,
-    content: "📝 **Requirements Evolved**\n\n" +
-      "After Phase " + extract_phase_number(current_phase_list) + ":\n" +
-      "- Validated: " + validated_count + "\n" +
-      "- Emerged: " + emerged_count + "\n" +
-      "- Invalidated: " + invalidated_count
+    content: "<p><strong>Requirements Evolved</strong></p>" +
+      "<p>After Phase " + extract_phase_number(current_phase_list) + ":</p>" +
+      "<ul>" +
+      "<li>Validated: " + validated_count + "</li>" +
+      "<li>Emerged: " + emerged_count + "</li>" +
+      "<li>Invalidated: " + invalidated_count + "</li>" +
+      "</ul>"
   })
 }
 ```
@@ -267,16 +276,19 @@ if (roadmap_page) {
 **Add transition comment to project:**
 
 ```javascript
+// IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
   reference_doctype: "MProject",
   reference_name: project_id,
-  content: "🔄 **Phase Transition**\n\n" +
-    "- Completed: Phase " + extract_phase_number(current_phase_list) + " (" + current_phase.title + ")\n" +
-    (MILESTONE_COMPLETE ? "- Status: All phases complete!" :
-     "- Starting: Phase " + extract_phase_number(next_phase_list) + " (" + next_phase.title + ")") + "\n\n" +
-    "Requirements validated: " + validated_count + "\n" +
-    "Requirements emerged: " + emerged_count
+  content: "<p><strong>Phase Transition</strong></p>" +
+    "<ul>" +
+    "<li>Completed: Phase " + extract_phase_number(current_phase_list) + " (" + current_phase.title + ")</li>" +
+    (MILESTONE_COMPLETE ? "<li>Status: All phases complete!</li>" :
+     "<li>Starting: Phase " + extract_phase_number(next_phase_list) + " (" + next_phase.title + ")</li>") +
+    "</ul>" +
+    "<p>Requirements validated: " + validated_count + "</p>" +
+    "<p>Requirements emerged: " + emerged_count + "</p>"
 })
 ```
 
