@@ -43,6 +43,20 @@ if (plan_page) {
 // Get parent task list for phase context
 phase_task_list = mosic_get_task_list(task.task_list, { include_tasks: false })
 phase_pages = mosic_get_entity_pages("MTask List", task.task_list)
+
+// Load phase-level pages (context and research are on phase, not task)
+phase_context_page = phase_pages.find(p => p.title.includes("Context") || p.title.includes("Decisions"))
+phase_research_page = phase_pages.find(p => p.title.includes("Research"))
+
+phase_context_content = ""
+if (phase_context_page) {
+  phase_context_content = mosic_get_page(phase_context_page.name, { content_format: "markdown" }).content
+}
+
+phase_research_content = ""
+if (phase_research_page) {
+  phase_research_content = mosic_get_page(phase_research_page.name, { content_format: "markdown" }).content
+}
 ```
 
 **Model lookup table:**
@@ -150,17 +164,23 @@ Read plan and context from Mosic:
 // Plan content loaded in load_mosic_context step
 execution_instructions = plan_content || task.description
 
-// Check for context page
-context_page = task_pages.find(p => p.title.includes("Context"))
-if (context_page) {
-  context_content = mosic_get_page(context_page.name, { content_format: "markdown" })
+// Phase context and research loaded in load_mosic_context step
+// - phase_context_content: User decisions from /gsd:discuss-phase
+// - phase_research_content: Research findings from /gsd:research-phase
+
+// Check for task-specific context page (rare, but possible)
+task_context_page = task_pages.find(p => p.title.includes("Context"))
+if (task_context_page) {
+  task_context_content = mosic_get_page(task_context_page.name, { content_format: "markdown" })
 }
 ```
 
 This IS the execution instructions. Follow it exactly.
 
-**If context page exists:**
-The context page provides the user's vision for this task — how they imagine it working, what's essential, and what's out of scope. Honor this context throughout execution.
+**Context hierarchy (use all that exist):**
+1. **Phase context** (`phase_context_content`): User's vision and decisions for the entire phase - from `/gsd:discuss-phase`. Honor these decisions throughout execution.
+2. **Phase research** (`phase_research_content`): Technical findings and recommendations - from `/gsd:research-phase`. Reference for implementation patterns.
+3. **Task context** (`task_context_content`): Task-specific notes if any.
 </step>
 
 <step name="execute">
@@ -328,7 +348,7 @@ DURATION_MIN=$(( DURATION_SEC / 60 ))
 ```javascript
 summary_page = mosic_create_entity_page("MTask", task_id, {
   workspace_id: workspace_id,
-  title: task.identifier + " Summary",
+  title: task.identifier + " Execution Summary",
   page_type: "Document",
   icon: "lucide:file-check",
   status: "Published",

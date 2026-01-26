@@ -439,6 +439,8 @@ plan_task = mosic_create_document("MTask", {
   status: "ToDo",
   priority: (wave == 1) ? "High" : "Normal"
 })
+# Note: Wave info is stored in the linked Plan page's "## Metadata" section,
+# which execute-phase extracts using extract_wave(plan_content)
 
 plan_task_id = plan_task.name
 

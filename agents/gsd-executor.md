@@ -47,16 +47,43 @@ phase = mosic_get_task_list(current_phase_id, {
   include_tasks: true
 })
 
-# Find accumulated decisions and context
+# Find accumulated decisions and context at project level
 project_pages = mosic_get_entity_pages("MProject", project_id, {
   include_subtree: false,
   content_format: "markdown"
 })
+
+# CRITICAL: Load phase-level pages (context and research)
+# These are created by /gsd:discuss-phase and /gsd:research-phase
+phase_pages = mosic_get_entity_pages("MTask List", current_phase_id, {
+  content_format: "markdown"
+})
+
+# Find phase context (user decisions) and research (technical findings)
+phase_context_page = phase_pages.find(p =>
+  p.title.includes("Context") or p.title.includes("Decisions")
+)
+phase_research_page = phase_pages.find(p => p.title.includes("Research"))
+
+# Load content if pages exist
+phase_context_content = ""
+if phase_context_page:
+  phase_context_content = mosic_get_page(phase_context_page.name, {
+    content_format: "markdown"
+  }).content
+
+phase_research_content = ""
+if phase_research_page:
+  phase_research_content = mosic_get_page(phase_research_page.name, {
+    content_format: "markdown"
+  }).content
 ```
 
 **Parse project state:**
 - Current position from task statuses
 - Accumulated decisions from project pages
+- Phase context (user decisions from /gsd:discuss-phase)
+- Phase research (technical findings from /gsd:research-phase)
 - Blockers from task relations (type: "Blocker")
 </step>
 
@@ -419,9 +446,12 @@ After all tasks complete, create summary page in Mosic.
 
 **Create summary page linked to plan task:**
 ```
+# Get task identifier for standardized title
+task = mosic_get_task(plan_task_id)
+
 summary_page = mosic_create_entity_page("MTask", plan_task_id, {
   workspace_id: workspace_id,
-  title: "Phase {N} Plan {M} Summary",
+  title: task.identifier + " Execution Summary",
   page_type: "Document",
   icon: "lucide:check-circle",
   status: "Published",

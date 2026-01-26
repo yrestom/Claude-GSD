@@ -195,6 +195,10 @@ mosic_batch_add_tags_to_document("MTask List", NEW_PHASE_ID, [
 phase_tag_name = "phase-" + NEW_IDENTIFIER.toLowerCase()
 mosic_add_tag_to_document("MTask List", NEW_PHASE_ID, phase_tag_name)
 
+# Store tag reference in config for consistency
+config.mosic.tags.phase_tags = config.mosic.tags.phase_tags or {}
+config.mosic.tags.phase_tags["phase-" + NEW_IDENTIFIER.toLowerCase()] = phase_tag_name
+
 DISPLAY: "Tagged with: gsd-managed, " + phase_tag_name
 ```
 
@@ -261,8 +265,8 @@ mosic_create_document("M Comment", {
 ## Step 9: Update config.json
 
 ```
-# Store new phase reference
-config.mosic.task_lists[NEW_IDENTIFIER.toLowerCase()] = NEW_PHASE_ID
+# Store new phase reference using consistent "phase-{id}" format
+config.mosic.task_lists["phase-" + NEW_IDENTIFIER.toLowerCase()] = NEW_PHASE_ID
 config.mosic.session = {
   "last_action": "insert-phase",
   "last_phase": NEW_PHASE_ID,

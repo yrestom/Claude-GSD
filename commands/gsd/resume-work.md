@@ -1,27 +1,27 @@
 ---
 name: gsd:resume-work
-description: Resume work from previous session with full context restoration
+description: Resume work from previous session with full context restoration from Mosic
 allowed-tools:
   - Read
   - Bash
   - Write
   - AskUserQuestion
-  - SlashCommand
   - ToolSearch
+  - mcp__mosic_pro__*
 ---
 
 <objective>
-Restore complete project context and resume work seamlessly from previous session.
+Restore complete project context from Mosic and resume work seamlessly from previous session.
 
-Routes to the resume-project workflow which handles:
+**Mosic-only architecture:** All state is read from Mosic. Session context from config.json (entity IDs only).
 
-- State loading from Mosic (MProject, MTasks)
-- Session context restoration from config.json
-- Incomplete work detection (PLAN without SUMMARY)
-- Mosic cross-session updates check
-- Status presentation
+Handles:
+- Project and phase state loading from Mosic
+- Cross-session update detection
+- Incomplete work identification (tasks in progress)
+- Checkpoint detection (awaiting user response)
 - Context-aware next action routing
-  </objective>
+</objective>
 
 <execution_context>
 @~/.claude/get-shit-done/workflows/resume-project.md
@@ -29,190 +29,339 @@ Routes to the resume-project workflow which handles:
 
 <process>
 
-## 0. Check Mosic for Cross-Session Updates
-
-**Before loading local state, check Mosic for updates made outside this session:**
+## 0. Load Config and Mosic Tools
 
 ```bash
-MOSIC_ENABLED=$(cat config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+CONFIG=$(cat config.json 2>/dev/null)
 ```
 
-**If mosic.enabled = true:**
+If missing: Error - run `/gsd:new-project` first.
+
+```
+workspace_id = config.mosic.workspace_id
+project_id = config.mosic.project_id
+last_sync = config.mosic.last_sync or config.last_sync
+```
+
+Load Mosic tools:
+```
+ToolSearch("mosic project task search notification")
+```
+
+---
+
+## 1. Check for Cross-Session Updates
 
 Display:
 ```
-◆ Checking Mosic for cross-session updates...
+Checking Mosic for updates since last session...
 ```
 
-### Load Mosic Config
-
-```bash
-WORKSPACE_ID=$(cat config.json | jq -r ".mosic.workspace_id")
-PROJECT_ID=$(cat config.json | jq -r ".mosic.project_id")
-LAST_SYNC=$(cat config.json | jq -r ".mosic.last_sync")
 ```
+# Load project with task lists
+project = mosic_get_project(project_id, { include_task_lists: true })
 
-### Check for External Updates
+IF not project:
+  ERROR: "Project not found in Mosic. Run /gsd:new-project first."
+  EXIT
 
-```
-# Load Mosic tools
-ToolSearch("mosic task search")
-
-IF PROJECT_ID is not null:
-  # Get tasks modified since last sync
+# Check for tasks modified since last sync
+IF last_sync:
   modified_tasks = mosic_search_tasks({
-    project_id: PROJECT_ID,
-    modified_after: LAST_SYNC
+    project_id: project_id,
+    modified_after: last_sync
   })
 
-  # Get comments added since last sync
-  recent_comments = mosic_search({
-    workspace_id: WORKSPACE_ID,
-    doctypes: ["M Comment"],
-    filters: {
-      modified: [">", LAST_SYNC]
-    }
-  })
-
-  # Check for status changes, new assignments, blockers
   external_updates = []
-
   FOR each task in modified_tasks:
-    IF task.status changed OR task.assignees changed:
+    IF task.done AND task.completed_date > last_sync:
       external_updates.push({
-        type: "task_update",
-        task: task.title,
-        field: changed_field,
-        old_value: local_value,
-        new_value: task[field]
+        type: "completed",
+        task: task.identifier + ": " + task.title
+      })
+    ELIF task.status changed:
+      external_updates.push({
+        type: "status_change",
+        task: task.identifier + ": " + task.title,
+        status: task.status
       })
 
-  FOR each comment in recent_comments:
-    IF comment.ref_doc == "MTask" AND comment.owner != "GSD Bot":
-      external_updates.push({
-        type: "new_comment",
-        task: comment.ref_name,
-        content: comment.content,
-        author: comment.owner
+  IF external_updates.length > 0:
+    Display:
+    """
+    -------------------------------------------
+     CROSS-SESSION UPDATES DETECTED
+    -------------------------------------------
+
+    Changes made in Mosic since last session:
+
+    {FOR each update:}
+    - [{update.type}] {update.task}
+
+    These updates have been integrated. Mosic is the source of truth.
+    -------------------------------------------
+    """
+  ELSE:
+    Display: "No external updates since last session."
+```
+
+---
+
+## 2. Determine Current Position from Mosic
+
+```
+# Categorize phases by status
+in_progress_phases = project.task_lists.filter(tl => tl.status == "In Progress")
+completed_phases = project.task_lists.filter(tl => tl.done or tl.status == "Completed")
+pending_phases = project.task_lists.filter(tl =>
+  tl.status == "ToDo" or tl.status == "Planned" or tl.status == "Backlog"
+)
+
+# Current phase is first in-progress, or first pending
+current_phase = in_progress_phases[0] or pending_phases[0]
+
+# Get current phase details with tasks
+IF current_phase:
+  phase = mosic_get_task_list(current_phase.name, { include_tasks: true })
+
+  in_progress_tasks = phase.tasks.filter(t => !t.done and t.status == "In Progress")
+  pending_tasks = phase.tasks.filter(t => !t.done)
+  completed_tasks = phase.tasks.filter(t => t.done)
+
+  current_task = in_progress_tasks[0] or pending_tasks[0]
+
+# Calculate progress
+total_phases = project.task_lists.length
+completed_count = completed_phases.length
+progress_pct = Math.round((completed_count / total_phases) * 100)
+```
+
+---
+
+## 3. Check for Incomplete Work
+
+```
+# Find tasks stuck in progress (started but not finished)
+stuck_tasks = []
+
+FOR each task_list in project.task_lists:
+  tl = mosic_get_task_list(task_list.name, { include_tasks: true })
+  FOR each task in tl.tasks:
+    IF !task.done AND task.status == "In Progress":
+      stuck_tasks.push({
+        identifier: task.identifier,
+        title: task.title,
+        phase: task_list.title,
+        task_id: task.name
       })
+
+# Check for checkpoint comments awaiting response
+checkpoint_pending = null
+IF current_task:
+  task_comments = mosic_list_documents("M Comment", {
+    filters: [
+      ["reference_doctype", "=", "MTask"],
+      ["reference_name", "=", current_task.name]
+    ],
+    order_by: "creation desc",
+    limit: 5
+  })
+
+  FOR each comment in task_comments:
+    IF comment.content contains "CHECKPOINT" AND comment.content contains "Awaiting":
+      checkpoint_pending = {
+        task: current_task.identifier,
+        comment: comment.content
+      }
+      BREAK
 ```
 
-### Present External Updates (if any)
+---
+
+## 4. Present Status
 
 ```
-IF external_updates.length > 0:
-  ───────────────────────────────────────────────────────────────
-  CROSS-SESSION UPDATES DETECTED
-  ───────────────────────────────────────────────────────────────
+-------------------------------------------
+ GSD > RESUMING WORK
+-------------------------------------------
 
-  The following changes were made in Mosic since your last session:
+**Project:** {project.title}
 
-  [FOR each update:]
-  - {task}: {field} changed to "{new_value}"
-  - {task}: New comment from {author}
+**Progress:** [{progress_bar}] {progress_pct}%
+  Phases: {completed_count}/{total_phases} complete
 
-  ───────────────────────────────────────────────────────────────
+**Current Phase:** {current_phase ? current_phase.title : "None in progress"}
+**Current Task:** {current_task ? current_task.identifier + " - " + current_task.title : "Ready to plan"}
 
-  These updates have been integrated. Mosic is the source of truth.
+Mosic: https://mosic.pro/app/MProject/{project_id}
 
-ELSE:
-  ✓ No external updates since last session
+---
+
+{IF stuck_tasks.length > 0:}
+**Tasks In Progress** (may need attention):
+{FOR each task in stuck_tasks:}
+- {task.identifier}: {task.title} ({task.phase})
+
+{IF checkpoint_pending:}
+**Pending Checkpoint:**
+Task {checkpoint_pending.task} is awaiting your response.
+
+---
 ```
 
-### Update Task Status to In Progress
+---
+
+## 5. Determine Next Action
 
 ```
-# Find current task from .continue-here.md or incomplete plans
-IF .continue-here.md exists:
-  PHASE_DIR = extract_phase_from_continue_here()
-  CURRENT_PLAN = extract_plan_from_continue_here()
-  TASK_ID = config.mosic.tasks["phase-{PHASE_NUM}-plan-{CURRENT_PLAN}"]
+# Check phase pages to determine what's available
+IF current_phase:
+  phase_pages = mosic_get_entity_pages("MTask List", current_phase.name, {
+    include_subtree: false
+  })
+  context_page = phase_pages.find(p => p.title contains "Context" or p.title contains "Decisions")
+  research_page = phase_pages.find(p => p.title contains "Research")
+  plan_tasks = phase.tasks.filter(t => t.title starts with "Plan")
+```
 
-  IF TASK_ID:
-    # Update status back to In Progress
-    mosic_update_document("MTask", TASK_ID, {
-      status: "In Progress"
-    })
+**Route based on state:**
 
-    # Add resume comment
-    # IMPORTANT: Comments must use HTML format
-    mosic_create_document("M Comment", {
-      workspace_id: WORKSPACE_ID,
-      ref_doc: "MTask",
-      ref_name: TASK_ID,
-      content: "<p><strong>Work Resumed</strong></p><p><strong>Resumed at:</strong> " + timestamp + "</p>"
-    })
+**A. Checkpoint pending:**
+→ Primary: Respond to checkpoint
+→ Option: Skip checkpoint and continue
 
-# Update task list status if needed
-TASK_LIST_ID = config.mosic.task_lists["phase-{PHASE_NUM}"]
-IF TASK_LIST_ID:
-  mosic_update_document("MTask List", TASK_LIST_ID, {
+**B. Task in progress:**
+→ Primary: Continue executing the task
+→ Option: Abandon and restart
+
+**C. Phase has plans, none executed:**
+→ Primary: Execute phase
+→ Option: Review plans
+
+**D. Phase needs planning (no plan tasks):**
+→ If no context page: Primary = Discuss phase
+→ If context exists: Primary = Plan phase
+
+**E. All phases complete:**
+→ Primary: Complete milestone
+
+---
+
+## 6. Offer Options
+
+```
+-------------------------------------------
+
+## What's Next?
+
+{Based on route, show primary action:}
+
+**A (checkpoint):**
+1. Respond to checkpoint for {task.identifier}
+2. Skip and continue execution
+
+**B (task in progress):**
+1. Continue {task.identifier}: {task.title}
+   `/gsd:execute-phase {phase_num}`
+2. Review task status
+
+**C (ready to execute):**
+1. Execute Phase {phase_num}
+   `/gsd:execute-phase {phase_num}`
+2. Review phase plans
+
+**D (needs planning - no context):**
+1. Discuss Phase {phase_num} context
+   `/gsd:discuss-phase {phase_num}`
+2. Plan directly (skip discussion)
+   `/gsd:plan-phase {phase_num}`
+
+**D (needs planning - has context):**
+1. Plan Phase {phase_num}
+   `/gsd:plan-phase {phase_num}`
+2. Review/update context
+   `/gsd:discuss-phase {phase_num}`
+
+**E (all complete):**
+1. Complete milestone
+   `/gsd:audit-milestone`
+2. Review accomplishments
+
+---
+
+<sub>`/clear` first -> fresh context window</sub>
+
+---
+
+**Also available:**
+- `/gsd:progress` - detailed project status
+- View project in Mosic
+
+---
+```
+
+Wait for user selection.
+
+---
+
+## 7. Update Session State
+
+```
+# Mark current task as In Progress if resuming
+IF current_task AND current_task.status != "In Progress":
+  mosic_update_document("MTask", current_task.name, {
     status: "In Progress"
   })
-```
 
-### Update Last Sync Timestamp
+# Add session resume comment to project
+# IMPORTANT: Comments must use HTML format
+mosic_create_document("M Comment", {
+  workspace_id: workspace_id,
+  reference_doctype: "MProject",
+  reference_name: project_id,
+  content: "<p><strong>Session Resumed</strong></p>" +
+    "<p>Phase: " + (current_phase ? current_phase.title : "None") + "</p>" +
+    "<p>Task: " + (current_task ? current_task.identifier : "None") + "</p>"
+})
 
-```bash
-# Update config.json with current timestamp
-# mosic.last_sync = ISO timestamp now
-```
+# Update last sync in config
+config.mosic.last_sync = "[ISO timestamp now]"
+config.mosic.session = {
+  last_action: "resume-work",
+  active_phase: current_phase ? current_phase.name : null,
+  active_task: current_task ? current_task.name : null,
+  last_updated: "[ISO timestamp]"
+}
 
-**If mosic.enabled = false:** Skip to standard workflow.
-
----
-
-## 1. Follow Standard Resume Workflow
-
-**Follow the resume-project workflow** from `@~/.claude/get-shit-done/workflows/resume-project.md`.
-
-The workflow handles all resumption logic including:
-
-1. Project existence verification
-2. STATE.md loading or reconstruction
-3. Checkpoint and incomplete work detection
-4. Visual status presentation
-5. Context-aware option offering (checks CONTEXT.md before suggesting plan vs discuss)
-6. Routing to appropriate next command
-7. Session continuity updates
-
----
-
-## 2. Enhanced Status Display (with Mosic)
-
-When presenting status, include Mosic information if enabled:
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► RESUMING WORK
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**Project:** {project_name}
-**Phase:** {phase_num} - {phase_name}
-**Status:** {status}
-
-[IF .continue-here.md exists:]
-**Checkpoint:** Task {X} of {Y}
-**Last Updated:** {timestamp}
-
-[IF mosic.enabled:]
-**Mosic:** https://mosic.pro/app/MTask/{task_id}
-**External Updates:** {count} since last session
-[END IF]
-
-───────────────────────────────────────────────────────────────
+write config.json
 ```
 
 </process>
 
+<quick_resume>
+If user says "continue" or "go" without needing options:
+- Load state silently
+- Determine primary action
+- Show command to run
+
+```
+Continuing from Phase {N}, Task {identifier}...
+
+`/gsd:execute-phase {N}`
+
+<sub>`/clear` first -> fresh context window</sub>
+```
+</quick_resume>
+
 <success_criteria>
-- [ ] Project context restored
-- [ ] Checkpoint detected if exists
-- [ ] Mosic sync (if enabled):
-  - [ ] Cross-session updates checked and displayed
-  - [ ] Task status updated to "In Progress"
-  - [ ] Resume comment added
-  - [ ] last_sync timestamp updated
-- [ ] Status presented clearly
-- [ ] Next actions offered
+- [ ] Config loaded with Mosic IDs
+- [ ] Project loaded from Mosic
+- [ ] Cross-session updates detected and displayed
+- [ ] Current position determined from task list/task status
+- [ ] Incomplete/stuck work identified
+- [ ] Checkpoint status checked
+- [ ] Clear status presented
+- [ ] Context-aware next actions offered
+- [ ] Session resume comment added to project
+- [ ] config.json last_sync updated
 </success_criteria>

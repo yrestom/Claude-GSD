@@ -242,6 +242,7 @@ ELSE:
 ```
 mosic_batch_add_tags_to_document("M Page", context_page_id, [
   config.mosic.tags.gsd_managed,
+  config.mosic.tags.context,
   config.mosic.tags.phase_tags[phase_key]
 ])
 ```

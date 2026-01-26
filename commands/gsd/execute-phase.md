@@ -78,6 +78,28 @@ phase = mosic_get_task_list(task_list_id, {
   include_tasks: true
 })
 
+# Load phase pages (research, context) for executor context
+phase_pages = mosic_get_entity_pages("MTask List", task_list_id, {
+  include_subtree: false
+})
+
+# Find phase-level context pages
+research_page = phase_pages.find(p => p.title contains "Research")
+context_page = phase_pages.find(p => p.title contains "Context" or p.title contains "Decisions")
+
+# Load their content if they exist
+research_content = ""
+IF research_page:
+  research_content = mosic_get_page(research_page.name, {
+    content_format: "markdown"
+  }).content
+
+context_content = ""
+IF context_page:
+  context_content = mosic_get_page(context_page.name, {
+    content_format: "markdown"
+  }).content
+
 # Filter to plan tasks only
 plan_tasks = phase.tasks.filter(t => t.title starts with "Plan")
 
@@ -121,34 +143,64 @@ Phase {PHASE}: {phase.title}
 ## 3. Group by Wave
 
 ```
-# Load plan pages to get wave info
+# Helper: Extract plan number from task title "Plan 01: ..."
+function extract_plan_number(task_title):
+  match = task_title.match(/Plan\s*(\d+)/i)
+  return match ? match[1].padStart(2, '0') : "01"
+
+# Helper: Extract wave from plan content (fallback if custom_wave not set)
+function extract_wave(content):
+  # Look for "**Wave:** N" in markdown content
+  match = content.match(/\*\*Wave:\*\*\s*(\d+)/i)
+  IF match: return parseInt(match[1])
+  # Also try "Wave: N" format
+  match = content.match(/Wave:\s*(\d+)/i)
+  IF match: return parseInt(match[1])
+  return 1
+
+# Load plan pages and group by wave
 waves = {}
 
 FOR each plan_task in incomplete_plans:
+  # Extract plan number for config lookups (from task title "Plan 01: ...")
+  plan_number = extract_plan_number(plan_task.title)
+
   # Get plan page linked to task
   task_pages = mosic_get_entity_pages("MTask", plan_task.name, {
     include_subtree: false
   })
   plan_page = task_pages.find(p => p.title contains "Plan" or p.page_type == "Spec")
 
+  plan_content = ""
+  wave = 1
+  autonomous = true
+
   IF plan_page:
     plan_content = mosic_get_page(plan_page.name, {
       content_format: "markdown"
-    })
-    # Extract wave from content (look for "wave: N" in frontmatter or content)
-    wave = extract_wave(plan_content) or 1
-  ELSE:
-    wave = 1
+    }).content
+
+    # Extract wave from plan page "## Metadata" section
+    # Format: "- **Wave:** N" or "**Wave:** N"
+    wave = extract_wave(plan_content)
+
+    # Extract autonomous flag from plan page
+    # Format: "- **Autonomous:** yes/no"
+    autonomous_match = plan_content.match(/\*\*Autonomous:\*\*\s*(yes|no|true|false)/i)
+    IF autonomous_match:
+      autonomous = autonomous_match[1].toLowerCase() in ["yes", "true"]
 
   waves[wave] = waves[wave] or []
   waves[wave].push({
     task: plan_task,
     page: plan_page,
-    content: plan_content
+    content: plan_content,
+    number: plan_number,
+    autonomous: autonomous
   })
 
 # Sort waves
-sorted_waves = Object.keys(waves).sort()
+sorted_waves = Object.keys(waves).sort((a, b) => parseInt(a) - parseInt(b))
 ```
 
 Display:
@@ -191,23 +243,54 @@ FOR each plan in wave:
 ### 4.2 Spawn Executors (Parallel)
 
 ```
-# Build executor prompts with inlined content
+# Build executor prompts with inlined content including phase context
 executor_prompts = []
 
 FOR each plan in wave:
-  prompt = build_executor_prompt(
-    plan_path: "Mosic task: " + plan.task.name,
-    plan_content: plan.content,
-    phase_info: phase.title,
-    workspace_id: workspace_id,
-    task_id: plan.task.name
-  )
+  prompt = """
+<objective>
+Execute task {plan.task.identifier}: {plan.task.title}
+
+Commit each subtask atomically. Create summary page. Update task status.
+</objective>
+
+<execution_context>
+@~/.claude/get-shit-done/workflows/execute-plan.md
+</execution_context>
+
+<context>
+**Task:** {plan.task.title}
+**Task ID:** {plan.task.name}
+**Phase:** {PHASE} - {phase.title}
+**Workspace:** {workspace_id}
+
+**Plan Content:**
+{plan.content}
+
+**Phase Research (if available):**
+{research_content or "No research page for this phase."}
+
+**Phase Context & Decisions (if available):**
+{context_content or "No context page for this phase."}
+</context>
+
+<success_criteria>
+- [ ] All subtasks executed
+- [ ] Each subtask committed individually
+- [ ] Summary page created in Mosic linked to task
+- [ ] Task marked complete in Mosic
+</success_criteria>
+"""
   executor_prompts.push(prompt)
 
-# Spawn all plans in wave in parallel
-Task(prompt=executor_prompts[0], subagent_type="gsd-executor", model="{executor_model}")
-Task(prompt=executor_prompts[1], subagent_type="gsd-executor", model="{executor_model}")
-...
+# Spawn all plans in wave in parallel using Task tool
+FOR each prompt in executor_prompts:
+  Task(
+    prompt="First, read ~/.claude/agents/gsd-executor.md for your role.\n\n" + prompt,
+    subagent_type="general-purpose",
+    model="{executor_model}",
+    description="Execute Plan " + plan.number
+  )
 ```
 
 ### 4.3 Handle Executor Results
@@ -230,8 +313,11 @@ FOR each completed_plan:
   })
 
   FOR each completed_item in executor_summary.completed_tasks:
-    matching_checklist = task_with_checklists.checklists.find(
-      c => c.title == completed_item
+    # Flexible matching: check exact match, contains, or normalized match
+    matching_checklist = task_with_checklists.checklists.find(c =>
+      c.title == completed_item OR
+      c.title.toLowerCase().includes(completed_item.toLowerCase()) OR
+      completed_item.toLowerCase().includes(c.title.toLowerCase())
     )
     IF matching_checklist:
       mosic_update_document("MTask CheckList", matching_checklist.name, {
@@ -239,9 +325,10 @@ FOR each completed_plan:
       })
 
   # Create summary page linked to task
+  # Standardized title format: "{identifier} Execution Summary"
   summary_page = mosic_create_entity_page("MTask", plan.task.name, {
     workspace_id: workspace_id,
-    title: "Execution Summary",
+    title: plan.task.identifier + " Execution Summary",
     page_type: "Document",
     icon: config.mosic.page_icons.summary,
     status: "Published",
