@@ -572,7 +572,13 @@ mosic_update_content_blocks(overview_page_id, {
 <final_commit>
 After summary creation and state updates:
 
-**Commit any remaining files:**
+**Confirm commit with user:**
+
+Use AskUserQuestion:
+- Question: "Commit plan completion to git?"
+- Options: "Yes, commit" / "No, skip commit"
+
+**If user approves:**
 ```bash
 git add config.json
 git commit -m "docs({phase}-{plan}): complete plan execution

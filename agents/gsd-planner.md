@@ -588,7 +588,13 @@ mosic_update_content_blocks(roadmap_page_id, {
 </step>
 
 <step name="git_commit">
-Commit config.json with plan IDs:
+**Confirm commit with user:**
+
+Use AskUserQuestion:
+- Question: "Commit phase plans to git?"
+- Options: "Yes, commit" / "No, skip commit"
+
+**If user approves:**
 ```bash
 git add config.json
 git commit -m "docs(phase-{N}): create phase plans

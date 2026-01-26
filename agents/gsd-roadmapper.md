@@ -466,6 +466,13 @@ Write all IDs to config.json.
 
 ## Step 9: Git Commit
 
+**Confirm commit with user:**
+
+Use AskUserQuestion:
+- Question: "Commit roadmap to git?"
+- Options: "Yes, commit" / "No, skip commit"
+
+**If user approves:**
 ```bash
 git add config.json
 git commit -m "docs: create roadmap ({N} phases)

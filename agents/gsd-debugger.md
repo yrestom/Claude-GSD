@@ -651,7 +651,13 @@ Update session page in Mosic:
 - Remove "active" tag, add "resolved" tag
 - Update page status to "Published"
 
-**Commit the fix:**
+**Confirm commit with user:**
+
+Use AskUserQuestion:
+- Question: "Commit the debug fix?"
+- Options: "Yes, commit fix" / "No, skip commit"
+
+**If user approves:**
 ```bash
 git add -A
 git commit -m "fix: {brief description}
