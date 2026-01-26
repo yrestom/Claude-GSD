@@ -4,6 +4,15 @@ Verify phase goal achievement through goal-backward analysis. Check that the cod
 This workflow is executed by a verification subagent spawned from execute-phase.md.
 </purpose>
 
+<mosic_only>
+**CRITICAL: This workflow operates ONLY through Mosic MCP.**
+
+- All state is read from Mosic (project, task lists, tasks, pages)
+- All documentation is stored in Mosic pages
+- Only `config.json` is stored locally (for Mosic entity IDs)
+- No `.planning/` directory operations
+</mosic_only>
+
 <core_principle>
 **Task completion ≠ Goal achievement**
 
@@ -24,41 +33,77 @@ Then verify each level against the actual codebase.
 
 <process>
 
-<step name="load_context" priority="first">
-**Gather all verification context:**
+<step name="load_mosic_context" priority="first">
 
-```bash
-# Phase directory (match both zero-padded and unpadded)
-PADDED_PHASE=$(printf "%02d" ${PHASE_ARG} 2>/dev/null || echo "${PHASE_ARG}")
-PHASE_DIR=$(ls -d .planning/phases/${PADDED_PHASE}-* .planning/phases/${PHASE_ARG}-* 2>/dev/null | head -1)
+**Load context from Mosic:**
 
-# Phase goal from ROADMAP
-grep -A 5 "Phase ${PHASE_NUM}" .planning/ROADMAP.md
-
-# Requirements mapped to this phase
-grep -E "^| ${PHASE_NUM}" .planning/REQUIREMENTS.md 2>/dev/null
-
-# All SUMMARY files (claims to verify)
-ls "$PHASE_DIR"/*-SUMMARY.md 2>/dev/null
-
-# All PLAN files (for must_haves in frontmatter)
-ls "$PHASE_DIR"/*-PLAN.md 2>/dev/null
+```
+Read config.json for Mosic IDs:
+- workspace_id
+- project_id
+- task_lists (phase mappings)
+- pages (page IDs)
+- tags (tag IDs)
 ```
 
-**Extract phase goal:** Parse ROADMAP.md for this phase's goal/description. This is the outcome to verify, not the tasks.
+```javascript
+// Load project with task lists
+project = mosic_get_project(project_id, { include_task_lists: true })
 
-**Extract requirements:** If REQUIREMENTS.md exists, find requirements mapped to this phase. These become additional verification targets.
+// Find the phase task list
+phase_task_list = project.task_lists.find(tl =>
+  tl.title.includes("Phase " + PHASE_NUM) ||
+  tl.identifier.startsWith(PHASE_NUM + "-")
+)
+
+// Get phase tasks with details
+phase = mosic_get_task_list(phase_task_list.name, { include_tasks: true })
+
+// Get phase pages (summaries, plans, etc.)
+phase_pages = mosic_get_entity_pages("MTask List", phase_task_list.name)
+```
+
+**Extract phase goal:** Parse phase task list description for this phase's goal/description. This is the outcome to verify, not the tasks.
+
+</step>
+
+<step name="load_requirements">
+Check if requirements page exists for this phase:
+
+```javascript
+// Get project requirements page
+project_pages = mosic_get_entity_pages("MProject", project_id)
+requirements_page = project_pages.find(p => p.title.includes("Requirements"))
+
+if (requirements_page) {
+  requirements_content = mosic_get_page(requirements_page.name, { content_format: "markdown" })
+  // Parse requirements mapped to this phase
+  phase_requirements = extract_phase_requirements(requirements_content, PHASE_NUM)
+}
+```
+
+These become additional verification targets.
 </step>
 
 <step name="establish_must_haves">
 **Determine what must be verified.**
 
-**Option A: Must-haves in PLAN frontmatter**
+**Option A: Must-haves from plan task pages**
 
-Check if any PLAN.md has `must_haves` in frontmatter:
+Check if any plan task has `must_haves` in its description:
 
-```bash
-grep -l "must_haves:" "$PHASE_DIR"/*-PLAN.md 2>/dev/null
+```javascript
+plan_tasks = phase.tasks.filter(t => t.title.includes("Plan"))
+
+for (task of plan_tasks) {
+  task_pages = mosic_get_entity_pages("MTask", task.name)
+  plan_page = task_pages.find(p => p.title.includes("Plan"))
+
+  if (plan_page) {
+    plan_content = mosic_get_page(plan_page.name, { content_format: "markdown" })
+    must_haves = extract_must_haves(plan_content)
+  }
+}
 ```
 
 If found, extract and use:
@@ -78,25 +123,13 @@ must_haves:
 
 **Option B: Derive from phase goal**
 
-If no must_haves in frontmatter, derive using goal-backward process:
+If no must_haves in plan pages, derive using goal-backward process:
 
-1. **State the goal:** Take phase goal from ROADMAP.md
-
+1. **State the goal:** Take phase goal from task list description
 2. **Derive truths:** Ask "What must be TRUE for this goal to be achieved?"
-   - List 3-7 observable behaviors from user perspective
-   - Each truth should be testable by a human using the app
-
 3. **Derive artifacts:** For each truth, ask "What must EXIST?"
-   - Map truths to concrete files (components, routes, schemas)
-   - Be specific: `src/components/Chat.tsx`, not "chat component"
-
 4. **Derive key links:** For each artifact, ask "What must be CONNECTED?"
-   - Identify critical wiring (component calls API, API queries DB)
-   - These are where stubs hide
-
 5. **Document derived must-haves** before proceeding to verification.
-
-<!-- Goal-backward derivation expertise is baked into the gsd-verifier agent -->
 </step>
 
 <step name="verify_truths">
@@ -115,19 +148,6 @@ A truth is achievable if the supporting artifacts exist, are substantive, and ar
 2. Check artifact status (see verify_artifacts step)
 3. Check wiring status (see verify_wiring step)
 4. Determine truth status based on supporting infrastructure
-
-**Example:**
-
-Truth: "User can see existing messages"
-
-Supporting artifacts:
-- Chat.tsx (renders messages)
-- /api/chat GET (provides messages)
-- Message model (defines schema)
-
-If Chat.tsx is a stub → Truth FAILED
-If /api/chat GET returns hardcoded [] → Truth FAILED
-If Chat.tsx exists, is substantive, calls API, renders response → Truth VERIFIED
 </step>
 
 <step name="verify_artifacts">
@@ -148,94 +168,24 @@ check_exists() {
 }
 ```
 
-If MISSING → artifact fails, record and continue to next artifact.
-
 ### Level 2: Substantive
 
 Check that the file has real implementation, not a stub.
-
-**Line count check:**
-```bash
-check_length() {
-  local path="$1"
-  local min_lines="$2"
-  local lines=$(wc -l < "$path" 2>/dev/null || echo 0)
-  [ "$lines" -ge "$min_lines" ] && echo "SUBSTANTIVE ($lines lines)" || echo "THIN ($lines lines)"
-}
-```
-
-Minimum lines by type:
-- Component: 15+ lines
-- API route: 10+ lines
-- Hook/util: 10+ lines
-- Schema model: 5+ lines
 
 **Stub pattern check:**
 ```bash
 check_stubs() {
   local path="$1"
-
-  # Universal stub patterns
-  local stubs=$(grep -c -E "TODO|FIXME|placeholder|not implemented|coming soon" "$path" 2>/dev/null || echo 0)
-
-  # Empty returns
+  local stubs=$(grep -c -E "TODO|FIXME|placeholder|not implemented" "$path" 2>/dev/null || echo 0)
   local empty=$(grep -c -E "return null|return undefined|return \{\}|return \[\]" "$path" 2>/dev/null || echo 0)
-
-  # Placeholder content
-  local placeholder=$(grep -c -E "will be here|placeholder|lorem ipsum" "$path" 2>/dev/null || echo 0)
-
-  local total=$((stubs + empty + placeholder))
+  local total=$((stubs + empty))
   [ "$total" -gt 0 ] && echo "STUB_PATTERNS ($total found)" || echo "NO_STUBS"
 }
 ```
 
-**Export check (for components/hooks):**
-```bash
-check_exports() {
-  local path="$1"
-  grep -E "^export (default )?(function|const|class)" "$path" && echo "HAS_EXPORTS" || echo "NO_EXPORTS"
-}
-```
-
-**Combine level 2 results:**
-- SUBSTANTIVE: Adequate length + no stubs + has exports
-- STUB: Too short OR has stub patterns OR no exports
-- PARTIAL: Mixed signals (length OK but has some stubs)
-
 ### Level 3: Wired
 
-Check that the artifact is connected to the system.
-
-**Import check (is it used?):**
-```bash
-check_imported() {
-  local artifact_name="$1"
-  local search_path="${2:-src/}"
-
-  # Find imports of this artifact
-  local imports=$(grep -r "import.*$artifact_name" "$search_path" --include="*.ts" --include="*.tsx" 2>/dev/null | wc -l)
-
-  [ "$imports" -gt 0 ] && echo "IMPORTED ($imports times)" || echo "NOT_IMPORTED"
-}
-```
-
-**Usage check (is it called?):**
-```bash
-check_used() {
-  local artifact_name="$1"
-  local search_path="${2:-src/}"
-
-  # Find usages (function calls, component renders, etc.)
-  local uses=$(grep -r "$artifact_name" "$search_path" --include="*.ts" --include="*.tsx" 2>/dev/null | grep -v "import" | wc -l)
-
-  [ "$uses" -gt 0 ] && echo "USED ($uses times)" || echo "NOT_USED"
-}
-```
-
-**Combine level 3 results:**
-- WIRED: Imported AND used
-- ORPHANED: Exists but not imported/used
-- PARTIAL: Imported but not used (or vice versa)
+Check that the artifact is connected to the system using import/usage checks.
 
 ### Final artifact status
 
@@ -255,133 +205,27 @@ Record status and evidence for each artifact.
 Key links are critical connections. If broken, the goal fails even with all artifacts present.
 
 ### Pattern: Component → API
-
-Check if component actually calls the API:
-
-```bash
-verify_component_api_link() {
-  local component="$1"
-  local api_path="$2"
-
-  # Check for fetch/axios call to the API
-  local has_call=$(grep -E "fetch\(['\"].*$api_path|axios\.(get|post).*$api_path" "$component" 2>/dev/null)
-
-  if [ -n "$has_call" ]; then
-    # Check if response is used
-    local uses_response=$(grep -A 5 "fetch\|axios" "$component" | grep -E "await|\.then|setData|setState" 2>/dev/null)
-
-    if [ -n "$uses_response" ]; then
-      echo "WIRED: $component → $api_path (call + response handling)"
-    else
-      echo "PARTIAL: $component → $api_path (call exists but response not used)"
-    fi
-  else
-    echo "NOT_WIRED: $component → $api_path (no call found)"
-  fi
-}
-```
+Check if component actually calls the API.
 
 ### Pattern: API → Database
-
-Check if API route queries database:
-
-```bash
-verify_api_db_link() {
-  local route="$1"
-  local model="$2"
-
-  # Check for Prisma/DB call
-  local has_query=$(grep -E "prisma\.$model|db\.$model|$model\.(find|create|update|delete)" "$route" 2>/dev/null)
-
-  if [ -n "$has_query" ]; then
-    # Check if result is returned
-    local returns_result=$(grep -E "return.*json.*\w+|res\.json\(\w+" "$route" 2>/dev/null)
-
-    if [ -n "$returns_result" ]; then
-      echo "WIRED: $route → database ($model)"
-    else
-      echo "PARTIAL: $route → database (query exists but result not returned)"
-    fi
-  else
-    echo "NOT_WIRED: $route → database (no query for $model)"
-  fi
-}
-```
+Check if API route queries database.
 
 ### Pattern: Form → Handler
-
-Check if form submission does something:
-
-```bash
-verify_form_handler_link() {
-  local component="$1"
-
-  # Find onSubmit handler
-  local has_handler=$(grep -E "onSubmit=\{|handleSubmit" "$component" 2>/dev/null)
-
-  if [ -n "$has_handler" ]; then
-    # Check if handler has real implementation
-    local handler_content=$(grep -A 10 "onSubmit.*=" "$component" | grep -E "fetch|axios|mutate|dispatch" 2>/dev/null)
-
-    if [ -n "$handler_content" ]; then
-      echo "WIRED: form → handler (has API call)"
-    else
-      # Check for stub patterns
-      local is_stub=$(grep -A 5 "onSubmit" "$component" | grep -E "console\.log|preventDefault\(\)$|\{\}" 2>/dev/null)
-      if [ -n "$is_stub" ]; then
-        echo "STUB: form → handler (only logs or empty)"
-      else
-        echo "PARTIAL: form → handler (exists but unclear implementation)"
-      fi
-    fi
-  else
-    echo "NOT_WIRED: form → handler (no onSubmit found)"
-  fi
-}
-```
+Check if form submission does something.
 
 ### Pattern: State → Render
-
-Check if state is actually rendered:
-
-```bash
-verify_state_render_link() {
-  local component="$1"
-  local state_var="$2"
-
-  # Check if state variable exists
-  local has_state=$(grep -E "useState.*$state_var|\[$state_var," "$component" 2>/dev/null)
-
-  if [ -n "$has_state" ]; then
-    # Check if state is used in JSX
-    local renders_state=$(grep -E "\{.*$state_var.*\}|\{$state_var\." "$component" 2>/dev/null)
-
-    if [ -n "$renders_state" ]; then
-      echo "WIRED: state → render ($state_var displayed)"
-    else
-      echo "NOT_WIRED: state → render ($state_var exists but not displayed)"
-    fi
-  else
-    echo "N/A: state → render (no state var $state_var)"
-  fi
-}
-```
+Check if state is actually rendered.
 
 ### Aggregate key link results
 
-For each key link in must_haves:
+For each key link:
 - Run appropriate verification function
 - Record status and evidence
 - WIRED / PARTIAL / STUB / NOT_WIRED
 </step>
 
 <step name="verify_requirements">
-**Check requirements coverage if REQUIREMENTS.md exists.**
-
-```bash
-# Find requirements mapped to this phase
-grep -E "Phase ${PHASE_NUM}" .planning/REQUIREMENTS.md 2>/dev/null
-```
+**Check requirements coverage if requirements page exists.**
 
 For each requirement:
 1. Parse requirement description
@@ -397,49 +241,27 @@ For each requirement:
 <step name="scan_antipatterns">
 **Scan for anti-patterns across phase files.**
 
-Identify files modified in this phase:
-```bash
-# Extract files from SUMMARY.md
-grep -E "^\- \`" "$PHASE_DIR"/*-SUMMARY.md | sed 's/.*`\([^`]*\)`.*/\1/' | sort -u
-```
+Identify files modified in this phase from task summaries:
 
-Run anti-pattern detection:
-```bash
-scan_antipatterns() {
-  local files="$@"
-
-  echo "## Anti-Patterns Found"
-  echo ""
-
-  for file in $files; do
-    [ -f "$file" ] || continue
-
-    # TODO/FIXME comments
-    grep -n -E "TODO|FIXME|XXX|HACK" "$file" 2>/dev/null | while read line; do
-      echo "| $file | $(echo $line | cut -d: -f1) | TODO/FIXME | ⚠️ Warning |"
-    done
-
-    # Placeholder content
-    grep -n -E "placeholder|coming soon|will be here" "$file" -i 2>/dev/null | while read line; do
-      echo "| $file | $(echo $line | cut -d: -f1) | Placeholder | 🛑 Blocker |"
-    done
-
-    # Empty implementations
-    grep -n -E "return null|return \{\}|return \[\]|=> \{\}" "$file" 2>/dev/null | while read line; do
-      echo "| $file | $(echo $line | cut -d: -f1) | Empty return | ⚠️ Warning |"
-    done
-
-    # Console.log only implementations
-    grep -n -B 2 -A 2 "console\.log" "$file" 2>/dev/null | grep -E "^\s*(const|function|=>)" | while read line; do
-      echo "| $file | - | Log-only function | ⚠️ Warning |"
-    done
-  done
+```javascript
+// Get summary pages for tasks
+modified_files = []
+for (task of phase.tasks) {
+  task_pages = mosic_get_entity_pages("MTask", task.name)
+  summary_page = task_pages.find(p => p.title.includes("Summary"))
+  if (summary_page) {
+    content = mosic_get_page(summary_page.name, { content_format: "markdown" })
+    files = extract_files_from_summary(content)
+    modified_files.push(...files)
+  }
 }
 ```
 
+Run anti-pattern detection on modified files.
+
 Categorize findings:
-- 🛑 Blocker: Prevents goal achievement (placeholder renders, empty handlers)
-- ⚠️ Warning: Indicates incomplete (TODO comments, console.log)
+- 🛑 Blocker: Prevents goal achievement
+- ⚠️ Warning: Indicates incomplete
 - ℹ️ Info: Notable but not problematic
 </step>
 
@@ -455,11 +277,6 @@ Some things can't be verified programmatically:
 - External service integration (payments, email)
 - Performance feel (does it feel fast?)
 - Error message clarity
-
-**Needs human if uncertain:**
-- Complex wiring that grep can't trace
-- Dynamic behavior depending on state
-- Edge cases and error states
 
 **Format for human verification:**
 ```markdown
@@ -480,7 +297,6 @@ Some things can't be verified programmatically:
 - All artifacts pass level 1-3
 - All key links WIRED
 - No blocker anti-patterns
-- (Human verification items are OK — will be prompted)
 
 **Status: gaps_found**
 - One or more truths FAILED
@@ -491,7 +307,6 @@ Some things can't be verified programmatically:
 **Status: human_needed**
 - All automated checks pass
 - BUT items flagged for human verification
-- Can't determine goal achievement without human
 
 **Calculate score:**
 ```
@@ -504,172 +319,137 @@ score = (verified_truths / total_truths)
 
 Group related gaps into fix plans:
 
-1. **Identify gap clusters:**
-   - API stub + component not wired → "Wire frontend to backend"
-   - Multiple artifacts missing → "Complete core implementation"
-   - Wiring issues only → "Connect existing components"
-
-2. **Generate plan recommendations:**
-
-```markdown
-### {phase}-{next}-PLAN.md: {Fix Name}
-
-**Objective:** {What this fixes}
-
-**Tasks:**
-1. {Task to fix gap 1}
-   - Files: {files to modify}
-   - Action: {specific fix}
-   - Verify: {how to confirm fix}
-
-2. {Task to fix gap 2}
-   - Files: {files to modify}
-   - Action: {specific fix}
-   - Verify: {how to confirm fix}
-
-3. Re-verify phase goal
-   - Run verification again
-   - Confirm all must-haves pass
-
-**Estimated scope:** {Small / Medium}
-```
-
-3. **Keep plans focused:**
-   - 2-3 tasks per plan
-   - Single concern per plan
-   - Include verification task
-
-4. **Order by dependency:**
-   - Fix missing artifacts before wiring
-   - Fix stubs before integration
-   - Verify after all fixes
+1. **Identify gap clusters**
+2. **Generate plan recommendations**
+3. **Keep plans focused** (2-3 tasks per plan)
+4. **Order by dependency**
 </step>
 
-<step name="create_report">
-**Generate VERIFICATION.md using template.**
+<step name="create_verification_page">
+**Create verification report page in Mosic.**
 
-```bash
-REPORT_PATH="$PHASE_DIR/${PHASE_NUM}-VERIFICATION.md"
-```
-
-Fill template sections:
-1. **Frontmatter:** phase, verified timestamp, status, score
-2. **Goal Achievement:** Truth verification table
-3. **Required Artifacts:** Artifact verification table
-4. **Key Link Verification:** Wiring verification table
-5. **Requirements Coverage:** If REQUIREMENTS.md exists
-6. **Anti-Patterns Found:** Scan results table
-7. **Human Verification Required:** Items needing human
-8. **Gaps Summary:** Critical and non-critical gaps
-9. **Recommended Fix Plans:** If gaps_found
-10. **Verification Metadata:** Approach, timing, counts
-
-See ~/.claude/get-shit-done/templates/verification-report.md for complete template.
-</step>
-
-<step name="sync_verification_to_mosic">
-**Sync verification results to Mosic (Deep Integration):**
-
-Check Mosic status:
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true:**
-
-### Step 1: Load Mosic Config
-
-```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-VERIFICATION_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.verification")
-PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PHASE_NUM}\"]")
-TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PHASE_NUM}\"]")
-```
-
-### Step 2: Create Verification Page
-
-```
-verification_page = mosic_create_entity_page("MTask List", task_list_id, {
+```javascript
+verification_page = mosic_create_entity_page("MTask List", phase_task_list.name, {
   workspace_id: workspace_id,
   title: "Phase " + PHASE_NUM + " Verification Report",
   page_type: "Document",
   icon: "lucide:shield-check",
   status: "Published",
-  content: convert_verification_to_editorjs(VERIFICATION.md),
+  content: {
+    blocks: [
+      {
+        type: "header",
+        data: { text: "Phase " + PHASE_NUM + " Verification", level: 1 }
+      },
+      {
+        type: "paragraph",
+        data: { text: "**Status:** " + STATUS + "\n**Score:** " + score + "/" + total }
+      },
+      {
+        type: "header",
+        data: { text: "Goal Achievement", level: 2 }
+      },
+      // Truth verification table
+      {
+        type: "table",
+        data: {
+          content: [
+            ["Truth", "Status", "Evidence"],
+            ...truths.map(t => [t.description, t.status, t.evidence])
+          ]
+        }
+      },
+      {
+        type: "header",
+        data: { text: "Required Artifacts", level: 2 }
+      },
+      // Artifact verification table
+      {
+        type: "header",
+        data: { text: "Key Link Verification", level: 2 }
+      },
+      // Wiring verification table
+      {
+        type: "header",
+        data: { text: "Anti-Patterns Found", level: 2 }
+      },
+      // Anti-pattern scan results
+      {
+        type: "header",
+        data: { text: "Human Verification Required", level: 2 }
+      },
+      // Human verification items
+      // If gaps_found:
+      {
+        type: "header",
+        data: { text: "Recommended Fix Plans", level: 2 }
+      },
+      // Fix plan recommendations
+    ]
+  },
   relation_type: "Related"
 })
 
-# Tag the verification page
+// Tag the verification page
 mosic_batch_add_tags_to_document("M Page", verification_page.name, [
-  GSD_MANAGED_TAG,
-  VERIFICATION_TAG,
-  PHASE_TAG
+  tags.gsd_managed,
+  tags.verification,
+  tags["phase-" + PHASE_NUM]
 ])
 
-# Store page ID
-# mosic.pages["phase-" + PHASE_NUM + "-verification"] = verification_page.name
+// Store page ID
+config.pages["phase-" + PHASE_NUM + "-verification"] = verification_page.name
 ```
 
-### Step 3: Update Task List Based on Status
+</step>
 
-```
-IF status == "passed":
-  mosic_update_document("MTask List", task_list_id, {
-    description: original_description + "\n\n---\n\n✅ **Verification Passed**\n" +
+<step name="update_task_list_status">
+Update task list based on verification status:
+
+```javascript
+if (status === "passed") {
+  mosic_update_document("MTask List", phase_task_list.name, {
+    description: phase_task_list.description + "\n\n---\n\n✅ **Verification Passed**\n" +
       "Score: " + score + "/" + total + " must-haves verified"
   })
 
   mosic_create_document("M Comment", {
     workspace_id: workspace_id,
-    ref_doc: "MTask List",
-    ref_name: task_list_id,
+    reference_doctype: "MTask List",
+    reference_name: phase_task_list.name,
     content: "✅ **Phase Verification Passed**\n\n" +
       "All must-haves verified. Goal achieved.\n\n" +
-      "See [Verification Report](page/" + verification_page.name + ") for details."
+      "[Verification Report](page/" + verification_page.name + ")"
   })
-
-ELSE IF status == "gaps_found":
-  mosic_update_document("MTask List", task_list_id, {
+} else if (status === "gaps_found") {
+  mosic_update_document("MTask List", phase_task_list.name, {
     status: "In Review",
-    description: original_description + "\n\n---\n\n⚠️ **Gaps Found**\n" +
+    description: phase_task_list.description + "\n\n---\n\n⚠️ **Gaps Found**\n" +
       "Score: " + score + "/" + total + " must-haves verified\n" +
-      "Gaps: " + gap_count + " items need fixing"
+      "Gaps: " + gaps.length + " items need fixing"
   })
 
-  # Create gap tasks
-  FOR each gap in gaps:
+  // Create gap tasks
+  for (gap of gaps) {
     gap_task = mosic_create_document("MTask", {
       workspace_id: workspace_id,
-      task_list: task_list_id,
+      task_list: phase_task_list.name,
       title: "Gap: " + gap.truth.substring(0, 80),
       description: "**Failed Verification:**\n\n" + gap.details,
       icon: "lucide:alert-triangle",
       status: "ToDo",
-      priority: gap.severity == "blocker" ? "Critical" : "High"
+      priority: gap.severity === "blocker" ? "Critical" : "High"
     })
 
-    # Tag gap task
     mosic_batch_add_tags_to_document("MTask", gap_task.name, [
-      GSD_MANAGED_TAG,
-      mosic.tags.fix,
-      PHASE_TAG
+      tags.gsd_managed,
+      tags.fix,
+      tags["phase-" + PHASE_NUM]
     ])
-
-ELSE IF status == "human_needed":
-  mosic_update_document("MTask List", task_list_id, {
-    status: "In Review",
-    description: original_description + "\n\n---\n\n🔍 **Human Verification Needed**\n" +
-      human_items.length + " items require manual testing"
-  })
+  }
+}
 ```
 
-**Error handling:**
-```
-IF mosic sync fails:
-  - Log warning, continue with local operation
-  - Add to pending_sync for retry
-```
 </step>
 
 <step name="return_to_orchestrator">
@@ -682,8 +462,7 @@ IF mosic sync fails:
 
 **Status:** {passed | gaps_found | human_needed}
 **Score:** {N}/{M} must-haves verified
-**Report:** .planning/phases/{phase_dir}/{phase}-VERIFICATION.md
-[IF mosic.enabled:] **Mosic:** https://mosic.pro/app/page/{verification_page.name} [END IF]
+**Mosic Report:** https://mosic.pro/app/page/{verification_page.name}
 
 {If passed:}
 All must-haves verified. Phase goal achieved. Ready to proceed.
@@ -695,11 +474,9 @@ All must-haves verified. Phase goal achieved. Ready to proceed.
 1. {Gap 1 summary}
 2. {Gap 2 summary}
 
-### Recommended Fixes
+### Gap Tasks Created
 
-{N} fix plans recommended:
-1. {phase}-{next}-PLAN.md: {name}
-2. {phase}-{next+1}-PLAN.md: {name}
+{N} tasks created in Mosic for fixing gaps.
 
 {If human_needed:}
 ### Human Verification Required
@@ -712,15 +489,16 @@ Automated checks passed. Awaiting human verification.
 ```
 
 The orchestrator will:
-- If `passed`: Continue to update_roadmap
-- If `gaps_found`: Create and execute fix plans, then re-verify
+- If `passed`: Continue to update roadmap
+- If `gaps_found`: Route to gap closure planning
 - If `human_needed`: Present items to user, collect responses
 </step>
 
 </process>
 
 <success_criteria>
-- [ ] Must-haves established (from frontmatter or derived)
+- [ ] Mosic context loaded (project, phase task list, tasks, pages)
+- [ ] Must-haves established (from plan pages or derived)
 - [ ] All truths verified with status and evidence
 - [ ] All artifacts checked at all three levels
 - [ ] All key links verified
@@ -729,10 +507,8 @@ The orchestrator will:
 - [ ] Human verification items identified
 - [ ] Overall status determined
 - [ ] Fix plans generated (if gaps_found)
-- [ ] VERIFICATION.md created with complete report
-- [ ] Mosic sync (if enabled):
-  - [ ] Verification page created linked to phase task list
-  - [ ] Task list status updated based on verification result
-  - [ ] Gap tasks created for gaps_found status
+- [ ] Verification page created in Mosic linked to phase task list
+- [ ] Task list status updated based on verification result
+- [ ] Gap tasks created for gaps_found status
 - [ ] Results returned to orchestrator
 </success_criteria>

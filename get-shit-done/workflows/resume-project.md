@@ -2,151 +2,153 @@
 Use this workflow when:
 - Starting a new session on an existing project
 - User says "continue", "what's next", "where were we", "resume"
-- Any planning operation when .planning/ already exists
+- Any planning operation when project already exists in Mosic
 - User returns after time away from project
 </trigger>
 
 <purpose>
-Instantly restore full project context so "Where were we?" has an immediate, complete answer.
+Instantly restore full project context from Mosic so "Where were we?" has an immediate, complete answer.
 </purpose>
 
-<required_reading>
-@~/.claude/get-shit-done/references/continuation-format.md
-</required_reading>
+<mosic_only>
+**CRITICAL: This workflow operates ONLY through Mosic MCP.**
+
+- All state is read from Mosic (project, task lists, tasks, pages)
+- Session continuity tracked via Mosic comments
+- Only `config.json` is stored locally (for Mosic entity IDs)
+- No `.planning/` directory operations
+</mosic_only>
 
 <process>
 
-<step name="detect_existing_project">
-Check if this is an existing project:
+<step name="load_mosic_context" priority="first">
 
-```bash
-ls .planning/STATE.md 2>/dev/null && echo "Project exists"
-ls .planning/ROADMAP.md 2>/dev/null && echo "Roadmap exists"
-ls .planning/PROJECT.md 2>/dev/null && echo "Project file exists"
+**Load context from Mosic:**
+
+```
+Read config.json for Mosic IDs:
+- workspace_id
+- project_id
+- task_lists (phase mappings)
+- pages (page IDs)
+- tags (tag IDs)
 ```
 
-**If STATE.md exists:** Proceed to load_state
-**If only ROADMAP.md/PROJECT.md exist:** Offer to reconstruct STATE.md
-**If .planning/ doesn't exist:** This is a new project - route to /gsd:new-project
+```javascript
+// Load project with task lists
+project = mosic_get_project(project_id, { include_task_lists: true })
+
+if (!project) {
+  console.log("Project not found in Mosic. Use /gsd:new-project to create.")
+  exit()
+}
+
+// Get project pages (overview, requirements, roadmap)
+project_pages = mosic_get_entity_pages("MProject", project_id)
+overview_page = project_pages.find(p => p.title.includes("Overview"))
+roadmap_page = project_pages.find(p => p.title.includes("Roadmap"))
+```
+
 </step>
 
-<step name="load_state">
+<step name="determine_current_position">
+**Find current position from Mosic state:**
 
-Read and parse STATE.md, then PROJECT.md:
+```javascript
+// Find in-progress phase
+in_progress_phases = project.task_lists.filter(tl => tl.status === "In Progress")
+completed_phases = project.task_lists.filter(tl => tl.status === "Completed")
+pending_phases = project.task_lists.filter(tl => tl.status === "ToDo" || tl.status === "Planned")
 
-```bash
-cat .planning/STATE.md
-cat .planning/PROJECT.md
+current_phase = in_progress_phases[0] || pending_phases[0]
+
+if (current_phase) {
+  // Get phase with tasks
+  phase = mosic_get_task_list(current_phase.name, { include_tasks: true })
+
+  // Find in-progress or next task
+  in_progress_tasks = phase.tasks.filter(t => !t.done && t.status === "In Progress")
+  pending_tasks = phase.tasks.filter(t => !t.done)
+  completed_tasks = phase.tasks.filter(t => t.done)
+
+  current_task = in_progress_tasks[0] || pending_tasks[0]
+}
+
+// Calculate progress
+total_phases = project.task_lists.length
+completed_phase_count = completed_phases.length
+progress_percent = Math.round((completed_phase_count / total_phases) * 100)
 ```
 
-**From STATE.md extract:**
+</step>
 
-- **Project Reference**: Core value and current focus
-- **Current Position**: Phase X of Y, Plan A of B, Status
-- **Progress**: Visual progress bar
-- **Recent Decisions**: Key decisions affecting current work
-- **Pending Todos**: Ideas captured during sessions
-- **Blockers/Concerns**: Issues carried forward
-- **Session Continuity**: Where we left off, any resume files
+<step name="check_for_changes">
+**Check for cross-session changes:**
 
-**From PROJECT.md extract:**
+```javascript
+last_sync = config.last_sync
 
-- **What This Is**: Current accurate description
-- **Requirements**: Validated, Active, Out of Scope
-- **Key Decisions**: Full decision log with outcomes
-- **Constraints**: Hard limits on implementation
+// Check notifications for this project
+notifications = mosic_get_document_notifications("MProject", project_id)
+unread_notifications = notifications.filter(n => !n.is_read && n.created > last_sync)
+
+// Check for tasks completed outside GSD
+external_changes = []
+for (task_list of project.task_lists) {
+  tasks = mosic_get_task_list(task_list.name, { include_tasks: true })
+  for (task of tasks.tasks) {
+    if (task.modified > last_sync && task.done) {
+      // Task was completed since last sync
+      external_changes.push({
+        type: "task_completed",
+        task: task.title,
+        phase: task_list.title
+      })
+    }
+  }
+}
+```
 
 </step>
 
 <step name="check_incomplete_work">
-Look for incomplete work that needs attention:
+**Look for incomplete work that needs attention:**
 
-```bash
-# Check for continue-here files (mid-plan resumption)
-ls .planning/phases/*/.continue-here*.md 2>/dev/null
-
-# Check for plans without summaries (incomplete execution)
-for plan in .planning/phases/*/*-PLAN.md; do
-  summary="${plan/PLAN/SUMMARY}"
-  [ ! -f "$summary" ] && echo "Incomplete: $plan"
-done 2>/dev/null
-
-# Check for interrupted agents
-if [ -f .planning/current-agent-id.txt ] && [ -s .planning/current-agent-id.txt ]; then
-  AGENT_ID=$(cat .planning/current-agent-id.txt | tr -d '\n')
-  echo "Interrupted agent: $AGENT_ID"
-fi
-```
-
-**If .continue-here file exists:**
-
-- This is a mid-plan resumption point
-- Read the file for specific resumption context
-- Flag: "Found mid-plan checkpoint"
-
-**If PLAN without SUMMARY exists:**
-
-- Execution was started but not completed
-- Flag: "Found incomplete plan execution"
-
-**If interrupted agent found:**
-
-- Subagent was spawned but session ended before completion
-- Read agent-history.json for task details
-- Flag: "Found interrupted agent"
-  </step>
-
-<step name="check_mosic_changes">
-**Check Mosic for cross-session changes (if enabled):**
-
-Check Mosic status:
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true:**
-
-### Step 1: Load Mosic Config
-
-```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
-LAST_SYNC=$(cat .planning/config.json | jq -r ".mosic.last_sync")
-```
-
-### Step 2: Check for Changes Since Last Sync
-
-```
-# Get project with task lists and recent activity
-project = mosic_get_project(project_id, { include_task_lists: true })
-
-# Check notifications for this project
-notifications = mosic_get_document_notifications("MProject", project_id)
-
-# Check for tasks completed outside GSD (in Mosic UI directly)
-FOR each task_list in project.task_lists:
-  tasks = mosic_get_task_list(task_list.name, { include_tasks: true })
-  FOR each task in tasks:
-    IF task.modified > LAST_SYNC AND task.status changed:
-      external_changes.append({
-        type: "task_status",
-        task: task.title,
-        new_status: task.status,
-        modified_by: task.modified_by
+```javascript
+// Check for tasks stuck in progress
+stuck_tasks = []
+for (task_list of project.task_lists) {
+  phase = mosic_get_task_list(task_list.name, { include_tasks: true })
+  for (task of phase.tasks) {
+    if (!task.done && task.status === "In Progress") {
+      // Task started but not finished
+      stuck_tasks.push({
+        identifier: task.identifier,
+        title: task.title,
+        phase: task_list.title
       })
+    }
+  }
+}
+
+// Check for checkpoint comments awaiting response
+checkpoint_comments = []
+if (current_task) {
+  task_comments = mosic_list_documents("M Comment", {
+    filters: [
+      ["reference_doctype", "=", "MTask"],
+      ["reference_name", "=", current_task.name]
+    ]
+  })
+
+  for (comment of task_comments) {
+    if (comment.content.includes("CHECKPOINT") && comment.content.includes("Awaiting")) {
+      checkpoint_comments.push(comment)
+    }
+  }
+}
 ```
 
-### Step 3: Flag External Changes
-
-```
-IF external_changes.length > 0:
-  MOSIC_CHANGES_DETECTED = true
-  Store external_changes for presentation
-ELSE:
-  MOSIC_CHANGES_DETECTED = false
-```
-
-**If mosic.enabled = false:** Skip Mosic check, set MOSIC_CHANGES_DETECTED = false.
 </step>
 
 <step name="present_status">
@@ -156,43 +158,29 @@ Present complete project status to user:
 ╔══════════════════════════════════════════════════════════════╗
 ║  PROJECT STATUS                                               ║
 ╠══════════════════════════════════════════════════════════════╣
-║  Building: [one-liner from PROJECT.md "What This Is"]         ║
+║  Project: ${project.title}                                    ║
 ║                                                               ║
-║  Phase: [X] of [Y] - [Phase name]                            ║
-║  Plan:  [A] of [B] - [Status]                                ║
-║  Progress: [██████░░░░] XX%                                  ║
+║  Phase: ${completed_phase_count + 1} of ${total_phases} - ${current_phase?.title || "None in progress"}
+║  Task:  ${current_task?.identifier || "None"} - ${current_task?.title || "Ready to plan"}
+║  Progress: [${"█".repeat(progress_percent/10)}${"░".repeat(10 - progress_percent/10)}] ${progress_percent}%
 ║                                                               ║
-║  Last activity: [date] - [what happened]                     ║
+║  Mosic: https://mosic.pro/app/Project/${project_id}           ║
 ╚══════════════════════════════════════════════════════════════╝
 
-[If MOSIC_CHANGES_DETECTED:]
-☁️  Mosic changes detected since last session:
-    - [change 1 - e.g., "Task 'Setup auth' marked complete by user@example.com"]
-    - [change 2]
-    Note: Local state may need reconciliation
+[If external_changes.length > 0:]
+☁️  Changes detected since last session:
+    ${external_changes.map(c => "- " + c.type + ": " + c.task).join("\n    ")}
 
-[If incomplete work found:]
-⚠️  Incomplete work detected:
-    - [.continue-here file or incomplete plan]
+[If stuck_tasks.length > 0:]
+⚠️  Tasks in progress (may need attention):
+    ${stuck_tasks.map(t => "- " + t.identifier + ": " + t.title).join("\n    ")}
 
-[If interrupted agent found:]
-⚠️  Interrupted agent detected:
-    Agent ID: [id]
-    Task: [task description from agent-history.json]
-    Interrupted: [timestamp]
+[If checkpoint_comments.length > 0:]
+⏸️  Pending checkpoint:
+    Task ${current_task.identifier} awaiting response
 
-    Resume with: Task tool (resume parameter with agent ID)
-
-[If pending todos exist:]
-📋 [N] pending todos — /gsd:check-todos to review
-
-[If blockers exist:]
-⚠️  Carried concerns:
-    - [blocker 1]
-    - [blocker 2]
-
-[If alignment is not ✓:]
-⚠️  Brief alignment: [status] - [assessment]
+[If unread_notifications.length > 0:]
+🔔 ${unread_notifications.length} unread notification(s)
 ```
 
 </step>
@@ -200,35 +188,37 @@ Present complete project status to user:
 <step name="determine_next_action">
 Based on project state, determine the most logical next action:
 
-**If interrupted agent exists:**
-→ Primary: Resume interrupted agent (Task tool with resume parameter)
-→ Option: Start fresh (abandon agent work)
+**If checkpoint awaiting response:**
+→ Primary: Respond to checkpoint
+→ Option: Skip and continue
 
-**If .continue-here file exists:**
-→ Primary: Resume from checkpoint
-→ Option: Start fresh on current plan
+**If task in progress:**
+→ Primary: Complete the in-progress task
+→ Option: Abandon and start fresh
 
-**If incomplete plan (PLAN without SUMMARY):**
-→ Primary: Complete the incomplete plan
-→ Option: Abandon and move on
-
-**If phase in progress, all plans complete:**
-→ Primary: Transition to next phase
-→ Option: Review completed work
+**If phase in progress, no tasks started:**
+→ Primary: Execute next task
+→ Option: Review phase plan
 
 **If phase ready to plan:**
-→ Check if CONTEXT.md exists for this phase:
+→ Check if context/research pages exist for this phase:
 
-- If CONTEXT.md missing:
-  → Primary: Discuss phase vision (how user imagines it working)
-  → Secondary: Plan directly (skip context gathering)
-- If CONTEXT.md exists:
+```javascript
+phase_pages = mosic_get_entity_pages("MTask List", current_phase.name)
+context_page = phase_pages.find(p => p.title.includes("Context"))
+research_page = phase_pages.find(p => p.title.includes("Research") || p.title.includes("Discovery"))
+```
+
+- If no context page:
+  → Primary: Discuss phase vision
+  → Secondary: Plan directly
+- If context exists:
   → Primary: Plan the phase
-  → Option: Review roadmap
+  → Option: Review context
 
-**If phase ready to execute:**
-→ Primary: Execute next plan
-→ Option: Review the plan first
+**If all phases complete:**
+→ Primary: Complete milestone
+→ Option: Review accomplishments
 </step>
 
 <step name="offer_options">
@@ -238,28 +228,17 @@ Present contextual options based on project state:
 What would you like to do?
 
 [Primary action based on state - e.g.:]
-1. Resume interrupted agent [if interrupted agent found]
+1. Execute phase (/gsd:execute-phase ${current_phase_num})
    OR
-1. Execute phase (/gsd:execute-phase {phase})
+1. Discuss Phase ${next_phase} context (/gsd:discuss-phase ${next_phase})
    OR
-1. Discuss Phase 3 context (/gsd:discuss-phase 3) [if CONTEXT.md missing]
-   OR
-1. Plan Phase 3 (/gsd:plan-phase 3) [if CONTEXT.md exists or discuss option declined]
+1. Plan Phase ${next_phase} (/gsd:plan-phase ${next_phase})
 
 [Secondary options:]
-2. Review current phase status
-3. Check pending todos ([N] pending)
-4. Review brief alignment
-5. Something else
+2. View project in Mosic
+3. Review current phase status
+4. Something else
 ```
-
-**Note:** When offering phase planning, check for CONTEXT.md existence first:
-
-```bash
-ls .planning/phases/XX-name/*-CONTEXT.md 2>/dev/null
-```
-
-If missing, suggest discuss-phase before plan. If exists, offer plan directly.
 
 Wait for user selection.
 </step>
@@ -267,83 +246,68 @@ Wait for user selection.
 <step name="route_to_workflow">
 Based on user selection, route to appropriate workflow:
 
-- **Execute plan** → Show command for user to run after clearing:
+- **Execute phase** → Show command for user to run after clearing:
   ```
   ---
 
   ## ▶ Next Up
 
-  **{phase}-{plan}: [Plan Name]** — [objective from PLAN.md]
+  **Phase ${PHASE}: ${phase.title}** — execute tasks
 
-  `/gsd:execute-phase {phase}`
+  `/gsd:execute-phase ${PHASE}`
 
   <sub>`/clear` first → fresh context window</sub>
 
   ---
   ```
-- **Plan phase** → Show command for user to run after clearing:
+
+- **Plan phase** → Show command:
   ```
   ---
 
   ## ▶ Next Up
 
-  **Phase [N]: [Name]** — [Goal from ROADMAP.md]
+  **Phase ${PHASE}: ${phase.title}** — create execution plan
 
-  `/gsd:plan-phase [phase-number]`
+  `/gsd:plan-phase ${PHASE}`
 
   <sub>`/clear` first → fresh context window</sub>
 
   ---
 
   **Also available:**
-  - `/gsd:discuss-phase [N]` — gather context first
-  - `/gsd:research-phase [N]` — investigate unknowns
+  - `/gsd:discuss-phase ${PHASE}` — gather context first
+  - `/gsd:research-phase ${PHASE}` — investigate unknowns
 
   ---
   ```
-- **Transition** → ./transition.md
-- **Check todos** → Read .planning/todos/pending/, present summary
-- **Review alignment** → Read PROJECT.md, compare to current state
+
+- **View in Mosic** → Provide direct link
 - **Something else** → Ask what they need
 </step>
 
 <step name="update_session">
-Before proceeding to routed workflow, update session continuity:
+Before proceeding, update session tracking:
 
-Update STATE.md:
+```javascript
+// Add session resume comment to project
+mosic_create_document("M Comment", {
+  workspace_id: workspace_id,
+  reference_doctype: "MProject",
+  reference_name: project_id,
+  content: "📋 **Session Resumed**\n\n" +
+    "Position: Phase " + (completed_phase_count + 1) + " of " + total_phases + "\n" +
+    "Action: " + selected_action
+})
 
-```markdown
-## Session Continuity
-
-Last session: [now]
-Stopped at: Session resumed, proceeding to [action]
-Resume file: [updated if applicable]
+// Update last sync in config
+config.last_sync = new Date().toISOString()
 ```
 
 This ensures if session ends unexpectedly, next resume knows the state.
 </step>
 
 </process>
-
-<reconstruction>
-If STATE.md is missing but other artifacts exist:
-
-"STATE.md missing. Reconstructing from artifacts..."
-
-1. Read PROJECT.md → Extract "What This Is" and Core Value
-2. Read ROADMAP.md → Determine phases, find current position
-3. Scan \*-SUMMARY.md files → Extract decisions, concerns
-4. Count pending todos in .planning/todos/pending/
-5. Check for .continue-here files → Session continuity
-
-Reconstruct and write STATE.md, then proceed normally.
-
-This handles cases where:
-
-- Project predates STATE.md introduction
-- File was accidentally deleted
-- Cloning repo without full .planning/ state
-  </reconstruction>
 
 <quick_resume>
 If user says "continue" or "go":
@@ -357,13 +321,13 @@ If user says "continue" or "go":
 <success_criteria>
 Resume is complete when:
 
-- [ ] STATE.md loaded (or reconstructed)
-- [ ] Incomplete work detected and flagged
-- [ ] Mosic sync check (if enabled):
-  - [ ] Cross-session changes detected
-  - [ ] External task status changes flagged
+- [ ] Mosic context loaded (project, task lists, tasks, pages)
+- [ ] Current position determined from task list status
+- [ ] Cross-session changes detected and flagged
+- [ ] Incomplete/stuck work identified
 - [ ] Clear status presented to user
 - [ ] Contextual next actions offered
 - [ ] User knows exactly where project stands
-- [ ] Session continuity updated
-      </success_criteria>
+- [ ] Session resume comment added to project
+- [ ] config.json last_sync updated
+</success_criteria>

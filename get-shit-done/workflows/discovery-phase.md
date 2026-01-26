@@ -1,20 +1,29 @@
 <purpose>
 Execute discovery at the appropriate depth level.
-Produces DISCOVERY.md (for Level 2-3) that informs PLAN.md creation.
+Produces research page in Mosic that informs planning.
 
 Called from plan-phase.md's mandatory_discovery step with a depth parameter.
 
-NOTE: For comprehensive ecosystem research ("how do experts build this"), use /gsd:research-phase instead, which produces RESEARCH.md.
+NOTE: For comprehensive ecosystem research ("how do experts build this"), use /gsd:research-phase instead, which produces a more detailed research page.
 </purpose>
+
+<mosic_only>
+**CRITICAL: This workflow operates ONLY through Mosic MCP.**
+
+- All state is read from Mosic (project, task lists, pages)
+- All documentation is stored in Mosic pages
+- Only `config.json` is stored locally (for Mosic entity IDs)
+- No `.planning/` directory operations
+</mosic_only>
 
 <depth_levels>
 **This workflow supports three depth levels:**
 
 | Level | Name         | Time      | Output                                       | When                                      |
 | ----- | ------------ | --------- | -------------------------------------------- | ----------------------------------------- |
-| 1     | Quick Verify | 2-5 min   | No file, proceed with verified knowledge     | Single library, confirming current syntax |
-| 2     | Standard     | 15-30 min | DISCOVERY.md                                 | Choosing between options, new integration |
-| 3     | Deep Dive    | 1+ hour   | Detailed DISCOVERY.md with validation gates  | Architectural decisions, novel problems   |
+| 1     | Quick Verify | 2-5 min   | No page, proceed with verified knowledge     | Single library, confirming current syntax |
+| 2     | Standard     | 15-30 min | Discovery page in Mosic                      | Choosing between options, new integration |
+| 3     | Deep Dive    | 1+ hour   | Detailed discovery page with validation gates | Architectural decisions, novel problems   |
 
 **Depth is determined by plan-phase.md before routing here.**
 </depth_levels>
@@ -32,6 +41,35 @@ See ~/.claude/get-shit-done/templates/discovery.md `<discovery_protocol>` for fu
 </source_hierarchy>
 
 <process>
+
+<step name="load_mosic_context" priority="first">
+
+**Load context from Mosic:**
+
+```
+Read config.json for Mosic IDs:
+- workspace_id
+- project_id
+- task_lists (phase mappings)
+- pages (page IDs)
+- tags (tag IDs)
+```
+
+```javascript
+// Load project with task lists
+project = mosic_get_project(project_id, { include_task_lists: true })
+
+// Find the phase task list
+phase_task_list = project.task_lists.find(tl =>
+  tl.title.includes("Phase " + PHASE_NUM) ||
+  tl.identifier.startsWith(PHASE_NUM + "-")
+)
+
+// Get phase pages
+phase_pages = mosic_get_entity_pages("MTask List", phase_task_list.name)
+```
+
+</step>
 
 <step name="determine_depth">
 Check the depth parameter passed from plan-phase.md:
@@ -69,7 +107,7 @@ For: Single known library, confirming syntax/version still correct.
    - API syntax unchanged
    - No breaking changes in recent versions
 
-4. **If verified:** Return to plan-phase.md with confirmation. No DISCOVERY.md needed.
+4. **If verified:** Return to plan-phase.md with confirmation. No discovery page needed.
 
 5. **If concerns found:** Escalate to Level 2.
 
@@ -107,7 +145,7 @@ For: Choosing between options, new external integration.
 
 5. **Cross-verify:** Any WebSearch finding → confirm with Context7/official docs.
 
-6. **Create DISCOVERY.md** using ~/.claude/get-shit-done/templates/discovery.md structure:
+6. **Create discovery page in Mosic** (see create_discovery_page step):
 
    - Summary with recommendation
    - Key findings per option
@@ -116,7 +154,7 @@ For: Choosing between options, new external integration.
 
 7. Return to plan-phase.md.
 
-**Output:** `.planning/phases/XX-name/DISCOVERY.md`
+**Output:** Discovery page created in Mosic linked to phase task list
 </step>
 
 <step name="level_3_deep_dive">
@@ -126,7 +164,7 @@ For: Architectural decisions, novel problems, high-risk choices.
 
 **Process:**
 
-1. **Scope the discovery** using ~/.claude/get-shit-done/templates/discovery.md:
+1. **Scope the discovery:**
 
    - Define clear scope
    - Define include/exclude boundaries
@@ -158,10 +196,10 @@ For: Architectural decisions, novel problems, high-risk choices.
    - Mark what's verified vs assumed
    - Flag contradictions
 
-6. **Create comprehensive DISCOVERY.md:**
+6. **Create comprehensive discovery page in Mosic:**
 
-   - Full structure from ~/.claude/get-shit-done/templates/discovery.md
-   - Quality report with source attribution
+   - Full structure with quality report
+   - Source attribution
    - Confidence by finding
    - If LOW confidence on any critical finding → add validation checkpoints
 
@@ -169,7 +207,7 @@ For: Architectural decisions, novel problems, high-risk choices.
 
 8. Return to plan-phase.md.
 
-**Output:** `.planning/phases/XX-name/DISCOVERY.md` (comprehensive)
+**Output:** Comprehensive discovery page in Mosic linked to phase task list
 </step>
 
 <step name="identify_unknowns">
@@ -181,37 +219,111 @@ Ask: What do we need to learn before we can plan this phase?
 - Best practices?
 - API patterns?
 - Architecture approach?
-  </step>
-
-<step name="create_discovery_scope">
-Use ~/.claude/get-shit-done/templates/discovery.md.
-
-Include:
-
-- Clear discovery objective
-- Scoped include/exclude lists
-- Source preferences (official docs, Context7, current year)
-- Output structure for DISCOVERY.md
-  </step>
-
-<step name="execute_discovery">
-Run the discovery:
-- Use web search for current info
-- Use Context7 MCP for library docs
-- Prefer current year sources
-- Structure findings per template
 </step>
 
-<step name="create_discovery_output">
-Write `.planning/phases/XX-name/DISCOVERY.md`:
-- Summary with recommendation
-- Key findings with sources
-- Code examples if applicable
-- Metadata (confidence, dependencies, open questions, assumptions)
+<step name="create_discovery_page">
+**Create discovery page in Mosic linked to phase task list:**
+
+```javascript
+discovery_page = mosic_create_entity_page("MTask List", phase_task_list.name, {
+  workspace_id: workspace_id,
+  title: "Phase " + PHASE_NUM + " Discovery",
+  page_type: "Document",
+  icon: "lucide:search",
+  status: "Published",
+  content: {
+    blocks: [
+      {
+        type: "header",
+        data: { text: "Phase " + PHASE_NUM + " Discovery", level: 1 }
+      },
+      {
+        type: "paragraph",
+        data: { text: "**Level:** " + DEPTH_LEVEL + "\n**Confidence:** " + CONFIDENCE }
+      },
+      {
+        type: "header",
+        data: { text: "Summary", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: RECOMMENDATION_SUMMARY }
+      },
+      {
+        type: "header",
+        data: { text: "Key Findings", level: 2 }
+      },
+      // Per-option/topic findings
+      ...findings_blocks,
+      {
+        type: "header",
+        data: { text: "Code Examples", level: 2 }
+      },
+      // Code examples from Context7
+      ...code_example_blocks,
+      {
+        type: "header",
+        data: { text: "Sources", level: 2 }
+      },
+      {
+        type: "list",
+        data: {
+          style: "unordered",
+          items: SOURCES
+        }
+      },
+      {
+        type: "header",
+        data: { text: "Open Questions", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: OPEN_QUESTIONS || "None - all questions resolved" }
+      }
+    ]
+  },
+  relation_type: "Related"
+})
+
+// Tag the discovery page
+mosic_batch_add_tags_to_document("M Page", discovery_page.name, [
+  tags.gsd_managed,
+  tags.research,
+  tags["phase-" + PHASE_NUM]
+])
+
+// Store page ID in config
+config.pages["phase-" + PHASE_NUM + "-discovery"] = discovery_page.name
+```
+
+</step>
+
+<step name="update_task_list">
+**Update task list with discovery summary:**
+
+```javascript
+mosic_update_document("MTask List", phase_task_list.name, {
+  description: phase_task_list.description + "\n\n---\n\n**Discovery Summary:**\n" +
+    "Confidence: " + CONFIDENCE_LEVEL + "\n" +
+    "Recommendation: " + RECOMMENDATION
+})
+
+// Add discovery comment
+mosic_create_document("M Comment", {
+  workspace_id: workspace_id,
+  reference_doctype: "MTask List",
+  reference_name: phase_task_list.name,
+  content: "🔍 **Discovery Complete**\n\n" +
+    "Depth: Level " + LEVEL + "\n" +
+    "Confidence: " + CONFIDENCE_LEVEL + "\n\n" +
+    "[Full Discovery](page/" + discovery_page.name + ")"
+})
+```
+
 </step>
 
 <step name="confidence_gate">
-After creating DISCOVERY.md, check confidence level.
+After creating discovery page, check confidence level.
 
 If confidence is LOW:
 Use AskUserQuestion:
@@ -231,7 +343,7 @@ Proceed directly, just note: "Discovery complete (high confidence)."
 </step>
 
 <step name="open_questions_gate">
-If DISCOVERY.md has open_questions:
+If discovery has open_questions:
 
 Present them inline:
 "Open questions from discovery:
@@ -241,150 +353,80 @@ Present them inline:
 
 These may affect implementation. Acknowledge and proceed? (yes / address first)"
 
-If "address first": Gather user input on questions, update discovery.
+If "address first": Gather user input on questions, update discovery page.
+</step>
+
+<step name="update_config">
+**Update config.json with discovery page ID:**
+
+```bash
+git add config.json
+git commit -m "$(cat <<'EOF'
+docs(phase-${PHASE_NUM}): complete discovery
+
+Confidence: ${CONFIDENCE_LEVEL}
+Recommendation: ${RECOMMENDATION_SHORT}
+EOF
+)"
+```
+
 </step>
 
 <step name="offer_next">
 ```
-Discovery complete: .planning/phases/XX-name/DISCOVERY.md
+Discovery complete: Phase ${PHASE_NUM} Discovery page in Mosic
+URL: https://mosic.pro/app/page/[discovery_page.name]
 Recommendation: [one-liner]
 Confidence: [level]
 
-What's next?
+---
 
-1. Discuss phase context (/gsd:discuss-phase [current-phase])
-2. Create phase plan (/gsd:plan-phase [current-phase])
-3. Refine discovery (dig deeper)
-4. Review discovery
+## ▶ Next Up
 
+**Phase ${PHASE_NUM}: [Name]** — ready for planning
+
+`/gsd:plan-phase ${PHASE_NUM}`
+
+<sub>`/clear` first → fresh context window</sub>
+
+---
+
+**Also available:**
+- `/gsd:discuss-phase ${PHASE_NUM}` — gather implementation decisions
+- Review discovery page in Mosic before planning
+- Refine discovery (dig deeper)
+
+---
 ```
 
-NOTE: DISCOVERY.md is NOT committed separately. It will be committed with phase completion.
 </step>
 
 </process>
-
-<step name="sync_discovery_to_mosic">
-**Sync discovery to Mosic (if enabled):**
-
-Check Mosic status:
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true AND Level 2-3 (DISCOVERY.md created):**
-
-Display:
-```
-◆ Syncing discovery to Mosic...
-```
-
-### Step 1: Load Mosic Config
-
-```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-RESEARCH_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.research")
-PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PADDED_PHASE}\"]")
-TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PADDED_PHASE}\"]")
-```
-
-### Step 2: Create Research Page Linked to Phase Task List
-
-```
-discovery_page = mosic_create_entity_page("MTask List", task_list_id, {
-  workspace_id: workspace_id,
-  title: "Phase " + PADDED_PHASE + " Discovery",
-  page_type: "Document",
-  icon: "lucide:search",
-  status: "Published",
-  content: convert_discovery_to_editorjs(DISCOVERY.md content),
-  relation_type: "Related"
-})
-
-# Tag the discovery page
-mosic_batch_add_tags_to_document("M Page", discovery_page.name, [
-  GSD_MANAGED_TAG,
-  RESEARCH_TAG,
-  PHASE_TAG
-])
-
-# Store page ID
-# mosic.pages["phase-" + PADDED_PHASE + "-discovery"] = discovery_page.name
-```
-
-### Step 3: Update Task List with Discovery Summary
-
-```
-# Extract recommendation from discovery
-recommendation = extract_recommendation_from_discovery(DISCOVERY.md)
-
-mosic_update_document("MTask List", task_list_id, {
-  description: original_description + "\n\n---\n\n**Discovery Summary:**\n" +
-    "Confidence: " + CONFIDENCE_LEVEL + "\n" +
-    "Recommendation: " + recommendation
-})
-```
-
-### Step 4: Add Discovery Comment
-
-```
-mosic_create_document("M Comment", {
-  workspace_id: workspace_id,
-  ref_doc: "MTask List",
-  ref_name: task_list_id,
-  content: "🔍 **Discovery Complete**\n\n" +
-    "Depth: Level " + LEVEL + "\n" +
-    "Confidence: " + CONFIDENCE_LEVEL + "\n\n" +
-    "[Full Discovery](page/" + discovery_page.name + ")"
-})
-```
-
-Display:
-```
-✓ Discovery synced to Mosic
-  Page: https://mosic.pro/app/page/[discovery_page.name]
-```
-
-**Error handling:**
-```
-IF mosic sync fails:
-  - Log warning: "Mosic sync failed: [error]. Discovery saved locally."
-  - Add to mosic.pending_sync array
-  - Continue (don't block)
-```
-
-**If mosic.enabled = false OR Level 1:** Skip Mosic sync.
-</step>
 
 <success_criteria>
 **Level 1 (Quick Verify):**
 - Context7 consulted for library/topic
 - Current state verified or concerns escalated
-- Verbal confirmation to proceed (no files)
+- Verbal confirmation to proceed (no pages)
 
 **Level 2 (Standard):**
 - Context7 consulted for all options
 - WebSearch findings cross-verified
-- DISCOVERY.md created with recommendation
+- Discovery page created in Mosic linked to phase task list
+- Task list updated with discovery summary
+- Discovery comment added to task list
 - Confidence level MEDIUM or higher
-- Mosic sync (if enabled):
-  - [ ] Discovery page created linked to phase task list
-  - [ ] Task list updated with discovery summary
-  - [ ] Discovery comment added
-- Ready to inform PLAN.md creation
+- config.json updated with page ID
+- Ready to inform planning
 
 **Level 3 (Deep Dive):**
 - Discovery scope defined
 - Context7 exhaustively consulted
 - All WebSearch findings verified against authoritative sources
-- DISCOVERY.md created with comprehensive analysis
+- Comprehensive discovery page created in Mosic
 - Quality report with source attribution
 - If LOW confidence findings → validation checkpoints defined
 - Confidence gate passed
-- Mosic sync (if enabled):
-  - [ ] Discovery page created linked to phase task list
-  - [ ] Task list updated with discovery summary
-  - [ ] Discovery comment added
-- Ready to inform PLAN.md creation
+- config.json updated with page ID
+- Ready to inform planning
 </success_criteria>

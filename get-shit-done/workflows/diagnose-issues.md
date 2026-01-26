@@ -1,16 +1,19 @@
 <purpose>
 Orchestrate parallel debug agents to investigate UAT gaps and find root causes.
 
-After UAT finds gaps, spawn one debug agent per gap. Each agent investigates autonomously with symptoms pre-filled from UAT. Collect root causes, update UAT.md gaps with diagnosis, then hand off to plan-phase --gaps with actual diagnoses.
+After UAT finds gaps, spawn one debug agent per gap. Each agent investigates autonomously with symptoms pre-filled from UAT. Collect root causes, update UAT page with diagnosis, then hand off to plan-phase --gaps with actual diagnoses.
 
-Orchestrator stays lean: parse gaps, spawn agents, collect results, update UAT.
+Orchestrator stays lean: parse gaps, spawn agents, collect results, update Mosic.
 </purpose>
 
-<paths>
-DEBUG_DIR=.planning/debug
+<mosic_only>
+**CRITICAL: This workflow operates ONLY through Mosic MCP.**
 
-Debug files use the `.planning/debug/` path (hidden directory with leading dot).
-</paths>
+- All state is read from Mosic (UAT page, phase task list, tasks)
+- Debug sessions are stored in Mosic pages
+- Only `config.json` is stored locally (for Mosic entity IDs)
+- No `.planning/debug/` directory operations
+</mosic_only>
 
 <core_principle>
 **Diagnose before planning fixes.**
@@ -23,27 +26,61 @@ With diagnosis: "Comment doesn't refresh" → "useEffect missing dependency" →
 
 <process>
 
-<step name="parse_gaps">
-**Extract gaps from UAT.md:**
+<step name="load_mosic_context" priority="first">
 
-Read the "Gaps" section (YAML format):
-```yaml
-- truth: "Comment appears immediately after submission"
-  status: failed
-  reason: "User reported: works but doesn't show until I refresh the page"
-  severity: major
-  test: 2
-  artifacts: []
-  missing: []
+**Load context from Mosic:**
+
+```
+Read config.json for Mosic IDs:
+- workspace_id
+- project_id
+- task_lists (phase mappings)
+- pages (page IDs including UAT page)
+- tags (tag IDs)
+```
+
+```javascript
+// Load project with task lists
+project = mosic_get_project(project_id, { include_task_lists: true })
+
+// Find the phase task list
+phase_task_list = project.task_lists.find(tl =>
+  tl.title.includes("Phase " + PHASE_NUM) ||
+  tl.identifier.startsWith(PHASE_NUM + "-")
+)
+
+// Get UAT page
+phase_pages = mosic_get_entity_pages("MTask List", phase_task_list.name)
+uat_page = phase_pages.find(p => p.title.includes("UAT"))
+uat_content = mosic_get_page(uat_page.name, { content_format: "markdown" })
+```
+
+</step>
+
+<step name="parse_gaps">
+**Extract gaps from UAT page content:**
+
+Parse the "Gaps" section from UAT page:
+
+```javascript
+// Extract gaps from UAT content
+gaps = parse_uat_gaps(uat_content)
+
+// Each gap has:
+// - truth: Expected behavior that failed
+// - status: failed
+// - reason: User reported issue
+// - severity: blocker/major/minor/cosmetic
+// - test: Test number
 ```
 
 For each gap, also read the corresponding test from "Tests" section to get full context.
 
 Build gap list:
-```
+```javascript
 gaps = [
-  {truth: "Comment appears immediately...", severity: "major", test_num: 2, reason: "..."},
-  {truth: "Reply button positioned correctly...", severity: "minor", test_num: 5, reason: "..."},
+  { truth: "Comment appears immediately...", severity: "major", test_num: 2, reason: "..." },
+  { truth: "Reply button positioned correctly...", severity: "minor", test_num: 5, reason: "..." },
   ...
 ]
 ```
@@ -64,7 +101,7 @@ Spawning parallel debug agents to investigate root causes:
 | Delete removes comment | blocker |
 
 Each agent will:
-1. Create DEBUG-{slug}.md with symptoms pre-filled
+1. Create debug page in Mosic with symptoms pre-filled
 2. Investigate autonomously (read code, form hypotheses, test)
 3. Return root cause
 
@@ -77,11 +114,11 @@ This runs in parallel - all gaps investigated simultaneously.
 
 For each gap, fill the debug-subagent-prompt template and spawn:
 
-```
+```javascript
 Task(
-  prompt=filled_debug_subagent_prompt,
-  subagent_type="general-purpose",
-  description="Debug: {truth_short}"
+  prompt = filled_debug_subagent_prompt,
+  subagent_type = "general-purpose",
+  description = "Debug: " + truth_short
 )
 ```
 
@@ -105,8 +142,6 @@ Each agent returns with:
 ```
 ## ROOT CAUSE FOUND
 
-**Debug Session:** ${DEBUG_DIR}/{slug}.md
-
 **Root Cause:** {specific cause with evidence}
 
 **Evidence Summary:**
@@ -124,7 +159,6 @@ Each agent returns with:
 Parse each return to extract:
 - root_cause: The diagnosed cause
 - files: Files involved
-- debug_path: Path to debug session file
 - suggested_fix: Hint for gap closure plan
 
 If agent returns `## INVESTIGATION INCONCLUSIVE`:
@@ -133,140 +167,171 @@ If agent returns `## INVESTIGATION INCONCLUSIVE`:
 - Include remaining possibilities from agent return
 </step>
 
-<step name="update_uat">
-**Update UAT.md gaps with diagnosis:**
+<step name="create_debug_pages">
+**Create debug session pages in Mosic:**
 
-For each gap in the Gaps section, add artifacts and missing fields:
-
-```yaml
-- truth: "Comment appears immediately after submission"
-  status: failed
-  reason: "User reported: works but doesn't show until I refresh the page"
-  severity: major
-  test: 2
-  root_cause: "useEffect in CommentList.tsx missing commentCount dependency"
-  artifacts:
-    - path: "src/components/CommentList.tsx"
-      issue: "useEffect missing dependency"
-  missing:
-    - "Add commentCount to useEffect dependency array"
-    - "Trigger re-render when new comment added"
-  debug_session: .planning/debug/comment-not-refreshing.md
-```
-
-Update status in frontmatter to "diagnosed".
-
-**Check planning config:**
-
-```bash
-COMMIT_PLANNING_DOCS=$(cat .planning/config.json 2>/dev/null | grep -o '"commit_docs"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "true")
-git check-ignore -q .planning 2>/dev/null && COMMIT_PLANNING_DOCS=false
-```
-
-**If `COMMIT_PLANNING_DOCS=false`:** Skip git operations
-
-**If `COMMIT_PLANNING_DOCS=true` (default):**
-
-Commit the updated UAT.md:
-```bash
-git add ".planning/phases/XX-name/{phase}-UAT.md"
-git commit -m "docs({phase}): add root causes from diagnosis"
-```
-</step>
-
-<step name="sync_diagnosis_to_mosic">
-**Sync diagnosis results to Mosic (Deep Integration):**
-
-Check Mosic status:
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true:**
-
-### Step 1: Load Mosic Config
-
-```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-FIX_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.fix")
-PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PHASE_NUM}\"]")
-TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PHASE_NUM}\"]")
-UAT_PAGE_ID=$(cat .planning/config.json | jq -r ".mosic.pages[\"phase-${PHASE_NUM}-uat\"]")
-```
-
-### Step 2: Create Debug Session Pages
-
-```
-FOR each diagnosed_gap:
-  # Create debug session page linked to UAT page
-  debug_page = mosic_create_entity_page("M Page", uat_page_id, {
+```javascript
+for (diagnosed_gap of diagnosed_gaps) {
+  // Create debug session page linked to UAT page
+  debug_page = mosic_create_entity_page("M Page", uat_page.name, {
     workspace_id: workspace_id,
-    title: "Debug: " + gap.truth.substring(0, 50),
+    title: "Debug: " + diagnosed_gap.truth.substring(0, 50),
     page_type: "Document",
     icon: "lucide:bug",
     status: "Published",
-    content: convert_debug_to_editorjs(DEBUG-slug.md),
+    content: {
+      blocks: [
+        {
+          type: "header",
+          data: { text: "Debug Session: " + diagnosed_gap.truth, level: 1 }
+        },
+        {
+          type: "header",
+          data: { text: "Symptoms", level: 2 }
+        },
+        {
+          type: "paragraph",
+          data: { text: "**Expected:** " + diagnosed_gap.expected }
+        },
+        {
+          type: "paragraph",
+          data: { text: "**Actual:** " + diagnosed_gap.reason }
+        },
+        {
+          type: "header",
+          data: { text: "Root Cause", level: 2 }
+        },
+        {
+          type: "paragraph",
+          data: { text: diagnosed_gap.root_cause }
+        },
+        {
+          type: "header",
+          data: { text: "Evidence", level: 2 }
+        },
+        {
+          type: "list",
+          data: {
+            style: "unordered",
+            items: diagnosed_gap.evidence
+          }
+        },
+        {
+          type: "header",
+          data: { text: "Files Involved", level: 2 }
+        },
+        {
+          type: "list",
+          data: {
+            style: "unordered",
+            items: diagnosed_gap.files.map(f => "`" + f.path + "`: " + f.issue)
+          }
+        },
+        {
+          type: "header",
+          data: { text: "Suggested Fix", level: 2 }
+        },
+        {
+          type: "paragraph",
+          data: { text: diagnosed_gap.suggested_fix }
+        }
+      ]
+    },
     relation_type: "Related"
   })
 
-  # Tag the debug page
+  // Tag the debug page
   mosic_batch_add_tags_to_document("M Page", debug_page.name, [
-    GSD_MANAGED_TAG,
-    FIX_TAG,
-    PHASE_TAG
+    tags.gsd_managed,
+    tags.fix,
+    tags["phase-" + PHASE_NUM]
   ])
+
+  diagnosed_gap.debug_page_id = debug_page.name
+}
 ```
 
-### Step 3: Update Issue Tasks with Root Causes
+</step>
 
-```
-FOR each diagnosed_gap:
-  issue_task_id = mosic.tasks["phase-" + PHASE_NUM + "-fix-" + gap.test]
+<step name="update_issue_tasks">
+**Update issue tasks with root causes:**
 
-  IF issue_task_id:
-    # Update task with root cause
+```javascript
+for (diagnosed_gap of diagnosed_gaps) {
+  // Find the issue task created during UAT
+  issue_task_id = config.tasks["phase-" + PHASE_NUM + "-fix-" + diagnosed_gap.test_num]
+
+  if (issue_task_id) {
+    // Get current task
+    issue_task = mosic_get_task(issue_task_id)
+
+    // Update task with root cause
     mosic_update_document("MTask", issue_task_id, {
-      status: "ToDo",  # Unblock now that we have diagnosis
-      description: original_description + "\n\n---\n\n**Root Cause:**\n" +
-        gap.root_cause + "\n\n" +
+      status: "ToDo",  // Unblock now that we have diagnosis
+      description: issue_task.description + "\n\n---\n\n**Root Cause:**\n" +
+        diagnosed_gap.root_cause + "\n\n" +
         "**Files Involved:**\n" +
-        gap.files.map(f => "- `" + f.path + "`: " + f.issue).join("\n") +
-        "\n\n**Suggested Fix:**\n" + gap.suggested_fix
+        diagnosed_gap.files.map(f => "- `" + f.path + "`: " + f.issue).join("\n") +
+        "\n\n**Suggested Fix:**\n" + diagnosed_gap.suggested_fix
     })
 
-    # Add diagnosis comment
+    // Add diagnosis comment
     mosic_create_document("M Comment", {
       workspace_id: workspace_id,
-      ref_doc: "MTask",
-      ref_name: issue_task_id,
+      reference_doctype: "MTask",
+      reference_name: issue_task_id,
       content: "🔍 **Root Cause Diagnosed**\n\n" +
-        gap.root_cause + "\n\n" +
-        "[Debug Session](page/" + debug_page.name + ")"
+        diagnosed_gap.root_cause + "\n\n" +
+        "[Debug Session](page/" + diagnosed_gap.debug_page_id + ")"
     })
 
-    # Link debug page to issue task
+    // Link debug page to issue task
     mosic_create_document("M Relation", {
       workspace_id: workspace_id,
       source_doctype: "M Page",
-      source_name: debug_page.name,
+      source_name: diagnosed_gap.debug_page_id,
       target_doctype: "MTask",
       target_name: issue_task_id,
       relation_type: "Related"
     })
+  }
+}
 ```
 
-### Step 4: Update UAT Page Status
+</step>
 
-```
-mosic_update_document("M Page", uat_page_id, {
-  content: updated_content_with_root_causes
+<step name="update_uat_page">
+**Update UAT page with diagnosis status:**
+
+```javascript
+// Update UAT page content with root causes
+mosic_update_content_blocks(uat_page.name, {
+  append_blocks: [
+    {
+      type: "header",
+      data: { text: "Diagnosis Results", level: 2 }
+    },
+    {
+      type: "table",
+      data: {
+        content: [
+          ["Gap", "Root Cause", "Debug Session"],
+          ...diagnosed_gaps.map(g => [
+            g.truth.substring(0, 50) + "...",
+            g.root_cause.substring(0, 80) + "...",
+            "[View](page/" + g.debug_page_id + ")"
+          ])
+        ]
+      }
+    }
+  ]
 })
 
+// Add diagnosis complete comment
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
-  ref_doc: "M Page",
-  ref_name: uat_page_id,
+  reference_doctype: "M Page",
+  reference_name: uat_page.name,
   content: "🔍 **Diagnosis Complete**\n\n" +
     diagnosed_count + " gaps diagnosed.\n" +
     inconclusive_count + " gaps need manual review.\n\n" +
@@ -274,12 +339,27 @@ mosic_create_document("M Comment", {
 })
 ```
 
-**Error handling:**
+</step>
+
+<step name="update_config">
+**Update config.json with debug page IDs:**
+
+```javascript
+// Store debug page IDs in config
+config.pages = config.pages || {}
+for (gap of diagnosed_gaps) {
+  config.pages["phase-" + PHASE_NUM + "-debug-" + gap.test_num] = gap.debug_page_id
+}
+config.last_sync = new Date().toISOString()
+
+// Write config.json
 ```
-IF mosic sync fails:
-  - Log warning, continue
-  - Add to pending_sync
+
+```bash
+git add config.json
+git commit -m "docs(phase-${PHASE_NUM}): add root causes from diagnosis"
 ```
+
 </step>
 
 <step name="report_results">
@@ -297,8 +377,10 @@ Display:
 | Reply button positioned correctly | CSS flex order incorrect | ReplyButton.tsx |
 | Delete removes comment | API missing auth header | api/comments.ts |
 
-Debug sessions: ${DEBUG_DIR}/
-[IF mosic.enabled:] Mosic: Synced to UAT page [END IF]
+Mosic:
+- UAT page updated with diagnosis results
+- Debug session pages created for each gap
+- Issue tasks updated with root causes
 
 Proceeding to plan fixes...
 ```
@@ -321,7 +403,7 @@ Agents only diagnose—plan-phase --gaps handles fixes (no fix application).
 - Report incomplete diagnosis
 
 **Agent times out:**
-- Check DEBUG-{slug}.md for partial progress
+- Check debug page for partial progress
 - Can resume with /gsd:debug
 
 **All agents fail:**
@@ -331,14 +413,13 @@ Agents only diagnose—plan-phase --gaps handles fixes (no fix application).
 </failure_handling>
 
 <success_criteria>
-- [ ] Gaps parsed from UAT.md
+- [ ] Mosic context loaded (UAT page, phase task list)
+- [ ] Gaps parsed from UAT page content
 - [ ] Debug agents spawned in parallel
 - [ ] Root causes collected from all agents
-- [ ] UAT.md gaps updated with artifacts and missing
-- [ ] Debug sessions saved to ${DEBUG_DIR}/
-- [ ] Mosic sync (if enabled):
-  - [ ] Debug session pages created linked to UAT page
-  - [ ] Issue tasks updated with root causes
-  - [ ] UAT page updated with diagnosis status
+- [ ] Debug session pages created in Mosic linked to UAT page
+- [ ] Issue tasks updated with root causes
+- [ ] UAT page updated with diagnosis status
+- [ ] config.json updated with debug page IDs
 - [ ] Hand off to verify-work for automatic planning
 </success_criteria>

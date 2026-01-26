@@ -4,14 +4,23 @@ Extract implementation decisions that downstream agents need. Analyze the phase 
 You are a thinking partner, not an interviewer. The user is the visionary — you are the builder. Your job is to capture decisions that will guide research and planning, not to figure out implementation yourself.
 </purpose>
 
-<downstream_awareness>
-**CONTEXT.md feeds into:**
+<mosic_only>
+**CRITICAL: This workflow operates ONLY through Mosic MCP.**
 
-1. **gsd-phase-researcher** — Reads CONTEXT.md to know WHAT to research
+- All state is read from Mosic (project, task lists, pages)
+- All documentation is stored in Mosic pages
+- Only `config.json` is stored locally (for Mosic entity IDs)
+- No `.planning/` directory operations
+</mosic_only>
+
+<downstream_awareness>
+**Context page feeds into:**
+
+1. **gsd-phase-researcher** — Reads context page to know WHAT to research
    - "User wants card-based layout" → researcher investigates card component patterns
    - "Infinite scroll decided" → researcher looks into virtualization libraries
 
-2. **gsd-planner** — Reads CONTEXT.md to know WHAT decisions are locked
+2. **gsd-planner** — Reads context page to know WHAT decisions are locked
    - "Pull-to-refresh on mobile" → planner includes that in task specs
    - "Claude's Discretion: loading skeleton" → planner can decide approach
 
@@ -41,7 +50,7 @@ Ask about vision and implementation choices. Capture decisions for downstream ag
 <scope_guardrail>
 **CRITICAL: No scope creep.**
 
-The phase boundary comes from ROADMAP.md and is FIXED. Discussion clarifies HOW to implement what's scoped, never WHETHER to add new capabilities.
+The phase boundary comes from the roadmap and is FIXED. Discussion clarifies HOW to implement what's scoped, never WHETHER to add new capabilities.
 
 **Allowed (clarifying ambiguity):**
 - "How should posts be displayed?" (layout, density, info shown)
@@ -71,7 +80,7 @@ Gray areas are **implementation decisions the user cares about** — things that
 
 **How to identify gray areas:**
 
-1. **Read the phase goal** from ROADMAP.md
+1. **Read the phase goal** from the task list in Mosic
 2. **Understand the domain** — What kind of thing is being built?
    - Something users SEE → visual presentation, interactions, states matter
    - Something users CALL → interface contracts, responses, errors matter
@@ -107,13 +116,55 @@ Phase: "API documentation"
 
 <process>
 
-<step name="validate_phase" priority="first">
+<step name="load_mosic_context" priority="first">
+
+**Load context from Mosic:**
+
+```
+Read config.json for Mosic IDs:
+- workspace_id
+- project_id
+- task_lists (phase mappings)
+- pages (page IDs)
+- tags (tag IDs)
+```
+
+```javascript
+// Load project with task lists
+project = mosic_get_project(project_id, { include_task_lists: true })
+
+// Load project roadmap page
+project_pages = mosic_get_entity_pages("MProject", project_id)
+roadmap_page = project_pages.find(p => p.title.includes("Roadmap"))
+```
+
+</step>
+
+<step name="validate_phase">
 Phase number from argument (required).
 
-Load and validate:
-- Read `.planning/ROADMAP.md`
-- Find phase entry
-- Extract: number, name, description, status
+Load and validate from Mosic:
+
+```javascript
+// Find the phase task list
+task_lists = project.task_lists
+phase_task_list = task_lists.find(tl =>
+  tl.title.includes("Phase " + PHASE) ||
+  tl.identifier.startsWith(PHASE + "-")
+)
+
+if (!phase_task_list) {
+  // Phase not found
+  console.log("Phase " + PHASE + " not found in project.")
+  console.log("Use /gsd:progress to see available phases.")
+  exit()
+}
+
+// Extract phase info
+phase_name = phase_task_list.title
+phase_description = phase_task_list.description
+phase_status = phase_task_list.status
+```
 
 **If phase not found:**
 ```
@@ -123,16 +174,16 @@ Use /gsd:progress to see available phases.
 ```
 Exit workflow.
 
-**If phase found:** Continue to analyze_phase.
+**If phase found:** Continue to check_existing.
 </step>
 
 <step name="check_existing">
-Check if CONTEXT.md already exists:
+Check if context page already exists in Mosic:
 
-```bash
-# Match both zero-padded (05-*) and unpadded (5-*) folders
-PADDED_PHASE=$(printf "%02d" ${PHASE})
-ls .planning/phases/${PADDED_PHASE}-*/*-CONTEXT.md .planning/phases/${PHASE}-*/*-CONTEXT.md 2>/dev/null
+```javascript
+// Get pages linked to this phase task list
+phase_pages = mosic_get_entity_pages("MTask List", phase_task_list.name)
+context_page = phase_pages.find(p => p.title.includes("Context"))
 ```
 
 **If exists:**
@@ -144,8 +195,8 @@ Use AskUserQuestion:
   - "View it" — Show me what's there
   - "Skip" — Use existing context as-is
 
-If "Update": Load existing, continue to analyze_phase
-If "View": Display CONTEXT.md, then offer update/skip
+If "Update": Load existing page content, continue to analyze_phase
+If "View": Display context page content, then offer update/skip
 If "Skip": Exit workflow
 
 **If doesn't exist:** Continue to analyze_phase.
@@ -154,7 +205,7 @@ If "Skip": Exit workflow
 <step name="analyze_phase">
 Analyze the phase to identify gray areas worth discussing.
 
-**Read the phase description from ROADMAP.md and determine:**
+**Read the phase description from Mosic and determine:**
 
 1. **Domain boundary** — What capability is this phase delivering? State it clearly.
 
@@ -276,87 +327,134 @@ Back to [current area]: [return to current question]"
 Track deferred ideas internally.
 </step>
 
-<step name="write_context">
-Create CONTEXT.md capturing decisions made.
+<step name="create_context_page">
+Create context page in Mosic linked to the phase task list.
 
-**Find or create phase directory:**
+```javascript
+context_page = mosic_create_entity_page("MTask List", phase_task_list.name, {
+  workspace_id: workspace_id,
+  title: "Phase " + PHASE + " Context & Decisions",
+  page_type: "Document",
+  icon: "lucide:message-square",
+  status: "Published",
+  content: {
+    blocks: [
+      {
+        type: "header",
+        data: { text: "Phase " + PHASE + ": " + phase_name + " - Context", level: 1 }
+      },
+      {
+        type: "paragraph",
+        data: { text: "**Gathered:** " + format_date(now) + "\n**Status:** Ready for planning" }
+      },
+      {
+        type: "header",
+        data: { text: "Phase Boundary", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: DOMAIN_BOUNDARY }
+      },
+      {
+        type: "header",
+        data: { text: "Implementation Decisions", level: 2 }
+      },
+      // Add decisions by category
+      ...DECISIONS_BLOCKS,
+      {
+        type: "header",
+        data: { text: "Claude's Discretion", level: 3 }
+      },
+      {
+        type: "paragraph",
+        data: { text: CLAUDE_DISCRETION_AREAS }
+      },
+      {
+        type: "header",
+        data: { text: "Specific Ideas", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: SPECIFIC_IDEAS || "No specific requirements — open to standard approaches" }
+      },
+      {
+        type: "header",
+        data: { text: "Deferred Ideas", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: DEFERRED_IDEAS || "None — discussion stayed within phase scope" }
+      }
+    ]
+  },
+  relation_type: "Related"
+})
+
+// Tag the context page
+mosic_batch_add_tags_to_document("M Page", context_page.name, [
+  tags.gsd_managed,
+  tags["phase-" + PHASE]
+])
+
+// Store page ID in config
+config.pages["phase-" + PHASE + "-context"] = context_page.name
+```
+
+</step>
+
+<step name="update_task_list">
+Update the phase task list with key decisions summary:
+
+```javascript
+// Extract key decisions for summary
+key_decisions = extract_key_decisions(DECISIONS)
+
+mosic_update_document("MTask List", phase_task_list.name, {
+  description: phase_task_list.description + "\n\n---\n\n**Key Decisions:**\n" +
+    key_decisions.map(d => "- " + d).join("\n") +
+    "\n\n[Full context: Phase Context & Decisions page]"
+})
+
+// Add comment summarizing discussion
+mosic_create_document("M Comment", {
+  workspace_id: workspace_id,
+  reference_doctype: "MTask List",
+  reference_name: phase_task_list.name,
+  content: "📝 **Context Gathered**\n\n" +
+    "Implementation decisions documented via `/gsd:discuss-phase`.\n\n" +
+    "**Areas Discussed:**\n" +
+    DISCUSSED_AREAS.map(a => "- " + a).join("\n") +
+    "\n\n**Status:** Ready for planning"
+})
+```
+
+</step>
+
+<step name="update_config">
+Update config.json with context page reference:
 
 ```bash
-# Match existing directory (padded or unpadded)
-PADDED_PHASE=$(printf "%02d" ${PHASE})
-PHASE_DIR=$(ls -d .planning/phases/${PADDED_PHASE}-* .planning/phases/${PHASE}-* 2>/dev/null | head -1)
-if [ -z "$PHASE_DIR" ]; then
-  # Create from roadmap name (lowercase, hyphens)
-  PHASE_NAME=$(grep "Phase ${PHASE}:" .planning/ROADMAP.md | sed 's/.*Phase [0-9]*: //' | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
-  mkdir -p ".planning/phases/${PADDED_PHASE}-${PHASE_NAME}"
-  PHASE_DIR=".planning/phases/${PADDED_PHASE}-${PHASE_NAME}"
-fi
+# Update config.json with page ID
+# Write updated config.json
+git add config.json
+git commit -m "$(cat <<'EOF'
+docs(phase-${PHASE}): capture phase context
+
+Phase ${PHASE}: ${PHASE_NAME}
+- Implementation decisions documented in Mosic
+- Phase boundary established
+EOF
+)"
 ```
 
-**File location:** `${PHASE_DIR}/${PADDED_PHASE}-CONTEXT.md`
-
-**Structure the content by what was discussed:**
-
-```markdown
-# Phase [X]: [Name] - Context
-
-**Gathered:** [date]
-**Status:** Ready for planning
-
-<domain>
-## Phase Boundary
-
-[Clear statement of what this phase delivers — the scope anchor]
-
-</domain>
-
-<decisions>
-## Implementation Decisions
-
-### [Category 1 that was discussed]
-- [Decision or preference captured]
-- [Another decision if applicable]
-
-### [Category 2 that was discussed]
-- [Decision or preference captured]
-
-### Claude's Discretion
-[Areas where user said "you decide" — note that Claude has flexibility here]
-
-</decisions>
-
-<specifics>
-## Specific Ideas
-
-[Any particular references, examples, or "I want it like X" moments from discussion]
-
-[If none: "No specific requirements — open to standard approaches"]
-
-</specifics>
-
-<deferred>
-## Deferred Ideas
-
-[Ideas that came up but belong in other phases. Don't lose them.]
-
-[If none: "None — discussion stayed within phase scope"]
-
-</deferred>
-
----
-
-*Phase: XX-name*
-*Context gathered: [date]*
-```
-
-Write file.
 </step>
 
 <step name="confirm_creation">
 Present summary and next steps:
 
 ```
-Created: .planning/phases/${PADDED_PHASE}-${SLUG}/${PADDED_PHASE}-CONTEXT.md
+Created: Phase ${PHASE} Context & Decisions page in Mosic
+URL: https://mosic.pro/app/page/[context_page.name]
 
 ## Decisions Captured
 
@@ -374,7 +472,7 @@ Created: .planning/phases/${PADDED_PHASE}-${SLUG}/${PADDED_PHASE}-CONTEXT.md
 
 ## ▶ Next Up
 
-**Phase ${PHASE}: [Name]** — [Goal from ROADMAP.md]
+**Phase ${PHASE}: [Name]** — [Goal from task list]
 
 `/gsd:plan-phase ${PHASE}`
 
@@ -384,147 +482,25 @@ Created: .planning/phases/${PADDED_PHASE}-${SLUG}/${PADDED_PHASE}-CONTEXT.md
 
 **Also available:**
 - `/gsd:plan-phase ${PHASE} --skip-research` — plan without research
-- Review/edit CONTEXT.md before continuing
+- Review context page in Mosic before continuing
 
 ---
 ```
 </step>
 
-<step name="sync_context_to_mosic">
-**Sync context to Mosic (Deep Integration):**
-
-Check Mosic status:
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true:**
-
-Display:
-```
-◆ Syncing context to Mosic...
-```
-
-### Step 1: Load Mosic Config
-
-```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PADDED_PHASE}\"]")
-TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PADDED_PHASE}\"]")
-```
-
-### Step 2: Create Context Page Linked to Phase Task List
-
-```
-context_page = mosic_create_entity_page("MTask List", task_list_id, {
-  workspace_id: workspace_id,
-  title: "Phase " + PADDED_PHASE + " Context & Decisions",
-  page_type: "Document",
-  icon: "lucide:message-square",
-  status: "Published",
-  content: convert_context_to_editorjs(CONTEXT.md content),
-  relation_type: "Related"
-})
-
-# Tag the context page
-mosic_batch_add_tags_to_document("M Page", context_page.name, [
-  GSD_MANAGED_TAG,
-  PHASE_TAG
-])
-
-# Store page ID
-# mosic.pages["phase-" + PADDED_PHASE + "-context"] = context_page.name
-```
-
-### Step 3: Update Task List Description with Key Decisions
-
-```
-# Extract key decisions for summary
-key_decisions = extract_decisions_from_context(CONTEXT.md)
-
-# Update task list description to reference decisions
-mosic_update_document("MTask List", task_list_id, {
-  description: original_description + "\n\n---\n\n**Key Decisions:**\n" +
-    key_decisions.map(d => "- " + d).join("\n") +
-    "\n\n[Full context: Phase Context & Decisions page]"
-})
-```
-
-### Step 4: Add Comment Summarizing Discussion
-
-```
-mosic_create_document("M Comment", {
-  workspace_id: workspace_id,
-  ref_doc: "MTask List",
-  ref_name: task_list_id,
-  content: "📝 **Context Gathered**\n\n" +
-    "Implementation decisions documented via `/gsd:discuss-phase`.\n\n" +
-    "**Areas Discussed:**\n" +
-    DISCUSSED_AREAS.map(a => "- " + a).join("\n") +
-    "\n\n**Status:** Ready for planning"
-})
-```
-
-Display:
-```
-✓ Context synced to Mosic
-  Page: https://mosic.pro/app/page/[context_page.name]
-```
-
-**Error handling:**
-```
-IF mosic sync fails:
-  - Log warning: "Mosic sync failed: [error]. Context saved locally."
-  - Add to mosic.pending_sync array
-  - Continue to git operations (don't block)
-```
-
-**If mosic.enabled = false:** Skip to git_commit step.
-</step>
-
-<step name="git_commit">
-Commit phase context:
-
-**Check planning config:**
-
-```bash
-COMMIT_PLANNING_DOCS=$(cat .planning/config.json 2>/dev/null | grep -o '"commit_docs"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "true")
-git check-ignore -q .planning 2>/dev/null && COMMIT_PLANNING_DOCS=false
-```
-
-**If `COMMIT_PLANNING_DOCS=false`:** Skip git operations
-
-**If `COMMIT_PLANNING_DOCS=true` (default):**
-
-```bash
-git add "${PHASE_DIR}/${PADDED_PHASE}-CONTEXT.md"
-git commit -m "$(cat <<'EOF'
-docs(${PADDED_PHASE}): capture phase context
-
-Phase ${PADDED_PHASE}: ${PHASE_NAME}
-- Implementation decisions documented
-- Phase boundary established
-EOF
-)"
-```
-
-Confirm: "Committed: docs(${PADDED_PHASE}): capture phase context"
-</step>
-
 </process>
 
 <success_criteria>
-- Phase validated against roadmap
-- Gray areas identified through intelligent analysis (not generic questions)
-- User selected which areas to discuss
-- Each selected area explored until user satisfied
-- Scope creep redirected to deferred ideas
-- CONTEXT.md captures actual decisions, not vague vision
-- Deferred ideas preserved for future phases
-- Mosic sync (if enabled):
-  - [ ] Context page created linked to phase task list
-  - [ ] Key decisions added to task list description
-  - [ ] Discussion comment added
-- User knows next steps
+- [ ] Mosic context loaded (project, task lists)
+- [ ] Phase validated against project task lists
+- [ ] Gray areas identified through intelligent analysis (not generic questions)
+- [ ] User selected which areas to discuss
+- [ ] Each selected area explored until user satisfied
+- [ ] Scope creep redirected to deferred ideas
+- [ ] Context page created in Mosic linked to phase task list
+- [ ] Key decisions added to task list description
+- [ ] Discussion comment added to task list
+- [ ] config.json updated with page ID
+- [ ] Deferred ideas preserved for future phases
+- [ ] User knows next steps
 </success_criteria>

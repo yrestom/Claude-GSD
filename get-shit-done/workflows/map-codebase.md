@@ -1,15 +1,24 @@
 <purpose>
-Orchestrate parallel codebase mapper agents to analyze codebase and produce structured documents in .planning/codebase/
+Orchestrate parallel codebase mapper agents to analyze codebase and produce structured pages in Mosic.
 
-Each agent has fresh context, explores a specific focus area, and **writes documents directly**. The orchestrator only receives confirmation + line counts, then writes a summary.
+Each agent has fresh context, explores a specific focus area, and **creates pages directly in Mosic**. The orchestrator only receives confirmation, then writes a summary.
 
-Output: .planning/codebase/ folder with 7 structured documents about the codebase state.
+Output: Mosic pages about the codebase state linked to the project.
 </purpose>
+
+<mosic_only>
+**CRITICAL: This workflow operates ONLY through Mosic MCP.**
+
+- All state is read from Mosic (project, pages)
+- All documentation is stored in Mosic pages
+- Only `config.json` is stored locally (for Mosic entity IDs)
+- No `.planning/codebase/` directory operations
+</mosic_only>
 
 <philosophy>
 **Why dedicated mapper agents:**
 - Fresh context per domain (no token contamination)
-- Agents write documents directly (no context transfer back to orchestrator)
+- Agents create pages directly in Mosic (no context transfer back to orchestrator)
 - Orchestrator only summarizes what was created (minimal context usage)
 - Faster execution (agents run simultaneously)
 
@@ -22,14 +31,32 @@ Documents are reference material for Claude when planning/executing. Always incl
 
 <process>
 
-<step name="resolve_model_profile" priority="first">
-Read model profile for agent spawning:
+<step name="load_mosic_context" priority="first">
 
-```bash
-MODEL_PROFILE=$(cat .planning/config.json 2>/dev/null | grep -o '"model_profile"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || echo "balanced")
+**Load context from Mosic:**
+
+```
+Read config.json for Mosic IDs:
+- workspace_id
+- project_id
+- pages (page IDs)
+- tags (tag IDs)
+- model_profile (default: balanced)
 ```
 
-Default to "balanced" if not set.
+```javascript
+// Load project
+project = mosic_get_project(project_id)
+
+// Check for existing codebase pages
+project_pages = mosic_get_entity_pages("MProject", project_id)
+codebase_pages = project_pages.filter(p =>
+  p.title.includes("Architecture") ||
+  p.title.includes("Tech Stack") ||
+  p.title.includes("Conventions") ||
+  p.title.includes("Concerns")
+)
+```
 
 **Model lookup table:**
 
@@ -41,50 +68,27 @@ Store resolved model for use in Task calls below.
 </step>
 
 <step name="check_existing">
-Check if .planning/codebase/ already exists:
+Check if codebase pages already exist:
 
-```bash
-ls -la .planning/codebase/ 2>/dev/null
-```
-
-**If exists:**
+**If codebase pages exist:**
 
 ```
-.planning/codebase/ already exists with these documents:
-[List files found]
+Codebase pages already exist:
+[List pages found]
 
 What's next?
 1. Refresh - Delete existing and remap codebase
-2. Update - Keep existing, only update specific documents
+2. Update - Keep existing, only update specific pages
 3. Skip - Use existing codebase map as-is
 ```
 
 Wait for user response.
 
-If "Refresh": Delete .planning/codebase/, continue to create_structure
-If "Update": Ask which documents to update, continue to spawn_agents (filtered)
+If "Refresh": Delete pages, continue to spawn_agents
+If "Update": Ask which pages to update, continue to spawn_agents (filtered)
 If "Skip": Exit workflow
 
-**If doesn't exist:**
-Continue to create_structure.
-</step>
-
-<step name="create_structure">
-Create .planning/codebase/ directory:
-
-```bash
-mkdir -p .planning/codebase
-```
-
-**Expected output files:**
-- STACK.md (from tech mapper)
-- INTEGRATIONS.md (from tech mapper)
-- ARCHITECTURE.md (from arch mapper)
-- STRUCTURE.md (from arch mapper)
-- CONVENTIONS.md (from quality mapper)
-- TESTING.md (from quality mapper)
-- CONCERNS.md (from concerns mapper)
-
+**If no codebase pages exist:**
 Continue to spawn_agents.
 </step>
 
@@ -93,97 +97,103 @@ Spawn 4 parallel gsd-codebase-mapper agents.
 
 Use Task tool with `subagent_type="gsd-codebase-mapper"`, `model="{mapper_model}"`, and `run_in_background=true` for parallel execution.
 
-**CRITICAL:** Use the dedicated `gsd-codebase-mapper` agent, NOT `Explore`. The mapper agent writes documents directly.
-
 **Agent 1: Tech Focus**
 
-Task tool parameters:
-```
-subagent_type: "gsd-codebase-mapper"
-model: "{mapper_model}"
-run_in_background: true
-description: "Map codebase tech stack"
-```
-
-Prompt:
-```
+```javascript
+Task(
+  prompt = `
 Focus: tech
 
 Analyze this codebase for technology stack and external integrations.
 
-Write these documents to .planning/codebase/:
-- STACK.md - Languages, runtime, frameworks, dependencies, configuration
-- INTEGRATIONS.md - External APIs, databases, auth providers, webhooks
+Create these pages in Mosic linked to project ${project_id}:
+- "Tech Stack" - Languages, runtime, frameworks, dependencies, configuration
+- "Integrations" - External APIs, databases, auth providers, webhooks
 
-Explore thoroughly. Write documents directly using templates. Return confirmation only.
+Workspace ID: ${workspace_id}
+Project ID: ${project_id}
+
+Explore thoroughly. Create pages directly in Mosic. Return confirmation only.
+`,
+  subagent_type = "gsd-codebase-mapper",
+  model = mapper_model,
+  run_in_background = true,
+  description = "Map codebase tech stack"
+)
 ```
 
 **Agent 2: Architecture Focus**
 
-Task tool parameters:
-```
-subagent_type: "gsd-codebase-mapper"
-model: "{mapper_model}"
-run_in_background: true
-description: "Map codebase architecture"
-```
-
-Prompt:
-```
+```javascript
+Task(
+  prompt = `
 Focus: arch
 
 Analyze this codebase architecture and directory structure.
 
-Write these documents to .planning/codebase/:
-- ARCHITECTURE.md - Pattern, layers, data flow, abstractions, entry points
-- STRUCTURE.md - Directory layout, key locations, naming conventions
+Create these pages in Mosic linked to project ${project_id}:
+- "Architecture" - Pattern, layers, data flow, abstractions, entry points
+- "Structure" - Directory layout, key locations, naming conventions
 
-Explore thoroughly. Write documents directly using templates. Return confirmation only.
+Workspace ID: ${workspace_id}
+Project ID: ${project_id}
+
+Explore thoroughly. Create pages directly in Mosic. Return confirmation only.
+`,
+  subagent_type = "gsd-codebase-mapper",
+  model = mapper_model,
+  run_in_background = true,
+  description = "Map codebase architecture"
+)
 ```
 
 **Agent 3: Quality Focus**
 
-Task tool parameters:
-```
-subagent_type: "gsd-codebase-mapper"
-model: "{mapper_model}"
-run_in_background: true
-description: "Map codebase conventions"
-```
-
-Prompt:
-```
+```javascript
+Task(
+  prompt = `
 Focus: quality
 
 Analyze this codebase for coding conventions and testing patterns.
 
-Write these documents to .planning/codebase/:
-- CONVENTIONS.md - Code style, naming, patterns, error handling
-- TESTING.md - Framework, structure, mocking, coverage
+Create these pages in Mosic linked to project ${project_id}:
+- "Conventions" - Code style, naming, patterns, error handling
+- "Testing" - Framework, structure, mocking, coverage
 
-Explore thoroughly. Write documents directly using templates. Return confirmation only.
+Workspace ID: ${workspace_id}
+Project ID: ${project_id}
+
+Explore thoroughly. Create pages directly in Mosic. Return confirmation only.
+`,
+  subagent_type = "gsd-codebase-mapper",
+  model = mapper_model,
+  run_in_background = true,
+  description = "Map codebase conventions"
+)
 ```
 
 **Agent 4: Concerns Focus**
 
-Task tool parameters:
-```
-subagent_type: "gsd-codebase-mapper"
-model: "{mapper_model}"
-run_in_background: true
-description: "Map codebase concerns"
-```
-
-Prompt:
-```
+```javascript
+Task(
+  prompt = `
 Focus: concerns
 
 Analyze this codebase for technical debt, known issues, and areas of concern.
 
-Write this document to .planning/codebase/:
-- CONCERNS.md - Tech debt, bugs, security, performance, fragile areas
+Create this page in Mosic linked to project ${project_id}:
+- "Technical Concerns" - Tech debt, bugs, security, performance, fragile areas
 
-Explore thoroughly. Write document directly using template. Return confirmation only.
+Workspace ID: ${workspace_id}
+Project ID: ${project_id}
+
+Explore thoroughly. Create page directly in Mosic. Return confirmation only.
+`,
+  subagent_type = "gsd-codebase-mapper",
+  model = mapper_model,
+  run_in_background = true,
+  description = "Map codebase concerns"
+)
 ```
 
 Continue to collect_confirmations.
@@ -192,239 +202,115 @@ Continue to collect_confirmations.
 <step name="collect_confirmations">
 Wait for all 4 agents to complete.
 
-Read each agent's output file to collect confirmations.
-
 **Expected confirmation format from each agent:**
 ```
 ## Mapping Complete
 
 **Focus:** {focus}
-**Documents written:**
-- `.planning/codebase/{DOC1}.md` ({N} lines)
-- `.planning/codebase/{DOC2}.md` ({N} lines)
+**Pages created:**
+- {page_title} (ID: {page_id})
+- {page_title} (ID: {page_id})
 
 Ready for orchestrator summary.
 ```
 
-**What you receive:** Just file paths and line counts. NOT document contents.
+Collect page IDs from agent returns.
 
-If any agent failed, note the failure and continue with successful documents.
+If any agent failed, note the failure and continue with successful pages.
 
 Continue to verify_output.
 </step>
 
 <step name="verify_output">
-Verify all documents created successfully:
+Verify all pages created successfully:
 
-```bash
-ls -la .planning/codebase/
-wc -l .planning/codebase/*.md
+```javascript
+// Refresh project pages
+project_pages = mosic_get_entity_pages("MProject", project_id)
+codebase_pages = project_pages.filter(p =>
+  p.title.includes("Architecture") ||
+  p.title.includes("Tech Stack") ||
+  p.title.includes("Conventions") ||
+  p.title.includes("Testing") ||
+  p.title.includes("Concerns") ||
+  p.title.includes("Structure") ||
+  p.title.includes("Integrations")
+)
+
+console.log("Found " + codebase_pages.length + " codebase pages")
 ```
 
 **Verification checklist:**
-- All 7 documents exist
-- No empty documents (each should have >20 lines)
+- All expected pages exist
+- No empty pages (each should have content)
 
-If any documents missing or empty, note which agents may have failed.
+If any pages missing, note which agents may have failed.
 
-Continue to commit_codebase_map.
+Continue to tag_pages.
 </step>
 
-<step name="commit_codebase_map">
-Commit the codebase map:
+<step name="tag_pages">
+**Tag all codebase pages:**
 
-**Check planning config:**
-
-```bash
-COMMIT_PLANNING_DOCS=$(cat .planning/config.json 2>/dev/null | grep -o '"commit_docs"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "true")
-git check-ignore -q .planning 2>/dev/null && COMMIT_PLANNING_DOCS=false
+```javascript
+for (page of codebase_pages) {
+  mosic_batch_add_tags_to_document("M Page", page.name, [
+    tags.gsd_managed,
+    "codebase"
+  ])
+}
 ```
 
-**If `COMMIT_PLANNING_DOCS=false`:** Skip git operations
+</step>
 
-**If `COMMIT_PLANNING_DOCS=true` (default):**
+<step name="update_config">
+**Update config.json with page IDs:**
+
+```javascript
+config.pages["codebase-architecture"] = architecture_page_id
+config.pages["codebase-stack"] = stack_page_id
+config.pages["codebase-conventions"] = conventions_page_id
+config.pages["codebase-testing"] = testing_page_id
+config.pages["codebase-concerns"] = concerns_page_id
+config.pages["codebase-structure"] = structure_page_id
+config.pages["codebase-integrations"] = integrations_page_id
+config.last_sync = new Date().toISOString()
+
+// Write config.json
+```
 
 ```bash
-git add .planning/codebase/*.md
+git add config.json
 git commit -m "$(cat <<'EOF'
-docs: map existing codebase
+docs: map existing codebase to Mosic
 
-- STACK.md - Technologies and dependencies
-- ARCHITECTURE.md - System design and patterns
-- STRUCTURE.md - Directory layout
-- CONVENTIONS.md - Code style and patterns
-- TESTING.md - Test structure
-- INTEGRATIONS.md - External services
-- CONCERNS.md - Technical debt and issues
+Pages created:
+- Architecture & Structure
+- Tech Stack & Integrations
+- Conventions & Testing
+- Technical Concerns
 EOF
 )"
 ```
 
-Continue to offer_next.
-</step>
-
-<step name="sync_codebase_map_to_mosic">
-**Sync codebase map to Mosic (Deep Integration):**
-
-Check Mosic status:
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true:**
-
-Display:
-```
-◆ Syncing codebase map to Mosic...
-```
-
-### Step 1: Load Mosic Config
-
-```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-```
-
-### Step 2: Create Architecture Page Linked to Project
-
-```
-architecture_page = mosic_create_entity_page("MProject", project_id, {
-  workspace_id: workspace_id,
-  title: "Codebase Architecture",
-  page_type: "Spec",
-  icon: "lucide:layers",
-  status: "Published",
-  content: convert_markdown_to_editorjs(ARCHITECTURE.md + "\n\n---\n\n" + STRUCTURE.md),
-  relation_type: "Related"
-})
-
-# Tag the page
-mosic_batch_add_tags_to_document("M Page", architecture_page.name, [
-  GSD_MANAGED_TAG,
-  "codebase"
-])
-```
-
-### Step 3: Create Tech Stack Page Linked to Project
-
-```
-stack_page = mosic_create_entity_page("MProject", project_id, {
-  workspace_id: workspace_id,
-  title: "Tech Stack & Integrations",
-  page_type: "Spec",
-  icon: "lucide:code-2",
-  status: "Published",
-  content: convert_markdown_to_editorjs(STACK.md + "\n\n---\n\n" + INTEGRATIONS.md),
-  relation_type: "Related"
-})
-
-# Tag the page
-mosic_batch_add_tags_to_document("M Page", stack_page.name, [
-  GSD_MANAGED_TAG,
-  "codebase"
-])
-```
-
-### Step 4: Create Conventions Page
-
-```
-conventions_page = mosic_create_entity_page("MProject", project_id, {
-  workspace_id: workspace_id,
-  title: "Code Conventions & Testing",
-  page_type: "Spec",
-  icon: "lucide:book-open",
-  status: "Published",
-  content: convert_markdown_to_editorjs(CONVENTIONS.md + "\n\n---\n\n" + TESTING.md),
-  relation_type: "Related"
-})
-
-# Tag the page
-mosic_batch_add_tags_to_document("M Page", conventions_page.name, [
-  GSD_MANAGED_TAG,
-  "codebase"
-])
-```
-
-### Step 5: Create Concerns Page
-
-```
-concerns_page = mosic_create_entity_page("MProject", project_id, {
-  workspace_id: workspace_id,
-  title: "Technical Concerns & Debt",
-  page_type: "Document",
-  icon: "lucide:alert-triangle",
-  status: "Published",
-  content: convert_markdown_to_editorjs(CONCERNS.md),
-  relation_type: "Related"
-})
-
-# Tag the page
-mosic_batch_add_tags_to_document("M Page", concerns_page.name, [
-  GSD_MANAGED_TAG,
-  "codebase"
-])
-```
-
-### Step 6: Store Page IDs
-
-```bash
-# Update config.json with page IDs
-# mosic.pages["codebase-architecture"] = architecture_page.name
-# mosic.pages["codebase-stack"] = stack_page.name
-# mosic.pages["codebase-conventions"] = conventions_page.name
-# mosic.pages["codebase-concerns"] = concerns_page.name
-```
-
-Display:
-```
-✓ Codebase map synced to Mosic
-  Architecture: https://mosic.pro/app/page/[architecture_page.name]
-  Tech Stack: https://mosic.pro/app/page/[stack_page.name]
-  Conventions: https://mosic.pro/app/page/[conventions_page.name]
-  Concerns: https://mosic.pro/app/page/[concerns_page.name]
-```
-
-**Error handling:**
-```
-IF mosic sync fails:
-  - Log warning: "Mosic sync failed: [error]. Codebase map saved locally."
-  - Add to mosic.pending_sync array
-  - Continue to offer_next (don't block)
-```
-
-**If mosic.enabled = false:** Skip to offer_next step.
 </step>
 
 <step name="offer_next">
 Present completion summary and next steps.
-
-**Get line counts:**
-```bash
-wc -l .planning/codebase/*.md
-```
 
 **Output format:**
 
 ```
 Codebase mapping complete.
 
-Created .planning/codebase/:
-- STACK.md ([N] lines) - Technologies and dependencies
-- ARCHITECTURE.md ([N] lines) - System design and patterns
-- STRUCTURE.md ([N] lines) - Directory layout and organization
-- CONVENTIONS.md ([N] lines) - Code style and patterns
-- TESTING.md ([N] lines) - Test structure and practices
-- INTEGRATIONS.md ([N] lines) - External services and APIs
-- CONCERNS.md ([N] lines) - Technical debt and issues
-
-[IF mosic.enabled:]
-Mosic Pages:
-- Architecture & Structure: https://mosic.pro/app/page/[id]
-- Tech Stack & Integrations: https://mosic.pro/app/page/[id]
-- Conventions & Testing: https://mosic.pro/app/page/[id]
-- Technical Concerns: https://mosic.pro/app/page/[id]
-[END IF]
+Created in Mosic:
+- Architecture: https://mosic.pro/app/page/[id]
+- Structure: https://mosic.pro/app/page/[id]
+- Tech Stack: https://mosic.pro/app/page/[id]
+- Integrations: https://mosic.pro/app/page/[id]
+- Conventions: https://mosic.pro/app/page/[id]
+- Testing: https://mosic.pro/app/page/[id]
+- Concerns: https://mosic.pro/app/page/[id]
 
 ---
 
@@ -440,8 +326,7 @@ Mosic Pages:
 
 **Also available:**
 - Re-run mapping: `/gsd:map-codebase`
-- Review specific file: `cat .planning/codebase/STACK.md`
-- Edit any document before proceeding
+- Review pages in Mosic
 
 ---
 ```
@@ -452,16 +337,13 @@ End workflow.
 </process>
 
 <success_criteria>
-- .planning/codebase/ directory created
-- 4 parallel gsd-codebase-mapper agents spawned with run_in_background=true
-- Agents write documents directly (orchestrator doesn't receive document contents)
-- Read agent output files to collect confirmations
-- All 7 codebase documents exist
-- Mosic sync (if enabled):
-  - [ ] Architecture & Structure page created linked to project
-  - [ ] Tech Stack & Integrations page created linked to project
-  - [ ] Conventions & Testing page created linked to project
-  - [ ] Technical Concerns page created linked to project
-- Clear completion summary with line counts
-- User offered clear next steps in GSD style
+- [ ] Mosic context loaded (project, existing pages)
+- [ ] 4 parallel gsd-codebase-mapper agents spawned
+- [ ] Agents create pages directly in Mosic linked to project
+- [ ] Confirmations collected from all agents
+- [ ] All 7 codebase pages exist in Mosic
+- [ ] All pages tagged with gsd_managed and codebase
+- [ ] config.json updated with page IDs
+- [ ] Clear completion summary with page URLs
+- [ ] User offered clear next steps in GSD style
 </success_criteria>

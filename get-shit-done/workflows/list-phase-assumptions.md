@@ -4,9 +4,43 @@ Surface Claude's assumptions about a phase before planning, enabling users to co
 Key difference from discuss-phase: This is ANALYSIS of what Claude thinks, not INTAKE of what user knows. No file output - purely conversational to prompt discussion.
 </purpose>
 
+<mosic_only>
+**CRITICAL: This workflow operates ONLY through Mosic MCP.**
+
+- All state is read from Mosic (project, task lists, roadmap page)
+- Assumptions page stored in Mosic (if corrections provided)
+- Only `config.json` is stored locally (for Mosic entity IDs)
+- No `.planning/` directory operations
+</mosic_only>
+
 <process>
 
-<step name="validate_phase" priority="first">
+<step name="load_mosic_context" priority="first">
+
+**Load context from Mosic:**
+
+```
+Read config.json for Mosic IDs:
+- workspace_id
+- project_id
+- task_lists (phase mappings)
+- pages (page IDs)
+- tags (tag IDs)
+```
+
+```javascript
+// Load project with task lists
+project = mosic_get_project(project_id, { include_task_lists: true })
+
+// Get roadmap page for phase details
+project_pages = mosic_get_entity_pages("MProject", project_id)
+roadmap_page = project_pages.find(p => p.title.includes("Roadmap"))
+roadmap_content = mosic_get_page(roadmap_page.name, { content_format: "markdown" })
+```
+
+</step>
+
+<step name="validate_phase">
 Phase number: $ARGUMENTS (required)
 
 **If argument missing:**
@@ -21,36 +55,35 @@ Example: /gsd:list-phase-assumptions 3
 Exit workflow.
 
 **If argument provided:**
-Validate phase exists in roadmap:
+Validate phase exists in project:
 
-```bash
-cat .planning/ROADMAP.md | grep -i "Phase ${PHASE}"
+```javascript
+// Find the phase task list
+phase_task_list = project.task_lists.find(tl =>
+  tl.title.includes("Phase " + PHASE) ||
+  tl.identifier.startsWith(PHASE + "-")
+)
+
+if (!phase_task_list) {
+  console.log("Error: Phase " + PHASE + " not found in project.")
+  console.log("\nAvailable phases:")
+  for (tl of project.task_lists) {
+    console.log("- " + tl.title)
+  }
+  exit()
+}
+
+// Extract phase details
+phase_name = phase_task_list.title
+phase_description = phase_task_list.description
+phase_goal = extract_goal_from_description(phase_description)
 ```
-
-**If phase not found:**
-
-```
-Error: Phase ${PHASE} not found in roadmap.
-
-Available phases:
-[list phases from roadmap]
-```
-
-Exit workflow.
-
-**If phase found:**
-Parse phase details from roadmap:
-
-- Phase number
-- Phase name
-- Phase description/goal
-- Any scope details mentioned
 
 Continue to analyze_phase.
 </step>
 
 <step name="analyze_phase">
-Based on roadmap description and project context, identify assumptions across five areas:
+Based on task list description and project context, identify assumptions across five areas:
 
 **1. Technical Approach:**
 What libraries, frameworks, patterns, or tools would Claude use?
@@ -83,7 +116,7 @@ What does Claude assume exists or needs to be in place?
 - "This will be consumed by..."
 
 Be honest about uncertainty. Mark assumptions with confidence levels:
-- "Fairly confident: ..." (clear from roadmap)
+- "Fairly confident: ..." (clear from description)
 - "Assuming: ..." (reasonable inference)
 - "Unclear: ..." (could go multiple ways)
 </step>
@@ -145,59 +178,18 @@ This changes my understanding significantly. [Summarize new understanding]
 Assumptions validated.
 ```
 
-Continue to offer_next.
+Continue to check_for_significant_corrections.
 </step>
 
-<step name="offer_next">
-Present next steps:
+<step name="check_for_significant_corrections">
+**If significant corrections were provided:**
 
-```
-What's next?
-1. Discuss context (/gsd:discuss-phase ${PHASE}) - Let me ask you questions to build comprehensive context
-2. Plan this phase (/gsd:plan-phase ${PHASE}) - Create detailed execution plans
-3. Re-examine assumptions - I'll analyze again with your corrections
-4. Done for now
-```
+Create assumptions page in Mosic to preserve the corrections:
 
-Wait for user selection.
-
-If "Discuss context": Note that CONTEXT.md will incorporate any corrections discussed here
-If "Plan this phase": Proceed knowing assumptions are understood
-If "Re-examine": Return to analyze_phase with updated understanding
-</step>
-
-</process>
-
-<step name="sync_assumptions_to_mosic">
-**Sync assumptions to Mosic (optional, if significant corrections made):**
-
-Check Mosic status:
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true AND user provided significant corrections:**
-
-Display:
-```
-◆ Syncing assumptions to Mosic...
-```
-
-### Step 1: Load Mosic Config
-
-```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${PADDED_PHASE}\"]")
-TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${PADDED_PHASE}\"]")
-```
-
-### Step 2: Create Assumptions Page (if corrections provided)
-
-```
-assumptions_page = mosic_create_entity_page("MTask List", task_list_id, {
+```javascript
+assumptions_page = mosic_create_entity_page("MTask List", phase_task_list.name, {
   workspace_id: workspace_id,
-  title: "Phase " + PADDED_PHASE + " Assumptions & Corrections",
+  title: "Phase " + PHASE + " Assumptions & Corrections",
   page_type: "Document",
   icon: "lucide:lightbulb",
   status: "Published",
@@ -208,54 +200,87 @@ assumptions_page = mosic_create_entity_page("MTask List", task_list_id, {
         data: { text: "Initial Assumptions", level: 2 }
       },
       // Technical approach, implementation order, scope, risks, dependencies
+      ...assumptions_blocks,
       {
         type: "header",
         data: { text: "User Corrections", level: 2 }
       },
-      // Corrections provided by user
+      {
+        type: "list",
+        data: {
+          style: "unordered",
+          items: corrections
+        }
+      }
     ]
   },
   relation_type: "Related"
 })
 
-# Tag the page
+// Tag the page
 mosic_batch_add_tags_to_document("M Page", assumptions_page.name, [
-  GSD_MANAGED_TAG,
-  PHASE_TAG
+  tags.gsd_managed,
+  tags["phase-" + PHASE]
 ])
-```
 
-### Step 3: Add Comment to Task List
-
-```
+// Add comment to task list
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
-  ref_doc: "MTask List",
-  ref_name: task_list_id,
+  reference_doctype: "MTask List",
+  reference_name: phase_task_list.name,
   content: "💡 **Assumptions Reviewed**\n\n" +
     "Key corrections:\n" +
     corrections.map(c => "- " + c).join("\n") +
     "\n\n[Full assumptions](page/" + assumptions_page.name + ")"
 })
+
+// Update config
+config.pages["phase-" + PHASE + "-assumptions"] = assumptions_page.name
 ```
 
-Display:
-```
-✓ Assumptions synced to Mosic
-  Page: https://mosic.pro/app/page/[assumptions_page.name]
-```
-
-**If mosic.enabled = false OR no corrections:** Skip Mosic sync.
+**If no significant corrections:** Skip page creation.
 </step>
 
+<step name="offer_next">
+Present next steps:
+
+```
+---
+
+## ▶ Next Up
+
+What would you like to do?
+
+1. **Discuss context** — `/gsd:discuss-phase ${PHASE}`
+   Let me ask you questions to build comprehensive context
+
+2. **Plan this phase** — `/gsd:plan-phase ${PHASE}`
+   Create detailed execution plans
+
+3. **Re-examine assumptions**
+   I'll analyze again with your corrections
+
+<sub>`/clear` first → fresh context window</sub>
+
+---
+```
+
+Wait for user selection.
+
+If "Discuss context": Note that context page will incorporate any corrections discussed here
+If "Plan this phase": Proceed knowing assumptions are understood
+If "Re-examine": Return to analyze_phase with updated understanding
+</step>
+
+</process>
+
 <success_criteria>
-- Phase number validated against roadmap
-- Assumptions surfaced across five areas: technical approach, implementation order, scope, risks, dependencies
-- Confidence levels marked where appropriate
-- "What do you think?" prompt presented
-- User feedback acknowledged
-- Mosic sync (if enabled and corrections provided):
-  - [ ] Assumptions page created linked to phase task list
-  - [ ] Comment added with key corrections
-- Clear next steps offered
+- [ ] Mosic context loaded (project, phase task list, roadmap)
+- [ ] Phase number validated against project
+- [ ] Assumptions surfaced across five areas: technical approach, implementation order, scope, risks, dependencies
+- [ ] Confidence levels marked where appropriate
+- [ ] "What do you think?" prompt presented
+- [ ] User feedback acknowledged
+- [ ] If significant corrections: assumptions page created in Mosic linked to phase task list
+- [ ] Clear next steps offered
 </success_criteria>

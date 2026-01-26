@@ -1,104 +1,110 @@
-<required_reading>
-
-**Read these files NOW:**
-
-1. `.planning/STATE.md`
-2. `.planning/PROJECT.md`
-3. `.planning/ROADMAP.md`
-4. Current phase's plan files (`*-PLAN.md`)
-5. Current phase's summary files (`*-SUMMARY.md`)
-
-</required_reading>
-
 <purpose>
-
-Mark current phase complete and advance to next. This is the natural point where progress tracking and PROJECT.md evolution happen.
+Mark current phase complete and advance to next. This is the natural point where progress tracking and project page evolution happen.
 
 "Planning next phase" = "current phase is done"
-
 </purpose>
+
+<mosic_only>
+**CRITICAL: This workflow operates ONLY through Mosic MCP.**
+
+- All state is read from Mosic (project, task lists, tasks, pages)
+- All documentation is stored in Mosic pages
+- Only `config.json` is stored locally (for Mosic entity IDs)
+- No `.planning/` directory operations
+</mosic_only>
 
 <process>
 
-<step name="load_project_state" priority="first">
+<step name="load_mosic_context" priority="first">
 
-Before transition, read project state:
+**Load context from Mosic:**
 
-```bash
-cat .planning/STATE.md 2>/dev/null
-cat .planning/PROJECT.md 2>/dev/null
+```
+Read config.json for Mosic IDs:
+- workspace_id
+- project_id
+- task_lists (phase mappings)
+- pages (page IDs)
+- tags (tag IDs)
 ```
 
-Parse current position to verify we're transitioning the right phase.
-Note accumulated context that may need updating after transition.
+```javascript
+// Load project with task lists
+project = mosic_get_project(project_id, { include_task_lists: true })
+
+// Get project pages
+project_pages = mosic_get_entity_pages("MProject", project_id)
+requirements_page = project_pages.find(p => p.title.includes("Requirements"))
+roadmap_page = project_pages.find(p => p.title.includes("Roadmap"))
+
+// Find current phase (in progress)
+current_phase_list = project.task_lists.find(tl => tl.status === "In Progress")
+
+if (!current_phase_list) {
+  console.log("No phase in progress to transition from.")
+  exit()
+}
+
+// Get phase with tasks
+current_phase = mosic_get_task_list(current_phase_list.name, { include_tasks: true })
+```
 
 </step>
 
 <step name="verify_completion">
+Check current phase has all tasks complete:
 
-Check current phase has all plan summaries:
-
-```bash
-ls .planning/phases/XX-current/*-PLAN.md 2>/dev/null | sort
-ls .planning/phases/XX-current/*-SUMMARY.md 2>/dev/null | sort
+```javascript
+total_tasks = current_phase.tasks.length
+completed_tasks = current_phase.tasks.filter(t => t.done).length
+incomplete_tasks = current_phase.tasks.filter(t => !t.done)
 ```
 
 **Verification logic:**
 
-- Count PLAN files
-- Count SUMMARY files
-- If counts match: all plans complete
-- If counts don't match: incomplete
+- Count total tasks
+- Count completed tasks
+- If counts match: all tasks complete
 
-<config-check>
-
-```bash
-cat .planning/config.json 2>/dev/null
-```
-
-</config-check>
-
-**If all plans complete:**
+**If all tasks complete:**
 
 <if mode="yolo">
 
 ```
-⚡ Auto-approved: Transition Phase [X] → Phase [X+1]
-Phase [X] complete — all [Y] plans finished.
+⚡ Auto-approved: Transition Phase ${CURRENT} → Phase ${NEXT}
+Phase ${CURRENT} complete — all ${total_tasks} tasks finished.
 
 Proceeding to mark done and advance...
 ```
 
-Proceed directly to cleanup_handoff step.
+Proceed directly to mark_phase_complete step.
 
 </if>
 
-<if mode="interactive" OR="custom with gates.confirm_transition true">
+<if mode="interactive">
 
-Ask: "Phase [X] complete — all [Y] plans finished. Ready to mark done and move to Phase [X+1]?"
+Ask: "Phase ${CURRENT} complete — all ${total_tasks} tasks finished. Ready to mark done and move to Phase ${NEXT}?"
 
 Wait for confirmation before proceeding.
 
 </if>
 
-**If plans incomplete:**
+**If tasks incomplete:**
 
 **SAFETY RAIL: always_confirm_destructive applies here.**
-Skipping incomplete plans is destructive — ALWAYS prompt regardless of mode.
+Skipping incomplete tasks is destructive — ALWAYS prompt regardless of mode.
 
 Present:
 
 ```
-Phase [X] has incomplete plans:
-- {phase}-01-SUMMARY.md ✓ Complete
-- {phase}-02-SUMMARY.md ✗ Missing
-- {phase}-03-SUMMARY.md ✗ Missing
+Phase ${CURRENT} has incomplete tasks:
+${incomplete_tasks.map(t => "- " + t.identifier + ": " + t.title + " ✗ Incomplete").join("\n")}
 
-⚠️ Safety rail: Skipping plans requires confirmation (destructive action)
+⚠️ Safety rail: Skipping tasks requires confirmation (destructive action)
 
 Options:
-1. Continue current phase (execute remaining plans)
-2. Mark complete anyway (skip remaining plans)
+1. Continue current phase (complete remaining tasks)
+2. Mark complete anyway (skip remaining tasks)
 3. Review what's left
 ```
 
@@ -106,495 +112,245 @@ Wait for user decision.
 
 </step>
 
-<step name="cleanup_handoff">
+<step name="mark_phase_complete">
+**Mark phase complete in Mosic:**
 
-Check for lingering handoffs:
+```javascript
+// Update phase task list status
+mosic_update_document("MTask List", current_phase_list.name, {
+  status: "Completed",
+  description: current_phase.description + "\n\n---\n\n✅ **Phase Complete**\n" +
+    "- Tasks: " + completed_tasks + "/" + total_tasks + "\n" +
+    "- Completed: " + format_date(now)
+})
 
-```bash
-ls .planning/phases/XX-current/.continue-here*.md 2>/dev/null
-```
-
-If found, delete them — phase is complete, handoffs are stale.
-
-</step>
-
-<step name="update_roadmap">
-
-Update the roadmap file:
-
-```bash
-ROADMAP_FILE=".planning/ROADMAP.md"
-```
-
-Update the file:
-
-- Mark current phase: `[x] Complete`
-- Add completion date
-- Update plan count to final (e.g., "3/3 plans complete")
-- Update Progress table
-- Keep next phase as `[ ] Not started`
-
-**Example:**
-
-```markdown
-## Phases
-
-- [x] Phase 1: Foundation (completed 2025-01-15)
-- [ ] Phase 2: Authentication ← Next
-- [ ] Phase 3: Core Features
-
-## Progress
-
-| Phase             | Plans Complete | Status      | Completed  |
-| ----------------- | -------------- | ----------- | ---------- |
-| 1. Foundation     | 3/3            | Complete    | 2025-01-15 |
-| 2. Authentication | 0/2            | Not started | -          |
-| 3. Core Features  | 0/1            | Not started | -          |
+// Add completion comment
+mosic_create_document("M Comment", {
+  workspace_id: workspace_id,
+  reference_doctype: "MTask List",
+  reference_name: current_phase_list.name,
+  content: "✅ **Phase Complete**\n\n" +
+    "All " + completed_tasks + " tasks finished.\n" +
+    "Transitioning to next phase."
+})
 ```
 
 </step>
 
-<step name="archive_prompts">
+<step name="find_next_phase">
+**Identify next phase:**
 
-If prompts were generated for the phase, they stay in place.
-The `completed/` subfolder pattern from create-meta-prompts handles archival.
+```javascript
+// Sort task lists by creation order or identifier
+sorted_phases = project.task_lists.sort((a, b) => {
+  // Extract phase number from identifier or title
+  numA = extract_phase_number(a)
+  numB = extract_phase_number(b)
+  return numA - numB
+})
+
+// Find index of current phase
+current_index = sorted_phases.findIndex(tl => tl.name === current_phase_list.name)
+
+// Get next phase
+next_phase_list = sorted_phases[current_index + 1]
+
+if (!next_phase_list) {
+  // No more phases - milestone complete
+  MILESTONE_COMPLETE = true
+} else {
+  MILESTONE_COMPLETE = false
+  next_phase = mosic_get_task_list(next_phase_list.name)
+}
+```
 
 </step>
 
-<step name="evolve_project">
+<step name="update_next_phase_status">
+**If next phase exists, mark it in progress:**
 
-Evolve PROJECT.md to reflect learnings from completed phase.
+```javascript
+if (!MILESTONE_COMPLETE) {
+  mosic_update_document("MTask List", next_phase_list.name, {
+    status: "In Progress"
+  })
 
-**Read phase summaries:**
+  // Add transition comment
+  mosic_create_document("M Comment", {
+    workspace_id: workspace_id,
+    reference_doctype: "MTask List",
+    reference_name: next_phase_list.name,
+    content: "🚀 **Phase Started**\n\n" +
+      "Transitioned from Phase " + extract_phase_number(current_phase_list) + ".\n" +
+      "Ready for planning."
+  })
+}
+```
 
-```bash
-cat .planning/phases/XX-current/*-SUMMARY.md
+</step>
+
+<step name="evolve_requirements">
+**Evolve requirements page to reflect learnings from completed phase:**
+
+Read phase summary pages:
+
+```javascript
+phase_pages = mosic_get_entity_pages("MTask List", current_phase_list.name)
+summary_page = phase_pages.find(p => p.title.includes("Summary"))
+
+if (summary_page) {
+  summary_content = mosic_get_page(summary_page.name, { content_format: "markdown" })
+}
 ```
 
 **Assess requirement changes:**
 
 1. **Requirements validated?**
-   - Any Active requirements shipped in this phase?
-   - Move to Validated with phase reference: `- ✓ [Requirement] — Phase X`
+   - Any requirements shipped in this phase?
+   - Move to Validated section
 
 2. **Requirements invalidated?**
-   - Any Active requirements discovered to be unnecessary or wrong?
-   - Move to Out of Scope with reason: `- [Requirement] — [why invalidated]`
+   - Any requirements discovered to be unnecessary or wrong?
+   - Note why in Out of Scope section
 
 3. **Requirements emerged?**
    - Any new requirements discovered during building?
-   - Add to Active: `- [ ] [New requirement]`
+   - Add to Active section
 
 4. **Decisions to log?**
-   - Extract decisions from SUMMARY.md files
-   - Add to Key Decisions table with outcome if known
+   - Extract decisions from summary pages
+   - Add to Key Decisions section
 
-5. **"What This Is" still accurate?**
-   - If the product has meaningfully changed, update the description
-   - Keep it current and accurate
+**Update requirements page:**
 
-**Update PROJECT.md:**
+```javascript
+if (requirements_page && has_requirement_changes) {
+  current_content = mosic_get_page(requirements_page.name, { content_format: "full" })
 
-Make the edits inline. Update "Last updated" footer:
-
-```markdown
----
-*Last updated: [date] after Phase [X]*
-```
-
-**Example evolution:**
-
-Before:
-
-```markdown
-### Active
-
-- [ ] JWT authentication
-- [ ] Real-time sync < 500ms
-- [ ] Offline mode
-
-### Out of Scope
-
-- OAuth2 — complexity not needed for v1
-```
-
-After (Phase 2 shipped JWT auth, discovered rate limiting needed):
-
-```markdown
-### Validated
-
-- ✓ JWT authentication — Phase 2
-
-### Active
-
-- [ ] Real-time sync < 500ms
-- [ ] Offline mode
-- [ ] Rate limiting on sync endpoint
-
-### Out of Scope
-
-- OAuth2 — complexity not needed for v1
-```
-
-**Step complete when:**
-
-- [ ] Phase summaries reviewed for learnings
-- [ ] Validated requirements moved from Active
-- [ ] Invalidated requirements moved to Out of Scope with reason
-- [ ] Emerged requirements added to Active
-- [ ] New decisions logged with rationale
-- [ ] "What This Is" updated if product changed
-- [ ] "Last updated" footer reflects this transition
-
-</step>
-
-<step name="update_current_position_after_transition">
-
-Update Current Position section in STATE.md to reflect phase completion and transition.
-
-**Format:**
-
-```markdown
-Phase: [next] of [total] ([Next phase name])
-Plan: Not started
-Status: Ready to plan
-Last activity: [today] — Phase [X] complete, transitioned to Phase [X+1]
-
-Progress: [updated progress bar]
-```
-
-**Instructions:**
-
-- Increment phase number to next phase
-- Reset plan to "Not started"
-- Set status to "Ready to plan"
-- Update last activity to describe transition
-- Recalculate progress bar based on completed plans
-
-**Example — transitioning from Phase 2 to Phase 3:**
-
-Before:
-
-```markdown
-## Current Position
-
-Phase: 2 of 4 (Authentication)
-Plan: 2 of 2 in current phase
-Status: Phase complete
-Last activity: 2025-01-20 — Completed 02-02-PLAN.md
-
-Progress: ███████░░░ 60%
-```
-
-After:
-
-```markdown
-## Current Position
-
-Phase: 3 of 4 (Core Features)
-Plan: Not started
-Status: Ready to plan
-Last activity: 2025-01-20 — Phase 2 complete, transitioned to Phase 3
-
-Progress: ███████░░░ 60%
-```
-
-**Step complete when:**
-
-- [ ] Phase number incremented to next phase
-- [ ] Plan status reset to "Not started"
-- [ ] Status shows "Ready to plan"
-- [ ] Last activity describes the transition
-- [ ] Progress bar reflects total completed plans
-
-</step>
-
-<step name="update_project_reference">
-
-Update Project Reference section in STATE.md.
-
-```markdown
-## Project Reference
-
-See: .planning/PROJECT.md (updated [today])
-
-**Core value:** [Current core value from PROJECT.md]
-**Current focus:** [Next phase name]
-```
-
-Update the date and current focus to reflect the transition.
-
-</step>
-
-<step name="review_accumulated_context">
-
-Review and update Accumulated Context section in STATE.md.
-
-**Decisions:**
-
-- Note recent decisions from this phase (3-5 max)
-- Full log lives in PROJECT.md Key Decisions table
-
-**Blockers/Concerns:**
-
-- Review blockers from completed phase
-- If addressed in this phase: Remove from list
-- If still relevant for future: Keep with "Phase X" prefix
-- Add any new concerns from completed phase's summaries
-
-**Example:**
-
-Before:
-
-```markdown
-### Blockers/Concerns
-
-- ⚠️ [Phase 1] Database schema not indexed for common queries
-- ⚠️ [Phase 2] WebSocket reconnection behavior on flaky networks unknown
-```
-
-After (if database indexing was addressed in Phase 2):
-
-```markdown
-### Blockers/Concerns
-
-- ⚠️ [Phase 2] WebSocket reconnection behavior on flaky networks unknown
-```
-
-**Step complete when:**
-
-- [ ] Recent decisions noted (full log in PROJECT.md)
-- [ ] Resolved blockers removed from list
-- [ ] Unresolved blockers kept with phase prefix
-- [ ] New concerns from completed phase added
-
-</step>
-
-<step name="update_session_continuity_after_transition">
-
-Update Session Continuity section in STATE.md to reflect transition completion.
-
-**Format:**
-
-```markdown
-Last session: [today]
-Stopped at: Phase [X] complete, ready to plan Phase [X+1]
-Resume file: None
-```
-
-**Step complete when:**
-
-- [ ] Last session timestamp updated to current date and time
-- [ ] Stopped at describes phase completion and next phase
-- [ ] Resume file confirmed as None (transitions don't use resume files)
-
-</step>
-
-<step name="sync_transition_to_mosic">
-**Sync phase transition to Mosic (Deep Integration):**
-
-Check Mosic status:
-```bash
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
-```
-
-**If mosic.enabled = true:**
-
-Display:
-```
-◆ Syncing transition to Mosic...
-```
-
-### Step 1: Load Mosic Config
-
-```bash
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
-GSD_MANAGED_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.gsd_managed")
-COMPLETED_PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${COMPLETED_PHASE}\"]")
-NEXT_PHASE_TAG=$(cat .planning/config.json | jq -r ".mosic.tags.phase_tags[\"phase-${NEXT_PHASE}\"]")
-COMPLETED_TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${COMPLETED_PHASE}\"]")
-NEXT_TASK_LIST_ID=$(cat .planning/config.json | jq -r ".mosic.task_lists[\"phase-${NEXT_PHASE}\"]")
-```
-
-### Step 2: Mark Completed Phase Task List as Complete
-
-```
-mosic_update_document("MTask List", completed_task_list_id, {
-  status: "Completed",
-  description: original_description + "\n\n---\n\n✅ **Phase Complete**\n" +
-    "- Completed: " + format_date(now) + "\n" +
-    "- Plans: " + completed_plans + "/" + total_plans
-})
-```
-
-### Step 3: Update Next Phase Task List to In Progress
-
-```
-IF next_task_list_id:
-  mosic_update_document("MTask List", next_task_list_id, {
-    status: "In Progress"
+  mosic_update_content_blocks(requirements_page.name, {
+    // Update validated section, active section, etc.
+    // Based on analysis above
   })
+
+  // Add evolution comment
+  mosic_create_document("M Comment", {
+    workspace_id: workspace_id,
+    reference_doctype: "M Page",
+    reference_name: requirements_page.name,
+    content: "📝 **Requirements Evolved**\n\n" +
+      "After Phase " + extract_phase_number(current_phase_list) + ":\n" +
+      "- Validated: " + validated_count + "\n" +
+      "- Emerged: " + emerged_count + "\n" +
+      "- Invalidated: " + invalidated_count
+  })
+}
 ```
 
-### Step 4: Add Transition Comment
+</step>
 
+<step name="update_roadmap">
+**Update roadmap page:**
+
+```javascript
+if (roadmap_page) {
+  mosic_update_content_blocks(roadmap_page.name, {
+    // Mark completed phase as done
+    // Update progress table
+    // Highlight next phase
+  })
+}
 ```
+
+</step>
+
+<step name="add_transition_comment">
+**Add transition comment to project:**
+
+```javascript
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
-  ref_doc: "MProject",
-  ref_name: project_id,
+  reference_doctype: "MProject",
+  reference_name: project_id,
   content: "🔄 **Phase Transition**\n\n" +
-    "- Completed: Phase " + COMPLETED_PHASE + " (" + completed_phase_name + ")\n" +
-    "- Starting: Phase " + NEXT_PHASE + " (" + next_phase_name + ")\n\n" +
+    "- Completed: Phase " + extract_phase_number(current_phase_list) + " (" + current_phase.title + ")\n" +
+    (MILESTONE_COMPLETE ? "- Status: All phases complete!" :
+     "- Starting: Phase " + extract_phase_number(next_phase_list) + " (" + next_phase.title + ")") + "\n\n" +
     "Requirements validated: " + validated_count + "\n" +
     "Requirements emerged: " + emerged_count
 })
 ```
 
-### Step 5: Update Last Sync Timestamp
+</step>
+
+<step name="update_config">
+**Update config.json:**
+
+```javascript
+config.last_sync = new Date().toISOString()
+
+// Write config.json
+```
 
 ```bash
-# Update config.json with sync timestamp
-# mosic.last_sync = "[ISO timestamp now]"
+git add config.json
+git commit -m "chore: transition from phase ${CURRENT} to phase ${NEXT}"
 ```
 
-Display:
-```
-✓ Transition synced to Mosic
-  Completed: Phase ${COMPLETED_PHASE} (https://mosic.pro/app/MTask List/[completed_task_list_id])
-  Starting: Phase ${NEXT_PHASE} (https://mosic.pro/app/MTask List/[next_task_list_id])
-```
-
-**Error handling:**
-```
-IF mosic sync fails:
-  - Log warning: "Mosic sync failed: [error]. Transition completed locally."
-  - Add to mosic.pending_sync array
-  - Continue to offer_next_phase (don't block)
-```
-
-**If mosic.enabled = false:** Skip to offer_next_phase step.
 </step>
 
 <step name="offer_next_phase">
+**Present next steps:**
 
-**MANDATORY: Verify milestone status before presenting next steps.**
-
-**Step 1: Read ROADMAP.md and identify phases in current milestone**
-
-Read the ROADMAP.md file and extract:
-1. Current phase number (the phase just transitioned from)
-2. All phase numbers in the current milestone section
-
-To find phases, look for:
-- Phase headers: lines starting with `### Phase` or `#### Phase`
-- Phase list items: lines like `- [ ] **Phase X:` or `- [x] **Phase X:`
-
-Count total phases and identify the highest phase number in the milestone.
-
-State: "Current phase is {X}. Milestone has {N} phases (highest: {Y})."
-
-**Step 2: Route based on milestone status**
-
-| Condition | Meaning | Action |
-|-----------|---------|--------|
-| current phase < highest phase | More phases remain | Go to **Route A** |
-| current phase = highest phase | Milestone complete | Go to **Route B** |
-
----
-
-**Route A: More phases remain in milestone**
-
-Read ROADMAP.md to get the next phase's name and goal.
-
-**If next phase exists:**
-
-<if mode="yolo">
+**If more phases remain:**
 
 ```
-Phase [X] marked complete.
-
-Next: Phase [X+1] — [Name]
-
-⚡ Auto-continuing: Plan Phase [X+1] in detail
-```
-
-Exit skill and invoke SlashCommand("/gsd:plan-phase [X+1]")
-
-</if>
-
-<if mode="interactive" OR="custom with gates.confirm_transition true">
-
-```
-## ✓ Phase [X] Complete
+## ✓ Phase ${CURRENT}: ${current_phase.title} Complete
 
 ---
 
 ## ▶ Next Up
 
-**Phase [X+1]: [Name]** — [Goal from ROADMAP.md]
+**Phase ${NEXT}: ${next_phase.title}** — ${next_phase.description}
 
-`/gsd:plan-phase [X+1]`
+`/gsd:plan-phase ${NEXT}`
 
 <sub>`/clear` first → fresh context window</sub>
 
 ---
 
 **Also available:**
-- `/gsd:discuss-phase [X+1]` — gather context first
-- `/gsd:research-phase [X+1]` — investigate unknowns
-- Review roadmap
+- `/gsd:discuss-phase ${NEXT}` — gather context first
+- `/gsd:research-phase ${NEXT}` — investigate unknowns
+- Review phase in Mosic
 
 ---
 ```
 
-</if>
-
----
-
-**Route B: Milestone complete (all phases done)**
-
-<if mode="yolo">
+**If milestone complete:**
 
 ```
-Phase {X} marked complete.
+## ✓ Phase ${CURRENT}: ${current_phase.title} Complete
 
-🎉 Milestone {version} is 100% complete — all {N} phases finished!
-
-⚡ Auto-continuing: Complete milestone and archive
-```
-
-Exit skill and invoke SlashCommand("/gsd:complete-milestone {version}")
-
-</if>
-
-<if mode="interactive" OR="custom with gates.confirm_transition true">
-
-```
-## ✓ Phase {X}: {Phase Name} Complete
-
-🎉 Milestone {version} is 100% complete — all {N} phases finished!
+🎉 Milestone is 100% complete — all ${total_phases} phases finished!
 
 ---
 
 ## ▶ Next Up
 
-**Complete Milestone {version}** — archive and prepare for next
+**Complete Milestone** — archive and prepare for next
 
-`/gsd:complete-milestone {version}`
+`/gsd:complete-milestone`
 
 <sub>`/clear` first → fresh context window</sub>
 
 ---
 
 **Also available:**
-- Review accomplishments before archiving
+- Review accomplishments in Mosic
+- `/gsd:add-phase` — add another phase before completing
 
 ---
 ```
-
-</if>
 
 </step>
 
@@ -605,43 +361,37 @@ Progress tracking is IMPLICIT: planning phase N implies phases 1-(N-1) complete.
 </implicit_tracking>
 
 <partial_completion>
-
 If user wants to move on but phase isn't fully complete:
 
 ```
-Phase [X] has incomplete plans:
-- {phase}-02-PLAN.md (not executed)
-- {phase}-03-PLAN.md (not executed)
+Phase ${CURRENT} has incomplete tasks:
+${incomplete_tasks.map(t => "- " + t.identifier + ": " + t.title).join("\n")}
 
 Options:
-1. Mark complete anyway (plans weren't needed)
+1. Mark complete anyway (tasks weren't needed)
 2. Defer work to later phase
 3. Stay and finish current phase
 ```
 
 Respect user judgment — they know if work matters.
 
-**If marking complete with incomplete plans:**
-
-- Update ROADMAP: "2/3 plans complete" (not "3/3")
-- Note in transition message which plans were skipped
-
+**If marking complete with incomplete tasks:**
+- Update task list description noting skipped tasks
+- Add comment explaining partial completion
 </partial_completion>
 
 <success_criteria>
-
 Transition is complete when:
 
-- [ ] Current phase plan summaries verified (all exist or user chose to skip)
-- [ ] Any stale handoffs deleted
-- [ ] ROADMAP.md updated with completion status and plan count
-- [ ] PROJECT.md evolved (requirements, decisions, description if needed)
-- [ ] STATE.md updated (position, project reference, context, session)
-- [ ] Progress table updated
-- [ ] Mosic sync (if enabled):
-  - [ ] Completed phase task list status updated to "Completed"
-  - [ ] Next phase task list status updated to "In Progress"
-  - [ ] Transition comment added to project
+- [ ] Mosic context loaded (project, task lists, pages)
+- [ ] Current phase tasks verified (all complete or user chose to skip)
+- [ ] Current phase task list marked "Completed"
+- [ ] Completion comment added to current phase
+- [ ] Next phase task list marked "In Progress" (if exists)
+- [ ] Transition comment added to next phase
+- [ ] Requirements page evolved (validated, emerged, invalidated)
+- [ ] Roadmap page updated
+- [ ] Transition comment added to project
+- [ ] config.json updated with last_sync
 - [ ] User knows next steps
-
 </success_criteria>
