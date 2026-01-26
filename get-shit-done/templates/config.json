@@ -31,5 +31,69 @@
   "safety": {
     "always_confirm_destructive": true,
     "always_confirm_external_services": true
+  },
+  "mosic": {
+    "enabled": false,
+    "workspace_id": null,
+    "space_id": null,
+    "project_id": null,
+    "sync_on_commit": true,
+    "auto_detect": true,
+    "task_lists": {},
+    "tasks": {},
+    "pages": {},
+    "checklists": {},
+    "tags": {
+      "gsd_managed": null,
+      "requirements": null,
+      "research": null,
+      "plan": null,
+      "summary": null,
+      "verification": null,
+      "uat": null,
+      "quick": null,
+      "fix": null,
+      "phase_tags": {}
+    },
+    "page_types": {
+      "overview": "Document",
+      "requirements": "Spec",
+      "roadmap": "Spec",
+      "research": "Document",
+      "plan": "Spec",
+      "summary": "Document",
+      "verification": "Document",
+      "uat": "Document"
+    },
+    "page_icons": {
+      "overview": "lucide:book-open",
+      "requirements": "lucide:list-checks",
+      "roadmap": "lucide:map",
+      "research": "lucide:search",
+      "plan": "lucide:file-code",
+      "summary": "lucide:check-circle",
+      "verification": "lucide:shield-check",
+      "uat": "lucide:user-check"
+    },
+    "status_mapping": {
+      "not_started": "Backlog",
+      "in_progress": "In Progress",
+      "blocked": "Blocked",
+      "review": "In Review",
+      "completed": "Completed"
+    },
+    "priority_mapping": {
+      "low": "Low",
+      "medium": "Normal",
+      "high": "High",
+      "critical": "Critical"
+    },
+    "relation_types": {
+      "documentation": "Related",
+      "dependency": "Depends",
+      "blocker": "Blocker"
+    },
+    "pending_sync": [],
+    "last_sync": null
   }
 }
