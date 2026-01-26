@@ -659,6 +659,83 @@ If default port is in use, check what's running and either:
 </task>
 ```
 
+## Mosic Integration
+
+### Syncing Checkpoint Outcomes to Mosic
+
+When checkpoints complete, sync the outcome to the corresponding Mosic task:
+
+**For checkpoint:human-verify:**
+```javascript
+// After user approves
+await mosic_update_document("MTask", task_id, {
+  status: "Done",
+  // Add comment with verification details
+});
+
+// If issues found, create follow-up task
+await mosic_create_document("MTask", {
+  title: "Fix: [issue from checkpoint]",
+  task_list: current_task_list_id,
+  status: "To Do",
+  priority: "High"
+});
+```
+
+**For checkpoint:decision:**
+```javascript
+// Record decision in task or project page
+await mosic_update_content_blocks(decision_page_id, [{
+  type: "paragraph",
+  content: `Decision: ${selected_option} - ${rationale}`
+}]);
+
+// Tag the decision for future reference
+await mosic_add_tag_to_document("M Page", decision_page_id, "decision");
+```
+
+**For checkpoint:human-action (auth gates):**
+```javascript
+// Log authentication completion
+await mosic_create_document("MTask", {
+  title: "Auth completed: [service]",
+  task_list: current_task_list_id,
+  status: "Done",
+  description: "Authentication gate cleared for [service]"
+});
+```
+
+### Checkpoint Status in Mosic
+
+Map checkpoint states to MTask status:
+
+| Checkpoint State | MTask Status |
+|------------------|--------------|
+| Pending (not reached) | To Do |
+| Waiting for user | In Progress |
+| Approved/Done | Done |
+| Issues found | Blocked |
+
+### Recording Verification Results
+
+Create verification records as Mosic task comments or linked pages:
+
+```javascript
+// Add verification result as comment
+await mosic_create_document("M Comment", {
+  parent_doctype: "MTask",
+  parent_name: task_id,
+  content: `Checkpoint verified: ${verification_details}`
+});
+
+// Or create verification page linked to task
+await mosic_create_entity_page("MTask", task_id, {
+  title: "Verification: [checkpoint name]",
+  page_type: "Note",
+  tags: ["verification", "checkpoint"]
+});
+```
+
 ## Quick Reference
 
 | Action | Automatable? | Claude does it? |

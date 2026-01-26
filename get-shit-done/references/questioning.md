@@ -138,4 +138,72 @@ Loop until "Create PROJECT.md" selected.
 
 </anti_patterns>
 
+<mosic_integration>
+
+## Mosic Project Setup Option
+
+During project initialization, offer Mosic integration:
+
+**When to offer:**
+After understanding the project scope, before creating PROJECT.md.
+
+**How to present:**
+
+- header: "Project Tracking"
+- question: "Want to track this project in Mosic for cross-session context?"
+- options:
+  - "Yes, create Mosic project" — Full tracking with tasks, pages, and relations
+  - "No, local files only" — Traditional .planning/ directory
+  - "Link to existing" — Connect to an existing Mosic project
+
+**If "Yes, create Mosic project":**
+
+```javascript
+// Create project in Mosic
+const project = await mosic_create_document("MProject", {
+  title: project_name,
+  description: project_brief,
+  workspace: workspace_id,
+  status: "Active",
+  tags: ["gsd-managed"]
+});
+
+// Store reference
+config.mosic = {
+  project_id: project.name,
+  workspace_id: workspace_id,
+  sync_on_commit: true
+};
+```
+
+**If "Link to existing":**
+
+- header: "Existing Project"
+- question: "Paste the Mosic project URL or ID:"
+- options: [text input]
+
+Then:
+```javascript
+// Validate and load existing project
+const project = await mosic_get_project(project_id, {
+  include_task_lists: true
+});
+
+// Check for existing GSD structure
+const existingPages = await mosic_get_entity_pages("MProject", project_id);
+// Analyze what exists, what needs creation
+```
+
+**Follow-up questions if Mosic enabled:**
+
+After establishing Mosic integration, you may need:
+
+- Workspace selection (if user has multiple)
+- Space assignment (if workspace has spaces)
+- Team member assignment (if collaborative)
+
+Keep these optional and don't overwhelm the flow.
+
+</mosic_integration>
+
 </questioning_guide>

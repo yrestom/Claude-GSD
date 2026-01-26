@@ -247,3 +247,109 @@ Sounds like an afterthought. Use "Also available:" instead.
 ```
 
 Fenced blocks inside templates create nesting ambiguity. Use inline backticks instead.
+
+---
+
+## Mosic Integration
+
+### Entity IDs in Handoff Data
+
+When creating continuation/handoff data, include Mosic entity IDs for cross-session context:
+
+```markdown
+---
+
+## ▶ Next Up
+
+**Phase 2: Authentication** — JWT login flow with refresh tokens
+
+`/gsd:plan-phase 2`
+
+<sub>`/clear` first → fresh context window</sub>
+
+---
+
+**Mosic Context:**
+- Project: `081aca99-8742-4b63-94a2-e5724abfac2f`
+- Task List: `[phase-task-list-id]`
+- Current Task: `[active-task-id]`
+
+---
+```
+
+### Handoff State Sync
+
+Before creating handoff, sync current state to Mosic:
+
+```javascript
+// Update task with handoff context
+await mosic_update_document("MTask", current_task_id, {
+  status: "In Progress",
+  description: existing_description + "\n\n---\nHandoff at: " + timestamp
+});
+
+// Create handoff page if complex context
+await mosic_create_entity_page("MTask", current_task_id, {
+  title: "Handoff: " + context_summary,
+  page_type: "Note",
+  tags: ["handoff", "continuation"]
+});
+```
+
+### Cross-Session Context Loading
+
+New sessions can load context from Mosic:
+
+```javascript
+// Load project state for continuation
+const project = await mosic_get_project(project_id, {
+  include_task_lists: true
+});
+
+const currentPhase = await mosic_get_task_list(task_list_id, {
+  include_tasks: true
+});
+
+const handoffPages = await mosic_search_documents_by_tags({
+  tags: ["handoff"],
+  doctypes: ["M Page"],
+  parent_doctype: "MTask",
+  parent_name: current_task_id
+});
+```
+
+### Continuation Format with Mosic URLs
+
+Include Mosic URLs for direct access:
+
+```markdown
+---
+
+## ▶ Next Up
+
+**02-03: Refresh Token Rotation** — Add /api/auth/refresh with sliding expiry
+
+`/gsd:execute-phase 2`
+
+<sub>`/clear` first → fresh context window</sub>
+
+---
+
+**Also available:**
+- [View in Mosic](https://mosic.pro/app/MTask/[task-id]) — full context and history
+- `/gsd:progress` — current state summary
+
+---
+```
+
+### Sync Considerations
+
+**Before handoff:**
+1. Update MTask status to reflect current state
+2. Add any blockers or notes as comments
+3. Create handoff page if context is complex
+
+**On resume:**
+1. Load fresh state from Mosic (not stale local files)
+2. Check for external updates (other agents, manual changes)
+3. Verify task is still assigned and not blocked

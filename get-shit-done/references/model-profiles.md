@@ -71,3 +71,55 @@ Verification requires goal-backward reasoning - checking if code *delivers* what
 
 **Why Haiku for gsd-codebase-mapper?**
 Read-only exploration and pattern extraction. No reasoning required, just structured output from file contents.
+
+## Mosic MCP Considerations
+
+### Token Cost for Mosic Operations
+
+Mosic MCP calls add token overhead. Factor this into profile selection:
+
+| Operation | Typical Tokens | Impact |
+|-----------|----------------|--------|
+| `mosic_get_project` | 200-500 | Low |
+| `mosic_get_task_list` (with tasks) | 500-2000 | Medium |
+| `mosic_get_entity_pages` | 300-1500 | Medium |
+| `mosic_search_tasks` | 200-1000 | Low-Medium |
+| `mosic_create_document` | 100-300 | Low |
+| `mosic_update_content_blocks` | 200-800 | Medium |
+
+### Profile Adjustments for Mosic-Heavy Workflows
+
+When workflows involve significant Mosic state management:
+
+**quality profile:**
+- Mosic context loading is acceptable overhead
+- Full project state available for decisions
+
+**balanced profile:**
+- Load Mosic context selectively
+- Cache entity IDs across agent calls
+- Prefer `include_tasks: false` when task details not needed
+
+**budget profile:**
+- Minimize Mosic calls
+- Use local state files as primary source
+- Sync to Mosic only at major milestones
+
+### Agent-Specific Mosic Usage
+
+| Agent | Mosic Usage | Notes |
+|-------|-------------|-------|
+| gsd-planner | High | Needs full context for task decomposition |
+| gsd-executor | Low | Uses local PLAN.md, syncs on completion |
+| gsd-verifier | Medium | Checks against Mosic requirements |
+| gsd-progress | High | Derives state from Mosic |
+| gsd-roadmapper | Medium | Creates/updates task lists |
+
+### Cost Optimization
+
+For budget-conscious workflows:
+
+1. **Batch reads:** Use `mosic_get_project` with `include_task_lists: true` instead of multiple calls
+2. **Cache IDs:** Store entity IDs in `.planning/config.json` to avoid lookups
+3. **Lazy sync:** Update Mosic only on phase completion, not per-task
+4. **Local-first:** Use local markdown files during execution, sync at checkpoints

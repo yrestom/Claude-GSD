@@ -261,3 +261,111 @@ Each phase involves reading files, running commands, analyzing output. The back-
 
 Single feature focus ensures full quality throughout the cycle.
 </context_budget>
+
+<mosic_test_tracking>
+
+## Mosic Test Tracking
+
+When Mosic integration is enabled, track TDD progress in the task structure.
+
+### MTask Checklist for TDD
+
+Create checklist items for each TDD phase:
+
+```javascript
+// When creating TDD task
+await mosic_create_document("MTask", {
+  title: "Implement email validation (TDD)",
+  task_list: phase_task_list_id,
+  description: `Feature: Email validation with RFC 5322 compliance
+
+Behavior:
+- Valid formats accepted: user@domain.com, user+tag@domain.co.uk
+- Invalid formats rejected: @domain, user@, plaintext
+- Empty input returns false`,
+  checklist: [
+    { label: "RED: Write failing test", checked: false },
+    { label: "GREEN: Implement to pass", checked: false },
+    { label: "REFACTOR: Clean up (if needed)", checked: false }
+  ]
+});
+```
+
+### Updating TDD Progress
+
+As each phase completes:
+
+```javascript
+// After RED phase commit
+await mosic_update_document("MTask", task_id, {
+  checklist: [
+    { label: "RED: Write failing test", checked: true },
+    { label: "GREEN: Implement to pass", checked: false },
+    { label: "REFACTOR: Clean up (if needed)", checked: false }
+  ]
+});
+
+// Add commit reference as comment
+await mosic_create_document("M Comment", {
+  parent_doctype: "MTask",
+  parent_name: task_id,
+  content: "RED phase complete: test(08-02): add failing test for email validation\nCommit: abc123"
+});
+```
+
+### Test Results Page
+
+For complex TDD features, create a test results page:
+
+```javascript
+await mosic_create_entity_page("MTask", task_id, {
+  title: "Test Results: Email Validation",
+  page_type: "Document",
+  tags: ["tdd", "test-results"],
+  content: `
+## Test Cases
+
+| Case | Input | Expected | Status |
+|------|-------|----------|--------|
+| Valid email | user@domain.com | true | PASS |
+| Plus addressing | user+tag@domain.com | true | PASS |
+| Missing @ | userdomain.com | false | PASS |
+| Empty | "" | false | PASS |
+
+## Coverage
+
+- Lines: 95%
+- Branches: 100%
+- Functions: 100%
+`
+});
+```
+
+### TDD Tags
+
+Use consistent tags for TDD artifacts:
+
+- `tdd` - TDD-managed task
+- `test-results` - Test results documentation
+- `red-phase`, `green-phase`, `refactor-phase` - Phase markers
+
+### Querying TDD Tasks
+
+Find TDD tasks across the project:
+
+```javascript
+// Find all TDD tasks
+const tddTasks = await mosic_search_documents_by_tags({
+  tags: ["tdd"],
+  doctypes: ["MTask"],
+  project_id: project_id
+});
+
+// Find tasks needing GREEN phase
+const pendingGreen = await mosic_search_tasks({
+  project_id: project_id,
+  checklist_incomplete: "GREEN: Implement to pass"
+});
+```
+
+</mosic_test_tracking>

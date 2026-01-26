@@ -610,3 +610,136 @@ Key principles:
 - Error handling: fix broken environment before checkpoint, never present checkpoint with failed setup
 
 </checkpoint_automation_reference>
+
+<mosic_verification_sync>
+
+## Syncing Verification Results to Mosic
+
+When verification completes, sync results to the corresponding Mosic entities.
+
+### Verification Report Page
+
+Create a verification page linked to the task or phase:
+
+```javascript
+// Create verification report page
+await mosic_create_entity_page("MTask List", phase_task_list_id, {
+  title: `Verification Report: Phase ${phase_number}`,
+  page_type: "Document",
+  tags: ["verification", "report", `phase-${phase_number}`],
+  content: verificationMarkdown
+});
+```
+
+### Verification Status Updates
+
+Map verification results to MTask status:
+
+| Verification Result | MTask Update |
+|---------------------|--------------|
+| All checks pass | status: "Done" |
+| Some checks fail | status: "Blocked", add blocker comment |
+| Critical failure | status: "Blocked", create issue task |
+| Needs human review | status: "In Progress", add review checklist |
+
+### Creating Issue Tasks for Failures
+
+When verification fails, create issue tasks automatically:
+
+```javascript
+// For each failed verification check
+for (const failure of failedChecks) {
+  await mosic_create_document("MTask", {
+    title: `Fix: ${failure.artifact} - ${failure.issue}`,
+    task_list: phase_task_list_id,
+    status: "To Do",
+    priority: "High",
+    description: `
+## Verification Failure
+
+**Artifact:** ${failure.artifact}
+**Check:** ${failure.checkType}
+**Issue:** ${failure.issue}
+
+## Expected
+${failure.expected}
+
+## Actual
+${failure.actual}
+
+## Suggested Fix
+${failure.suggestion}
+`,
+    tags: ["verification-failure", "bug"]
+  });
+}
+```
+
+### Linking Verification to Source Tasks
+
+Create relations between verification results and original tasks:
+
+```javascript
+// Link verification page to source task
+await mosic_create_document("M Relation", {
+  source_doctype: "M Page",
+  source_name: verification_page_id,
+  target_doctype: "MTask",
+  target_name: original_task_id,
+  relation_type: "Related"
+});
+```
+
+### Verification Summary in Mosic
+
+Update project/phase with verification metrics:
+
+```javascript
+// Add verification summary to phase
+await mosic_update_content_blocks(phase_overview_page_id, [{
+  type: "paragraph",
+  content: `## Verification Summary
+
+- **Total Checks:** ${total}
+- **Passed:** ${passed} ✓
+- **Failed:** ${failed} ✗
+- **Needs Review:** ${needsReview} ◆
+
+Last verified: ${timestamp}`
+}]);
+```
+
+### Automated vs Human Verification Tracking
+
+Track which verifications were automated vs human:
+
+```javascript
+// Tag verification results by type
+await mosic_batch_add_tags_to_document("M Page", verification_page_id, [
+  "verification",
+  passed ? "auto-verified" : "human-verified",
+  `phase-${phase_number}`
+]);
+```
+
+### Querying Verification Status
+
+Find tasks needing verification:
+
+```javascript
+// Find unverified completed tasks
+const unverified = await mosic_search_tasks({
+  project_id: project_id,
+  status: "Done",
+  tags_exclude: ["verified"]
+});
+
+// Find verification failures
+const failures = await mosic_search_documents_by_tags({
+  tags: ["verification-failure"],
+  doctypes: ["MTask"],
+  project_id: project_id
+});
+```
+
+</mosic_verification_sync>

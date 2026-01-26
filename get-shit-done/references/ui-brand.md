@@ -157,4 +157,81 @@ Always at end of major completions.
 - Random emoji (`🚀`, `✨`, `💫`)
 - Missing Next Up block after completions
 
+---
+
+## Mosic URL Display Patterns
+
+When displaying Mosic entity references, use consistent formatting.
+
+### Entity Links
+
+```
+**Project:** [Project Name](https://mosic.pro/app/MProject/[id])
+**Phase:** [Phase Name](https://mosic.pro/app/MTask%20List/[id])
+**Task:** [Task Name](https://mosic.pro/app/MTask/[id])
+**Page:** [Page Title](https://mosic.pro/app/page/[id])
+```
+
+### In Progress Display
+
+```
+◆ Syncing to Mosic...
+  → Project: GET SHIT DONE (GSD)
+  → Phase: Authentication
+  → Task: Implement JWT validation
+
+✓ Mosic sync complete
+  View: https://mosic.pro/app/MTask/[id]
+```
+
+### Status with Mosic Reference
+
+```
+| Phase | Status | Mosic |
+|-------|--------|-------|
+| 1. Foundation | ✓ | [View](https://mosic.pro/app/MTask%20List/[id]) |
+| 2. Auth | ◆ | [View](https://mosic.pro/app/MTask%20List/[id]) |
+| 3. Features | ○ | [View](https://mosic.pro/app/MTask%20List/[id]) |
+```
+
+### Next Up with Mosic Context
+
+```
+───────────────────────────────────────────────────────────────
+
+## ▶ Next Up
+
+**Phase 2: Authentication** — JWT login flow with refresh tokens
+
+`/gsd:plan-phase 2`
+
+<sub>`/clear` first → fresh context window</sub>
+
+[View in Mosic](https://mosic.pro/app/MTask%20List/[id])
+
+───────────────────────────────────────────────────────────────
+```
+
+### Error with Mosic Sync Failure
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  WARNING                                                     ║
+╚══════════════════════════════════════════════════════════════╝
+
+Mosic sync failed: [error reason]
+Local state saved to .planning/STATE.md
+
+**To retry:** `/gsd:progress --sync`
+```
+
+### Mosic-Specific Symbols
+
+```
+⟳  Syncing to Mosic
+⇄  Mosic conflict detected
+☁  Mosic connection active
+⚡ Local-only mode (Mosic disabled)
+```
+
 </ui_patterns>

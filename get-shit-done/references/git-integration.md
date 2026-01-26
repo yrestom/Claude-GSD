@@ -252,3 +252,99 @@ Each plan produces 2-4 commits (tasks + metadata). Clear, granular, bisectable.
 - "Commit noise" irrelevant when consumer is Claude, not humans
 
 </commit_strategy_rationale>
+
+<mosic_sync>
+
+## Mosic Sync on Commit
+
+When `sync_on_commit` is enabled in config, commits trigger Mosic updates.
+
+### Sync Behavior
+
+| Commit Type | Mosic Action |
+|-------------|--------------|
+| Task completion (`feat`, `fix`, `test`, `refactor`) | Update MTask status, add commit reference |
+| Plan completion (`docs`) | Update MTask List progress, create summary page |
+| Project init (`docs: initialize`) | Update MProject, link commit |
+| Handoff (`wip`) | Update MTask with WIP state |
+
+### Implementation Pattern
+
+```javascript
+// After successful git commit
+const commitHash = getLastCommitHash();
+const commitType = parseCommitType(commitMessage);
+
+if (commitType === 'task') {
+  // Update task with commit reference
+  await mosic_update_document("MTask", task_id, {
+    status: "Done"
+  });
+
+  // Add commit as comment
+  await mosic_create_document("M Comment", {
+    parent_doctype: "MTask",
+    parent_name: task_id,
+    content: `Committed: ${commitHash}\n${commitMessage}`
+  });
+}
+
+if (commitType === 'plan') {
+  // Update task list progress
+  const taskList = await mosic_get_task_list(task_list_id, { include_tasks: true });
+  const completedTasks = taskList.tasks.filter(t => t.done).length;
+
+  // Create or update summary page
+  await mosic_create_entity_page("MTask List", task_list_id, {
+    title: `Plan ${plan_id} Summary`,
+    page_type: "Document",
+    tags: ["summary", `plan-${plan_id}`]
+  });
+}
+```
+
+### Commit → Mosic Mapping
+
+```
+feat(08-02): create user registration endpoint
+      │  │
+      │  └── Plan ID → Find MTask by plan reference
+      └────── Phase ID → Find MTask List
+
+docs(08-02): complete registration flow plan
+      │  │
+      │  └── Plan ID → Create/update summary page
+      └────── Phase ID → Update MTask List progress
+```
+
+### Sync Configuration
+
+In `.planning/config.json`:
+
+```json
+{
+  "mosic": {
+    "sync_on_commit": true,
+    "project_id": "081aca99-8742-4b63-94a2-e5724abfac2f",
+    "workspace_id": "b0dd6682-3b21-4556-aeba-59229d454a27"
+  }
+}
+```
+
+### When NOT to Sync
+
+- Failed commits (pre-commit hook failures)
+- Amend commits (already synced)
+- Rebase/squash operations (history rewrite)
+- Local-only branches (not ready for tracking)
+
+### Conflict Resolution
+
+If Mosic task was updated externally:
+
+1. Fetch current Mosic state before commit
+2. Compare with expected state
+3. If conflict: warn user, don't overwrite
+4. Manual resolution: `/gsd:progress --sync` to reconcile
+
+</mosic_sync>
