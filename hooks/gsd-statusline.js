@@ -71,12 +71,31 @@ process.stdin.on('end', () => {
       } catch (e) {}
     }
 
+    // Mosic sync status
+    let mosicStatus = '';
+    const configFile = path.join(dir, '.planning', 'config.json');
+    if (fs.existsSync(configFile)) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+        if (config.mosic?.enabled) {
+          const pendingCount = config.mosic?.pending_sync?.length || 0;
+          if (pendingCount > 0) {
+            // Yellow warning - pending sync items
+            mosicStatus = `\x1b[33m◐ ${pendingCount}\x1b[0m │ `;
+          } else {
+            // Green - synced
+            mosicStatus = '\x1b[32m◉\x1b[0m │ ';
+          }
+        }
+      } catch (e) {}
+    }
+
     // Output
     const dirname = path.basename(dir);
     if (task) {
-      process.stdout.write(`${gsdUpdate}\x1b[2m${model}\x1b[0m │ \x1b[1m${task}\x1b[0m │ \x1b[2m${dirname}\x1b[0m${ctx}`);
+      process.stdout.write(`${gsdUpdate}${mosicStatus}\x1b[2m${model}\x1b[0m │ \x1b[1m${task}\x1b[0m │ \x1b[2m${dirname}\x1b[0m${ctx}`);
     } else {
-      process.stdout.write(`${gsdUpdate}\x1b[2m${model}\x1b[0m │ \x1b[2m${dirname}\x1b[0m${ctx}`);
+      process.stdout.write(`${gsdUpdate}${mosicStatus}\x1b[2m${model}\x1b[0m │ \x1b[2m${dirname}\x1b[0m${ctx}`);
     }
   } catch (e) {
     // Silent fail - don't break statusline on parse errors
