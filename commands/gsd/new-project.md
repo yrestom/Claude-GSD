@@ -555,8 +555,12 @@ questions: [
 - Add `config.json` to `.gitignore` (create if needed)
 
 **If commit_docs = Yes:**
-- Commit config.json:
 
+Use AskUserQuestion to confirm:
+- Question: "Commit GSD project config to git?"
+- Options: "Yes, commit" / "No, skip commit"
+
+**If user approves:**
 ```bash
 git add config.json
 git commit -m "$(cat <<'EOF'
@@ -1006,6 +1010,11 @@ If "adjust": Return to scoping.
 
 **Commit config.json update (if commit_docs = true):**
 
+Use AskUserQuestion to confirm:
+- Question: "Commit requirements update to git?"
+- Options: "Yes, commit" / "No, skip commit"
+
+**If user approves:**
 ```bash
 git add config.json
 git commit -m "$(cat <<'EOF'
@@ -1215,6 +1224,11 @@ Then re-ask.
 
 **Commit config.json (if commit_docs = true):**
 
+Use AskUserQuestion to confirm:
+- Question: "Commit roadmap to git?"
+- Options: "Yes, commit" / "No, skip commit"
+
+**If user approves:**
 ```bash
 git add config.json
 git commit -m "$(cat <<'EOF'

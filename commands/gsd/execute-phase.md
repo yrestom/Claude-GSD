@@ -538,7 +538,13 @@ IF config.mosic.pages.requirements:
 git status --porcelain
 ```
 
-**If changes exist:** Orchestrator made corrections between executor completions. Commit them:
+**If changes exist:** Orchestrator made corrections between executor completions.
+
+Use AskUserQuestion to confirm:
+- Question: "Commit orchestrator corrections?"
+- Options: "Yes, commit changes" / "No, skip commit"
+
+**If user approves:**
 ```bash
 git add -u && git commit -m "fix({phase}): orchestrator corrections"
 ```
