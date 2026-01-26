@@ -3,7 +3,7 @@ TDD is about design quality, not coverage metrics. The red-green-refactor cycle 
 
 **Principle:** If you can describe the behavior as `expect(fn(input)).toBe(output)` before writing `fn`, TDD improves the result.
 
-**Key insight:** TDD work is fundamentally heavier than standard tasks—it requires 2-3 execution cycles (RED → GREEN → REFACTOR), each with file reads, test runs, and potential debugging. TDD features get dedicated plans to ensure full context is available throughout the cycle.
+**Key insight:** TDD work is fundamentally heavier than standard tasks - it requires 2-3 execution cycles (RED -> GREEN -> REFACTOR), each with file reads, test runs, and potential debugging. TDD features get dedicated plans to ensure full context is available throughout the cycle.
 </overview>
 
 <when_to_use_tdd>
@@ -27,14 +27,14 @@ TDD is about design quality, not coverage metrics. The red-green-refactor cycle 
 - Exploratory prototyping
 
 **Heuristic:** Can you write `expect(fn(input)).toBe(output)` before writing `fn`?
-→ Yes: Create a TDD plan
-→ No: Use standard plan, add tests after if needed
+-> Yes: Create a TDD plan
+-> No: Use standard plan, add tests after if needed
 </when_to_use_tdd>
 
 <tdd_plan_structure>
 ## TDD Plan Structure
 
-Each TDD plan implements **one feature** through the full RED-GREEN-REFACTOR cycle.
+Each TDD plan implements **one feature** through the full RED-GREEN-REFACTOR cycle. Plan content is stored in Mosic M Pages.
 
 ```markdown
 ---
@@ -50,9 +50,10 @@ Output: [Working, tested feature]
 </objective>
 
 <context>
-@.planning/PROJECT.md
-@.planning/ROADMAP.md
-@relevant/source/files.ts
+Load from Mosic:
+- mosic_get_page(requirements_page_id, { content_format: "markdown" })
+- mosic_get_page(roadmap_page_id, { content_format: "markdown" })
+- Relevant source files via Read tool
 </context>
 
 <feature>
@@ -60,7 +61,7 @@ Output: [Working, tested feature]
   <files>[source file, test file]</files>
   <behavior>
     [Expected behavior in testable terms]
-    Cases: input → expected output
+    Cases: input -> expected output
   </behavior>
   <implementation>[How to implement once tests pass]</implementation>
 </feature>
@@ -77,7 +78,7 @@ Output: [Working, tested feature]
 </success_criteria>
 
 <output>
-After completion, create SUMMARY.md with:
+After completion, create summary page in Mosic with:
 - RED: What test was written, why it failed
 - GREEN: What implementation made it pass
 - REFACTOR: What cleanup was done (if any)
@@ -85,7 +86,7 @@ After completion, create SUMMARY.md with:
 </output>
 ```
 
-**One feature per TDD plan.** If features are trivial enough to batch, they're trivial enough to skip TDD—use a standard plan and add tests after.
+**One feature per TDD plan.** If features are trivial enough to batch, they're trivial enough to skip TDD - use a standard plan and add tests after.
 </tdd_plan_structure>
 
 <execution_flow>
@@ -266,7 +267,7 @@ Single feature focus ensures full quality throughout the cycle.
 
 ## Mosic Test Tracking
 
-When Mosic integration is enabled, track TDD progress in the task structure.
+TDD progress is tracked in Mosic task structure.
 
 ### MTask Checklist for TDD
 
@@ -283,12 +284,15 @@ Behavior:
 - Valid formats accepted: user@domain.com, user+tag@domain.co.uk
 - Invalid formats rejected: @domain, user@, plaintext
 - Empty input returns false`,
-  checklist: [
-    { label: "RED: Write failing test", checked: false },
-    { label: "GREEN: Implement to pass", checked: false },
-    { label: "REFACTOR: Clean up (if needed)", checked: false }
+  check_list: [
+    { label: "RED: Write failing test", checked: 0 },
+    { label: "GREEN: Implement to pass", checked: 0 },
+    { label: "REFACTOR: Clean up (if needed)", checked: 0 }
   ]
 });
+
+// Tag as TDD task
+await mosic_add_tag_to_document("MTask", task_id, "tdd");
 ```
 
 ### Updating TDD Progress
@@ -298,17 +302,18 @@ As each phase completes:
 ```javascript
 // After RED phase commit
 await mosic_update_document("MTask", task_id, {
-  checklist: [
-    { label: "RED: Write failing test", checked: true },
-    { label: "GREEN: Implement to pass", checked: false },
-    { label: "REFACTOR: Clean up (if needed)", checked: false }
+  check_list: [
+    { label: "RED: Write failing test", checked: 1 },
+    { label: "GREEN: Implement to pass", checked: 0 },
+    { label: "REFACTOR: Clean up (if needed)", checked: 0 }
   ]
 });
 
 // Add commit reference as comment
 await mosic_create_document("M Comment", {
-  parent_doctype: "MTask",
-  parent_name: task_id,
+  comment_type: "Comment",
+  reference_doctype: "MTask",
+  reference_name: task_id,
   content: "RED phase complete: test(08-02): add failing test for email validation\nCommit: abc123"
 });
 ```
@@ -320,10 +325,13 @@ For complex TDD features, create a test results page:
 ```javascript
 await mosic_create_entity_page("MTask", task_id, {
   title: "Test Results: Email Validation",
-  page_type: "Document",
-  tags: ["tdd", "test-results"],
-  content: `
-## Test Cases
+  page_type: "Document"
+});
+
+await mosic_update_content_blocks(test_results_page_id, [{
+  type: "paragraph",
+  data: {
+    text: `## Test Cases
 
 | Case | Input | Expected | Status |
 |------|-------|----------|--------|
@@ -336,9 +344,15 @@ await mosic_create_entity_page("MTask", task_id, {
 
 - Lines: 95%
 - Branches: 100%
-- Functions: 100%
-`
-});
+- Functions: 100%`
+  }
+}]);
+
+// Tag the page
+await mosic_batch_add_tags_to_document("M Page", test_results_page_id, [
+  "tdd",
+  "test-results"
+]);
 ```
 
 ### TDD Tags
@@ -358,14 +372,54 @@ Find TDD tasks across the project:
 const tddTasks = await mosic_search_documents_by_tags({
   tags: ["tdd"],
   doctypes: ["MTask"],
-  project_id: project_id
+  project_id: config.project_id
 });
 
-// Find tasks needing GREEN phase
-const pendingGreen = await mosic_search_tasks({
-  project_id: project_id,
-  checklist_incomplete: "GREEN: Implement to pass"
+// Find incomplete TDD tasks
+const incompleteTdd = await mosic_search_tasks({
+  project_id: config.project_id,
+  status: "In Progress",
+  tags: ["tdd"]
 });
+```
+
+### TDD Summary Page
+
+After TDD task completion, create a summary page in Mosic (not a local file):
+
+```javascript
+const summaryPage = await mosic_create_entity_page("MTask", task_id, {
+  title: `TDD Summary: ${feature_name}`,
+  page_type: "Document",
+  icon: "lucide:check-circle"
+});
+
+await mosic_update_content_blocks(summaryPage.name, [{
+  type: "paragraph",
+  data: {
+    text: `## TDD Summary
+
+### RED Phase
+- Test file: ${testFile}
+- Behavior tested: ${behaviorDescription}
+- Initial failure: ${failureReason}
+- Commit: ${redCommitHash}
+
+### GREEN Phase
+- Implementation: ${implementationApproach}
+- Commit: ${greenCommitHash}
+
+### REFACTOR Phase
+- Changes: ${refactorChanges || "None needed"}
+- Commit: ${refactorCommitHash || "N/A"}
+
+### Test Coverage
+- Lines: ${coverage.lines}%
+- Branches: ${coverage.branches}%`
+  }
+}]);
+
+await mosic_add_tag_to_document("M Page", summaryPage.name, "summary");
 ```
 
 </mosic_test_tracking>

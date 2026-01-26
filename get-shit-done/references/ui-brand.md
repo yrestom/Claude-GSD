@@ -220,9 +220,9 @@ When displaying Mosic entity references, use consistent formatting.
 ╚══════════════════════════════════════════════════════════════╝
 
 Mosic sync failed: [error reason]
-Local state saved to .planning/STATE.md
 
 **To retry:** `/gsd:progress --sync`
+**Check connection:** Verify Mosic MCP server is running
 ```
 
 ### Mosic-Specific Symbols

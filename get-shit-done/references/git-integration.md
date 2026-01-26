@@ -1,5 +1,5 @@
 <overview>
-Git integration for GSD framework.
+Git integration for GSD framework. Commits trigger Mosic task updates when sync is enabled.
 </overview>
 
 <core_principle>
@@ -7,19 +7,21 @@ Git integration for GSD framework.
 **Commit outcomes, not process.**
 
 The git log should read like a changelog of what shipped, not a diary of planning activity.
+
+**Mosic integration:** Commits update MTask status and create completion records. No local planning files to commit.
 </core_principle>
 
 <commit_points>
 
-| Event                   | Commit? | Why                                              |
-| ----------------------- | ------- | ------------------------------------------------ |
-| BRIEF + ROADMAP created | YES     | Project initialization                           |
-| PLAN.md created         | NO      | Intermediate - commit with plan completion       |
-| RESEARCH.md created     | NO      | Intermediate                                     |
-| DISCOVERY.md created    | NO      | Intermediate                                     |
-| **Task completed**      | YES     | Atomic unit of work (1 commit per task)         |
-| **Plan completed**      | YES     | Metadata commit (SUMMARY + STATE + ROADMAP)     |
-| Handoff created         | YES     | WIP state preserved                              |
+| Event                   | Commit? | Mosic Update |
+| ----------------------- | ------- | ------------ |
+| Project initialized     | YES     | MProject status: Active |
+| Phase started           | NO      | MTask List status: In Progress |
+| **Task completed**      | YES     | MTask status: Done, commit reference added |
+| **Plan completed**      | YES     | Summary page created, MTask List progress updated |
+| Handoff created         | NO      | Handoff comment/page created on MTask |
+
+**Note:** Planning artifacts (requirements, roadmaps, research) are stored in Mosic M Pages, not committed to git.
 
 </commit_points>
 
@@ -35,12 +37,12 @@ If NO_GIT: Run `git init` silently. GSD projects always get their own repo.
 <commit_formats>
 
 <format name="initialization">
-## Project Initialization (brief + roadmap together)
+## Project Initialization
 
 ```
 docs: initialize [project-name] ([N] phases)
 
-[One-liner from PROJECT.md]
+[One-liner from project description]
 
 Phases:
 1. [phase-name]: [goal]
@@ -51,8 +53,24 @@ Phases:
 What to commit:
 
 ```bash
-git add .planning/
+# Only actual code/config files, not planning docs
+git add package.json tsconfig.json .gitignore src/
 git commit
+```
+
+**Mosic sync:**
+```javascript
+await mosic_update_document("MProject", project_id, {
+  status: "Active"
+});
+
+// Add commit reference as comment
+await mosic_create_document("M Comment", {
+  comment_type: "Comment",
+  reference_doctype: "MProject",
+  reference_name: project_id,
+  content: `Project initialized\nCommit: ${commitHash}`
+});
 ```
 
 </format>
@@ -109,12 +127,34 @@ git commit -m "feat(07-02): implement JWT generation
 "
 ```
 
+**Mosic sync after task commit:**
+```javascript
+// Update task status
+await mosic_update_document("MTask", task_id, {
+  status: "Done"
+});
+
+// Mark task as completed
+await mosic_complete_task(task_id);
+
+// Add commit reference as comment
+await mosic_create_document("M Comment", {
+  comment_type: "Comment",
+  reference_doctype: "MTask",
+  reference_name: task_id,
+  content: `**Task Completed**
+Commit: ${commitHash}
+Type: ${commitType}
+Message: ${commitMessage}`
+});
+```
+
 </format>
 
 <format name="plan-completion">
 ## Plan Completion (After All Tasks Done)
 
-After all tasks committed, one final metadata commit captures plan completion.
+After all tasks committed, one final commit captures any remaining changes.
 
 ```
 docs({phase}-{plan}): complete [plan-name] plan
@@ -123,39 +163,87 @@ Tasks completed: [N]/[N]
 - [Task 1 name]
 - [Task 2 name]
 - [Task 3 name]
-
-SUMMARY: .planning/phases/XX-name/{phase}-{plan}-SUMMARY.md
 ```
 
 What to commit:
 
 ```bash
-git add .planning/phases/XX-name/{phase}-{plan}-PLAN.md
-git add .planning/phases/XX-name/{phase}-{plan}-SUMMARY.md
-git add .planning/STATE.md
-git add .planning/ROADMAP.md
+# Any remaining files not committed with individual tasks
+git add .
 git commit
 ```
 
-**Note:** Code files NOT included - already committed per-task.
+**Note:** No local planning files to commit. Summary is created in Mosic.
+
+**Mosic sync after plan completion:**
+```javascript
+// Get task list to calculate progress
+const taskList = await mosic_get_task_list(task_list_id, { include_tasks: true });
+const completedTasks = taskList.tasks.filter(t => t.done).length;
+const totalTasks = taskList.tasks.length;
+
+// Create summary page linked to task list
+const summaryPage = await mosic_create_entity_page("MTask List", task_list_id, {
+  title: `Plan ${plan_id} Summary`,
+  page_type: "Document",
+  icon: "lucide:check-circle"
+});
+
+await mosic_update_content_blocks(summaryPage.name, [{
+  type: "paragraph",
+  data: {
+    text: `## Plan Completion Summary
+
+**Tasks Completed:** ${completedTasks}/${totalTasks}
+
+### Commits
+${commits.map(c => `- ${c.hash}: ${c.message}`).join('\n')}
+
+### Files Changed
+${filesChanged.join('\n')}
+
+**Completed at:** ${new Date().toISOString()}`
+  }
+}]);
+
+// Tag summary page
+await mosic_add_tag_to_document("M Page", summaryPage.name, "summary");
+await mosic_add_tag_to_document("M Page", summaryPage.name, `plan-${plan_id}`);
+```
 
 </format>
 
 <format name="handoff">
 ## Handoff (WIP)
 
+Handoffs don't require git commits. State is preserved in Mosic.
+
+**Mosic handoff:**
+```javascript
+// Add handoff context as task comment
+await mosic_create_document("M Comment", {
+  comment_type: "Comment",
+  reference_doctype: "MTask",
+  reference_name: task_id,
+  content: `**Session Handoff**
+Status: ${currentStatus}
+Progress: Task ${currentTask}/${totalTasks}
+Next: ${nextStep}
+Timestamp: ${new Date().toISOString()}`
+});
+
+// Update session state in config.json
+config.session = {
+  current_phase_id: phase_id,
+  current_task_id: task_id,
+  active_plan_number: plan_number,
+  last_sync: new Date().toISOString()
+};
 ```
-wip: [phase-name] paused at task [X]/[Y]
 
-Current: [task name]
-[If blocked:] Blocked: [reason]
-```
-
-What to commit:
-
+If uncommitted code changes exist:
 ```bash
-git add .planning/
-git commit
+git stash -m "WIP: [phase-name] task [X]/[Y]"
 ```
 
 </format>
@@ -163,16 +251,7 @@ git commit
 
 <example_log>
 
-**Old approach (per-plan commits):**
-```
-a7f2d1 feat(checkout): Stripe payments with webhook verification
-3e9c4b feat(products): catalog with search, filters, and pagination
-8a1b2c feat(auth): JWT with refresh rotation using jose
-5c3d7e feat(foundation): Next.js 15 + Prisma + Tailwind scaffold
-2f4a8d docs: initialize ecommerce-app (5 phases)
-```
-
-**New approach (per-task commits):**
+**Per-task commits (recommended):**
 ```
 # Phase 04 - Checkout
 1a2b3c docs(04-01): complete checkout flow plan
@@ -210,19 +289,19 @@ Each plan produces 2-4 commits (tasks + metadata). Clear, granular, bisectable.
 
 <anti_patterns>
 
-**Still don't commit (intermediate artifacts):**
-- PLAN.md creation (commit with plan completion)
-- RESEARCH.md (intermediate)
-- DISCOVERY.md (intermediate)
-- Minor planning tweaks
-- "Fixed typo in roadmap"
+**Don't commit (no local planning files):**
+- PLAN.md (doesn't exist - plans are in Mosic M Pages)
+- RESEARCH.md (doesn't exist)
+- SUMMARY.md (doesn't exist - summaries are in Mosic)
+- STATE.md (doesn't exist - state is in Mosic)
+- ROADMAP.md (doesn't exist - roadmap is in Mosic)
 
-**Do commit (outcomes):**
+**Do commit (code outcomes):**
 - Each task completion (feat/fix/test/refactor)
-- Plan completion metadata (docs)
 - Project initialization (docs)
+- Configuration files (package.json, tsconfig.json, etc.)
 
-**Key principle:** Commit working code and shipped outcomes, not planning process.
+**Key principle:** Commit working code and shipped outcomes. Documentation lives in Mosic M Pages.
 
 </anti_patterns>
 
@@ -234,11 +313,11 @@ Each plan produces 2-4 commits (tasks + metadata). Clear, granular, bisectable.
 - Git history becomes primary context source for future Claude sessions
 - `git log --grep="{phase}-{plan}"` shows all work for a plan
 - `git diff <hash>^..<hash>` shows exact changes per task
-- Less reliance on parsing SUMMARY.md = more context for actual work
+- Mosic has the full context; git has the code history
 
 **Failure recovery:**
-- Task 1 committed ✅, Task 2 failed ❌
-- Claude in next session: sees task 1 complete, can retry task 2
+- Task 1 committed, Task 2 failed
+- Claude in next session: sees task 1 complete in git AND Mosic, can retry task 2
 - Can `git reset --hard` to last successful task
 
 **Debugging:**
@@ -249,24 +328,23 @@ Each plan produces 2-4 commits (tasks + metadata). Clear, granular, bisectable.
 **Observability:**
 - Solo developer + Claude workflow benefits from granular attribution
 - Atomic commits are git best practice
-- "Commit noise" irrelevant when consumer is Claude, not humans
+- Mosic provides the "why", git provides the "what"
 
 </commit_strategy_rationale>
 
-<mosic_sync>
+<mosic_sync_on_commit>
 
 ## Mosic Sync on Commit
 
-When `sync_on_commit` is enabled in config, commits trigger Mosic updates.
+When `git.sync_on_commit` is enabled in config.json, commits trigger Mosic updates.
 
 ### Sync Behavior
 
 | Commit Type | Mosic Action |
 |-------------|--------------|
-| Task completion (`feat`, `fix`, `test`, `refactor`) | Update MTask status, add commit reference |
-| Plan completion (`docs`) | Update MTask List progress, create summary page |
-| Project init (`docs: initialize`) | Update MProject, link commit |
-| Handoff (`wip`) | Update MTask with WIP state |
+| Task completion (`feat`, `fix`, `test`, `refactor`) | MTask status: Done, commit comment added |
+| Plan completion (`docs`) | Summary page created, MTask List progress updated |
+| Project init (`docs: initialize`) | MProject status: Active, commit comment added |
 
 ### Implementation Pattern
 
@@ -274,59 +352,74 @@ When `sync_on_commit` is enabled in config, commits trigger Mosic updates.
 // After successful git commit
 const commitHash = getLastCommitHash();
 const commitType = parseCommitType(commitMessage);
+const { phase, plan } = parsePhaseAndPlan(commitMessage);
+
+// Load task from cached ID or search
+const task_id = config.entity_ids.tasks[`${phase}-${plan}`];
 
 if (commitType === 'task') {
-  // Update task with commit reference
+  // Update task status
   await mosic_update_document("MTask", task_id, {
     status: "Done"
   });
 
+  // Mark as completed
+  await mosic_complete_task(task_id);
+
   // Add commit as comment
   await mosic_create_document("M Comment", {
-    parent_doctype: "MTask",
-    parent_name: task_id,
-    content: `Committed: ${commitHash}\n${commitMessage}`
+    comment_type: "Comment",
+    reference_doctype: "MTask",
+    reference_name: task_id,
+    content: `**Committed:** ${commitHash}\n${commitMessage}`
   });
 }
 
 if (commitType === 'plan') {
-  // Update task list progress
+  // Get task list for progress calculation
+  const task_list_id = config.entity_ids.task_lists[`phase_${phase}`];
   const taskList = await mosic_get_task_list(task_list_id, { include_tasks: true });
-  const completedTasks = taskList.tasks.filter(t => t.done).length;
 
-  // Create or update summary page
-  await mosic_create_entity_page("MTask List", task_list_id, {
-    title: `Plan ${plan_id} Summary`,
-    page_type: "Document",
-    tags: ["summary", `plan-${plan_id}`]
+  // Create summary page
+  const summaryPage = await mosic_create_entity_page("MTask List", task_list_id, {
+    title: `Plan ${plan} Summary`,
+    page_type: "Document"
   });
+
+  // Tag the summary
+  await mosic_add_tag_to_document("M Page", summaryPage.name, "summary");
 }
 ```
 
-### Commit → Mosic Mapping
+### Commit -> Mosic Mapping
 
 ```
 feat(08-02): create user registration endpoint
-      │  │
-      │  └── Plan ID → Find MTask by plan reference
-      └────── Phase ID → Find MTask List
-
-docs(08-02): complete registration flow plan
-      │  │
-      │  └── Plan ID → Create/update summary page
-      └────── Phase ID → Update MTask List progress
+      |  |
+      |  +-- Plan ID -> Find MTask by cached ID or plan reference
+      +------ Phase ID -> Find MTask List
 ```
 
 ### Sync Configuration
 
-In `.planning/config.json`:
+In `config.json`:
 
 ```json
 {
-  "mosic": {
-    "sync_on_commit": true,
-    "project_id": "081aca99-8742-4b63-94a2-e5724abfac2f",
-    "workspace_id": "b0dd6682-3b21-4556-aeba-59229d454a27"
+  "workspace_id": "...",
+  "project_id": "...",
+  "git": {
+    "sync_on_commit": true
+  },
+  "entity_ids": {
+    "task_lists": {
+      "phase_1": "task-list-uuid",
+      "phase_2": "task-list-uuid"
+    },
+    "tasks": {
+      "01-01": "task-uuid",
+      "01-02": "task-uuid"
+    }
   }
 }
 ```
@@ -347,4 +440,73 @@ If Mosic task was updated externally:
 3. If conflict: warn user, don't overwrite
 4. Manual resolution: `/gsd:progress --sync` to reconcile
 
-</mosic_sync>
+```javascript
+// Check for conflicts before sync
+const task = await mosic_get_task(task_id);
+
+if (task.modified !== config.session.last_sync) {
+  console.warn(`Task ${task_id} was modified externally. Skipping sync.`);
+  console.warn(`Run /gsd:progress --sync to reconcile.`);
+  return;
+}
+```
+
+</mosic_sync_on_commit>
+
+<no_local_planning_files>
+
+## No Local Planning Files
+
+GSD with Mosic does NOT create or commit local planning files:
+
+**Not created:**
+- `.planning/` directory
+- `PLAN.md`, `SUMMARY.md`, `STATE.md`
+- `REQUIREMENTS.md`, `ROADMAP.md`
+- `RESEARCH.md`, `CONTEXT.md`
+
+**Where this content lives:**
+- Requirements -> M Page linked to MProject (tag: requirements)
+- Roadmap -> M Page linked to MProject (tag: roadmap)
+- Phase plans -> M Page linked to MTask (tag: plan)
+- Summaries -> M Page linked to MTask List (tag: summary)
+- State -> MTask status (In Progress, Done, Blocked)
+- Research -> M Page linked to MTask List (tag: research)
+
+**Benefits:**
+- No merge conflicts on planning docs
+- Single source of truth (Mosic)
+- Cross-session visibility without git
+- Rich querying via Mosic search
+- Real-time collaboration support
+
+</no_local_planning_files>
+
+<config_file_handling>
+
+## Config File Handling
+
+The only GSD-related local file is `config.json`:
+
+```json
+{
+  "workspace_id": "...",
+  "project_id": "...",
+  "session": {...},
+  "entity_ids": {...},
+  "git": {"sync_on_commit": true}
+}
+```
+
+**Gitignore recommendation:**
+```
+# GSD session config (not committed)
+config.json
+```
+
+**Why not committed:**
+- Contains session-specific state
+- Entity IDs may change between environments
+- Mosic is the source of truth
+
+</config_file_handling>

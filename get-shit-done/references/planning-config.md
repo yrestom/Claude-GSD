@@ -1,197 +1,306 @@
 <planning_config>
 
-Configuration options for `.planning/` directory behavior and Mosic integration.
+Configuration options for Mosic MCP integration. GSD operates Mosic-first with no local planning files.
 
 <config_schema>
 ```json
 {
-  "planning": {
-    "commit_docs": true,
-    "search_gitignored": false
+  "workspace_id": "b0dd6682-3b21-4556-aeba-59229d454a27",
+  "project_id": "081aca99-8742-4b63-94a2-e5724abfac2f",
+  "space_id": null,
+  "session": {
+    "current_phase_id": null,
+    "current_task_id": null,
+    "active_plan_number": null,
+    "last_sync": null
   },
-  "mosic": {
-    "enabled": false,
-    "workspace_id": null,
-    "space_id": null,
-    "project_id": null,
-    "sync_on_commit": true,
-    "auto_detect": true,
+  "entity_ids": {
     "task_lists": {},
     "tasks": {},
-    "pages": {},
-    "tags": {
-      "gsd_managed": null,
-      "requirements": null,
-      "research": null,
-      "plan": null,
-      "summary": null,
-      "verification": null,
-      "uat": null,
-      "quick": null,
-      "fix": null,
-      "phase_tags": {}
-    },
-    "page_types": {
-      "overview": "Document",
-      "requirements": "Spec",
-      "roadmap": "Spec",
-      "research": "Document",
-      "plan": "Spec",
-      "summary": "Document",
-      "verification": "Document",
-      "uat": "Document"
-    },
-    "page_icons": {
-      "overview": "lucide:book-open",
-      "requirements": "lucide:list-checks",
-      "roadmap": "lucide:map",
-      "research": "lucide:search",
-      "plan": "lucide:file-code",
-      "summary": "lucide:check-circle",
-      "verification": "lucide:shield-check",
-      "uat": "lucide:user-check"
-    },
-    "status_mapping": {
-      "not_started": "Backlog",
-      "planning": "ToDo",
-      "in_progress": "In Progress",
-      "in_review": "In Review",
-      "blocked": "Blocked",
-      "completed": "Completed"
-    },
-    "priority_mapping": {
-      "wave_1": "Critical",
-      "wave_2": "High",
-      "wave_3": "Normal",
-      "default": "Normal"
-    },
-    "relation_types": {
-      "task_to_task": "Depends",
-      "task_to_plan": "Related",
-      "issue_to_task": "Blocker",
-      "page_to_page": "Related",
-      "phase_to_phase": "Depends"
-    },
-    "last_sync": null,
-    "pending_sync": []
+    "pages": {}
+  },
+  "tags": {
+    "gsd_managed": null,
+    "requirements": null,
+    "research": null,
+    "plan": null,
+    "summary": null,
+    "verification": null,
+    "uat": null,
+    "quick": null,
+    "fix": null,
+    "phase_tags": {}
+  },
+  "page_types": {
+    "overview": "Document",
+    "requirements": "Spec",
+    "roadmap": "Spec",
+    "research": "Document",
+    "plan": "Spec",
+    "summary": "Document",
+    "verification": "Document",
+    "uat": "Document"
+  },
+  "page_icons": {
+    "overview": "lucide:book-open",
+    "requirements": "lucide:list-checks",
+    "roadmap": "lucide:map",
+    "research": "lucide:search",
+    "plan": "lucide:file-code",
+    "summary": "lucide:check-circle",
+    "verification": "lucide:shield-check",
+    "uat": "lucide:user-check"
+  },
+  "status_mapping": {
+    "not_started": "Backlog",
+    "planning": "ToDo",
+    "in_progress": "In Progress",
+    "in_review": "In Review",
+    "blocked": "Blocked",
+    "completed": "Completed"
+  },
+  "priority_mapping": {
+    "wave_1": "Critical",
+    "wave_2": "High",
+    "wave_3": "Normal",
+    "default": "Normal"
+  },
+  "relation_types": {
+    "task_to_task": "Depends",
+    "task_to_plan": "Related",
+    "issue_to_task": "Blocker",
+    "page_to_page": "Related",
+    "phase_to_phase": "Depends"
+  },
+  "git": {
+    "sync_on_commit": true
   }
 }
 ```
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `commit_docs` | `true` | Whether to commit planning artifacts to git |
-| `search_gitignored` | `false` | Add `--no-ignore` to broad rg searches |
-| `mosic.enabled` | `false` | Enable Mosic project management sync |
-| `mosic.workspace_id` | `null` | Mosic workspace UUID |
-| `mosic.project_id` | `null` | Mosic project UUID (set after project creation) |
-| `mosic.sync_on_commit` | `true` | Auto-sync to Mosic after git commits |
-| `mosic.auto_detect` | `true` | Auto-detect existing Mosic projects by name |
+| Option | Description |
+|--------|-------------|
+| `workspace_id` | Mosic workspace UUID (required) |
+| `project_id` | Mosic project UUID (set after project creation) |
+| `space_id` | Optional Mosic space within workspace |
+| `session.current_phase_id` | MTask List ID of phase currently being worked |
+| `session.current_task_id` | MTask ID of task currently being executed |
+| `session.active_plan_number` | Plan number within current phase |
+| `session.last_sync` | Timestamp of last successful Mosic sync |
+| `entity_ids.*` | Cached Mosic entity IDs for quick lookup |
+| `git.sync_on_commit` | Update Mosic tasks after git commits |
 </config_schema>
 
-<commit_docs_behavior>
+<local_file_policy>
 
-**When `commit_docs: true` (default):**
-- Planning files committed normally
-- SUMMARY.md, STATE.md, ROADMAP.md tracked in git
-- Full history of planning decisions preserved
+## Local File Policy
 
-**When `commit_docs: false`:**
-- Skip all `git add`/`git commit` for `.planning/` files
-- User must add `.planning/` to `.gitignore`
-- Useful for: OSS contributions, client projects, keeping planning private
+**The ONLY local file is `config.json`** which stores:
+- Mosic workspace and project references
+- Session state (current phase/task being worked on)
+- Entity ID mappings for quick lookup
+- Tag IDs for consistent tagging
 
-**Checking the config:**
+**All project documentation lives in Mosic M Pages:**
+- Requirements, roadmaps, research → M Pages linked to MProject
+- Phase plans, summaries → M Pages linked to MTask List
+- Task plans, verification reports → M Pages linked to MTask
 
-```bash
-# Check config.json first
-COMMIT_DOCS=$(cat .planning/config.json 2>/dev/null | grep -o '"commit_docs"[[:space:]]*:[[:space:]]*[^,}]*' | grep -o 'true\|false' || echo "true")
+**All state comes from Mosic:**
+- Project progress → `mosic_get_project` with `include_task_lists: true`
+- Phase progress → `mosic_get_task_list` with `include_tasks: true`
+- Task status → `mosic_get_task` or `mosic_search_tasks`
 
-# Auto-detect gitignored (overrides config)
-git check-ignore -q .planning 2>/dev/null && COMMIT_DOCS=false
+**No local `.planning/` directory created.** This eliminates:
+- Local/remote sync conflicts
+- Stale state issues
+- Git commit complexity for planning files
+- Storage of duplicate information
+
+</local_file_policy>
+
+<config_location>
+
+## Config File Location
+
+The `config.json` file is stored in the project root:
+
+```
+project/
+├── config.json          # GSD session state and Mosic references
+├── src/
+├── package.json
+└── ...
 ```
 
-**Auto-detection:** If `.planning/` is gitignored, `commit_docs` is automatically `false` regardless of config.json. This prevents git errors when users have `.planning/` in `.gitignore`.
+**Why project root:**
+- Easy to add to `.gitignore` (project-specific, not committed)
+- No nested directory structure to maintain
+- Single file, minimal footprint
 
-**Conditional git operations:**
-
-```bash
-if [ "$COMMIT_DOCS" = "true" ]; then
-  git add .planning/STATE.md
-  git commit -m "docs: update state"
-fi
+**Gitignore recommendation:**
+```
+# GSD session config (Mosic references, not committed)
+config.json
 ```
 
-</commit_docs_behavior>
+</config_location>
 
-<search_behavior>
+<state_derivation>
 
-**When `search_gitignored: false` (default):**
-- Standard rg behavior (respects .gitignore)
-- Direct path searches work: `rg "pattern" .planning/` finds files
-- Broad searches skip gitignored: `rg "pattern"` skips `.planning/`
+## State Derivation from Mosic
 
-**When `search_gitignored: true`:**
-- Add `--no-ignore` to broad rg searches that should include `.planning/`
-- Only needed when searching entire repo and expecting `.planning/` matches
+Instead of reading local state files, derive state from live Mosic data:
 
-**Note:** Most GSD operations use direct file reads or explicit paths, which work regardless of gitignore status.
+**Project State:**
+```javascript
+// Get project with phases
+const project = await mosic_get_project(config.project_id, {
+  include_task_lists: true
+});
 
-</search_behavior>
+// Calculate overall progress
+const phases = project.task_lists || [];
+const completedPhases = phases.filter(p => p.done).length;
+const progress = (completedPhases / phases.length) * 100;
+```
 
-<setup_uncommitted_mode>
+**Phase State:**
+```javascript
+// Get phase with tasks
+const phase = await mosic_get_task_list(config.session.current_phase_id, {
+  include_tasks: true
+});
 
-To use uncommitted mode:
+// Calculate phase progress
+const tasks = phase.tasks || [];
+const completedTasks = tasks.filter(t => t.done).length;
+const phaseProgress = (completedTasks / tasks.length) * 100;
+```
 
-1. **Set config:**
-   ```json
-   "planning": {
-     "commit_docs": false,
-     "search_gitignored": true
-   }
-   ```
+**Current Work:**
+```javascript
+// Find in-progress tasks
+const inProgress = await mosic_search_tasks({
+  project_id: config.project_id,
+  status: "In Progress"
+});
 
-2. **Add to .gitignore:**
-   ```
-   .planning/
-   ```
+// Get blocked tasks
+const blocked = await mosic_search_tasks({
+  project_id: config.project_id,
+  status: "Blocked"
+});
+```
 
-3. **Existing tracked files:** If `.planning/` was previously tracked:
-   ```bash
-   git rm -r --cached .planning/
-   git commit -m "chore: stop tracking planning docs"
-   ```
+**Documentation:**
+```javascript
+// Get all pages for project
+const docs = await mosic_get_entity_pages("MProject", config.project_id, {
+  include_subtree: true
+});
 
-</setup_uncommitted_mode>
+// Get specific page by tag
+const requirements = await mosic_search_documents_by_tags({
+  tags: ["requirements"],
+  doctypes: ["M Page"],
+  project_id: config.project_id
+});
+```
 
-<mosic_integration>
+</state_derivation>
 
-## Mosic MCP Integration
+<session_management>
 
-GSD integrates with Mosic MCP for cloud-based project management visibility.
+## Session Context Management
 
-### Architecture
+The `session` object in config.json tracks working context across Claude sessions:
 
-**Hybrid Architecture:**
-- Local `.planning/` files remain the source of truth
-- Mosic provides persistent, searchable project visibility
-- One-way push: Local → Mosic only
-- Never modify local files based on Mosic state
+**Starting work on a phase:**
+```javascript
+// Update session when starting phase work
+config.session = {
+  current_phase_id: phase_task_list_id,
+  current_task_id: null,
+  active_plan_number: 1,
+  last_sync: new Date().toISOString()
+};
+// Write to config.json
+```
 
-**Entity Mapping:**
+**Starting work on a task:**
+```javascript
+// Update when picking up a task
+config.session.current_task_id = task_id;
+config.session.last_sync = new Date().toISOString();
+// Write to config.json
 
-| GSD Concept | Mosic Entity | Relation |
-|-------------|--------------|----------|
-| Project | MProject | 1:1 |
-| Phase | MTask List | 1:1 |
-| Plan | MTask | 1:1 |
-| Task (within plan) | MTask CheckList | 1:N |
-| REQUIREMENTS.md | M Page (Spec) | 1:1 |
-| ROADMAP.md | M Page (Spec) | 1:1 |
-| SUMMARY.md | M Page (Document) | 1:1 per plan |
-| CONTEXT.md | M Page (Document) | 1:1 per phase |
+// Also update Mosic task status
+await mosic_update_document("MTask", task_id, {
+  status: "In Progress"
+});
+```
 
-### Page Types
+**Completing a task:**
+```javascript
+// Clear task from session
+config.session.current_task_id = null;
+config.session.last_sync = new Date().toISOString();
+// Write to config.json
+
+// Update Mosic task
+await mosic_complete_task(task_id);
+```
+
+**Session Recovery:**
+
+On startup, verify session state matches Mosic:
+```javascript
+// Check if session task is still valid
+if (config.session.current_task_id) {
+  const task = await mosic_get_task(config.session.current_task_id);
+  if (task.done || task.status === "Completed") {
+    // Task was completed externally, clear session
+    config.session.current_task_id = null;
+  }
+}
+```
+
+</session_management>
+
+<entity_id_caching>
+
+## Entity ID Caching
+
+Cache Mosic entity IDs to avoid repeated lookups:
+
+```javascript
+// After creating a phase task list
+config.entity_ids.task_lists[`phase_${phaseNumber}`] = task_list_id;
+
+// After creating a task
+config.entity_ids.tasks[`${phaseNumber}-${planNumber}`] = task_id;
+
+// After creating a page
+config.entity_ids.pages[`requirements`] = requirements_page_id;
+config.entity_ids.pages[`phase_${phaseNumber}_overview`] = overview_page_id;
+```
+
+**Using cached IDs:**
+```javascript
+// Direct access without search
+const phaseId = config.entity_ids.task_lists[`phase_${phaseNumber}`];
+const task = await mosic_get_task_list(phaseId, { include_tasks: true });
+```
+
+**Cache invalidation:**
+Cache is write-through (update cache when creating entities). IDs are permanent in Mosic, so cache invalidation is rarely needed unless entities are deleted.
+
+</entity_id_caching>
+
+<page_types>
+
+## Page Types
 
 Use semantic page types for different documentation:
 
@@ -206,17 +315,25 @@ Use semantic page types for different documentation:
 | Verification | Document | lucide:shield-check | Verification reports |
 | UAT | Document | lucide:user-check | User acceptance testing |
 
-### Relation Types
+</page_types>
 
-| Relation | From → To | Purpose |
+<relation_types>
+
+## Relation Types
+
+| Relation | From -> To | Purpose |
 |----------|-----------|---------|
-| Depends | Phase → Phase | Phase execution order |
-| Depends | Task → Task | Task dependencies |
-| Related | Task → Page | Link task to documentation |
-| Related | Page → Page | Connect related docs |
-| Blocker | Issue → Task | Issue blocks task completion |
+| Depends | Phase -> Phase | Phase execution order |
+| Depends | Task -> Task | Task dependencies |
+| Related | Task -> Page | Link task to documentation |
+| Related | Page -> Page | Connect related docs |
+| Blocker | Issue -> Task | Issue blocks task completion |
 
-### Tag Infrastructure
+</relation_types>
+
+<tag_infrastructure>
+
+## Tag Infrastructure
 
 Tags provide cross-cutting organization:
 
@@ -231,55 +348,167 @@ Tags provide cross-cutting organization:
 - `fix`: Bug fix and issue resolution
 - `phase-01`, `phase-02`, etc.: Phase identification
 
-### Enabling Mosic
+**Tag ID Caching:**
 
-During `/gsd:new-project`, if Mosic MCP is available:
+On first use, search for existing tags and cache IDs:
+```javascript
+// Search existing tags first
+const existingTags = await mosic_search_tags({
+  workspace_id: config.workspace_id,
+  query: "gsd-managed"
+});
 
-1. User is prompted to enable Mosic integration
-2. Workspace is selected or detected
-3. Existing projects can be linked or new project created
-4. Tags are created (idempotent - only missing ones)
-5. Project pages are created with proper types
-
-### Sync Points
-
-**new-project:** Creates project, overview page, tags
-
-**plan-phase:** Creates tasks, plan pages, checklists, dependencies
-
-**execute-phase:** Updates task status, creates summary pages, marks checklists done
-
-**verify-work:** Creates UAT page, issue tasks with Blocker relations
-
-**complete-milestone:** Updates project status, creates milestone summary
-
-**quick:** Creates quick task with summary page
-
-**add-phase:** Creates phase task list with overview page
-
-### Error Handling
-
-Mosic sync errors should never block local operations:
-
-```
-IF mosic sync fails:
-  - Log warning with error details
-  - Add failed item to mosic.pending_sync array
-  - Continue with local operation
-  - Retry on next sync opportunity
+if (existingTags.length > 0) {
+  config.tags.gsd_managed = existingTags[0].name;
+}
 ```
 
-### Checking Mosic Status
+</tag_infrastructure>
 
-```bash
-# Check if Mosic is enabled
-MOSIC_ENABLED=$(cat .planning/config.json 2>/dev/null | grep -o '"enabled"[[:space:]]*:[[:space:]]*[^,}]*' | head -1 | grep -o 'true\|false' || echo "false")
+<initialization>
 
-# Load workspace/project IDs
-WORKSPACE_ID=$(cat .planning/config.json | jq -r ".mosic.workspace_id")
-PROJECT_ID=$(cat .planning/config.json | jq -r ".mosic.project_id")
+## Project Initialization
+
+During `/gsd:new-project`:
+
+1. **Select or create workspace** (if multiple available)
+2. **Create MProject** with proper metadata
+3. **Create initial pages** (requirements, roadmap) linked to project
+4. **Setup tags** (idempotent - only create missing ones)
+5. **Store references** in config.json
+
+```javascript
+// Create project
+const project = await mosic_create_document("MProject", {
+  title: project_name,
+  description: project_brief,
+  workspace: config.workspace_id,
+  status: "Active"
+});
+
+// Store in config
+config.project_id = project.name;
+
+// Create requirements page
+const reqPage = await mosic_create_entity_page("MProject", project.name, {
+  title: "Requirements",
+  page_type: "Spec",
+  icon: "lucide:list-checks"
+});
+
+// Tag project
+await mosic_add_tag_to_document("MProject", project.name, "gsd-managed");
+
+// Cache IDs
+config.entity_ids.pages.requirements = reqPage.name;
 ```
 
-</mosic_integration>
+</initialization>
+
+<existing_project_detection>
+
+## Handling Existing Projects
+
+Implement logic for BOTH scenarios:
+
+**New Project:**
+- Create MProject with proper metadata
+- Create initial pages linked to project
+- Set up tags and relations
+
+**Existing Project:**
+```javascript
+// Detect if project already exists
+const existing = await mosic_search({
+  query: project_name,
+  doctypes: ["MProject"],
+  workspace_id: config.workspace_id
+});
+
+if (existing.length > 0) {
+  // Analyze existing structure
+  const project = await mosic_get_project(existing[0].name, {
+    include_task_lists: true
+  });
+
+  const pages = await mosic_get_entity_pages("MProject", project.name);
+
+  // Identify what exists
+  const hasRequirements = pages.some(p => p.title === "Requirements");
+  const hasRoadmap = pages.some(p => p.title === "Roadmap");
+
+  // Only create missing elements
+  if (!hasRequirements) {
+    await mosic_create_entity_page("MProject", project.name, {
+      title: "Requirements",
+      page_type: "Spec"
+    });
+  }
+
+  // Preserve existing work
+  config.project_id = project.name;
+}
+```
+
+</existing_project_detection>
+
+<error_handling>
+
+## Error Handling
+
+Mosic API errors should be handled gracefully:
+
+```javascript
+try {
+  const project = await mosic_get_project(config.project_id);
+} catch (error) {
+  if (error.status === 404) {
+    // Project deleted or ID invalid
+    console.error("Project not found in Mosic. Run /gsd:new-project to reinitialize.");
+    config.project_id = null;
+  } else if (error.status === 403) {
+    // Permission denied
+    console.error("Access denied to project. Check workspace membership.");
+  } else {
+    // Network or other error
+    console.error("Mosic API error:", error.message);
+  }
+}
+```
+
+**Retry logic:**
+For transient errors, implement exponential backoff:
+```javascript
+const maxRetries = 3;
+for (let i = 0; i < maxRetries; i++) {
+  try {
+    return await mosic_operation();
+  } catch (error) {
+    if (i === maxRetries - 1) throw error;
+    await sleep(Math.pow(2, i) * 1000); // 1s, 2s, 4s
+  }
+}
+```
+
+</error_handling>
+
+<sync_points>
+
+## Sync Points
+
+GSD operations sync with Mosic at these points:
+
+| Command | Mosic Operations |
+|---------|------------------|
+| `new-project` | Create project, pages, tags |
+| `add-phase` | Create task list, overview page |
+| `plan-phase` | Create tasks, plan pages, checklists, dependencies |
+| `execute-phase` | Update task status, create summary pages |
+| `verify-work` | Create verification page, issue tasks for failures |
+| `complete-milestone` | Update project status, create milestone summary |
+| `quick` | Create quick task with summary page |
+| `progress` | Read-only - derive from Mosic state |
+
+</sync_points>
 
 </planning_config>

@@ -1,6 +1,6 @@
 <questioning_guide>
 
-Project initialization is dream extraction, not requirements gathering. You're helping the user discover and articulate what they want to build. This isn't a contract negotiation — it's collaborative thinking.
+Project initialization is dream extraction, not requirements gathering. You're helping the user discover and articulate what they want to build. This isn't a contract negotiation - it's collaborative thinking.
 
 <philosophy>
 
@@ -14,7 +14,7 @@ Don't interrogate. Collaborate. Don't follow a script. Follow the thread.
 
 <the_goal>
 
-By the end of questioning, you need enough clarity to write a PROJECT.md that downstream phases can act on:
+By the end of questioning, you need enough clarity to create project documentation in Mosic that downstream phases can act on:
 
 - **Research** needs: what domain to research, what the user already knows, what unknowns exist
 - **Requirements** needs: clear enough vision to scope v1 features
@@ -22,7 +22,7 @@ By the end of questioning, you need enough clarity to write a PROJECT.md that do
 - **plan-phase** needs: specific requirements to break into tasks, context for implementation choices
 - **execute-phase** needs: success criteria to verify against, the "why" behind requirements
 
-A vague PROJECT.md forces every downstream phase to guess. The cost compounds.
+Vague project documentation forces every downstream phase to guess. The cost compounds.
 
 </the_goal>
 
@@ -36,9 +36,9 @@ A vague PROJECT.md forces every downstream phase to guess. The cost compounds.
 
 **Make the abstract concrete.** "Walk me through using this." "What does that actually look like?"
 
-**Clarify ambiguity.** "When you say Z, do you mean A or B?" "You mentioned X — tell me more."
+**Clarify ambiguity.** "When you say Z, do you mean A or B?" "You mentioned X - tell me more."
 
-**Know when to stop.** When you understand what they want, why they want it, who it's for, and what done looks like — offer to proceed.
+**Know when to stop.** When you understand what they want, why they want it, who it's for, and what done looks like - offer to proceed.
 
 </how_to_question>
 
@@ -46,21 +46,21 @@ A vague PROJECT.md forces every downstream phase to guess. The cost compounds.
 
 Use these as inspiration, not a checklist. Pick what's relevant to the thread.
 
-**Motivation — why this exists:**
+**Motivation - why this exists:**
 - "What prompted this?"
 - "What are you doing today that this replaces?"
 - "What would you do if this existed?"
 
-**Concreteness — what it actually is:**
+**Concreteness - what it actually is:**
 - "Walk me through using this"
-- "You said X — what does that actually look like?"
+- "You said X - what does that actually look like?"
 - "Give me an example"
 
-**Clarification — what they mean:**
+**Clarification - what they mean:**
 - "When you say Z, do you mean A or B?"
-- "You mentioned X — tell me more about that"
+- "You mentioned X - tell me more about that"
 
-**Success — how you'll know it's working:**
+**Success - how you'll know it's working:**
 - "How will you know this is working?"
 - "What does done look like?"
 
@@ -80,14 +80,14 @@ Use AskUserQuestion to help users think by presenting concrete options to react 
 - Leading options that presume an answer
 - Too many options (2-4 is ideal)
 
-**Example — vague answer:**
+**Example - vague answer:**
 User says "it should be fast"
 
 - header: "Fast"
 - question: "Fast how?"
 - options: ["Sub-second response", "Handles large datasets", "Quick to build", "Let me explain"]
 
-**Example — following a thread:**
+**Example - following a thread:**
 User mentions "frustrated with current tools"
 
 - header: "Frustration"
@@ -111,52 +111,53 @@ Four things. If they volunteer more, capture it.
 
 <decision_gate>
 
-When you could write a clear PROJECT.md, offer to proceed:
+When you could create clear project documentation, offer to proceed:
 
 - header: "Ready?"
-- question: "I think I understand what you're after. Ready to create PROJECT.md?"
+- question: "I think I understand what you're after. Ready to create the project?"
 - options:
-  - "Create PROJECT.md" — Let's move forward
-  - "Keep exploring" — I want to share more / ask me more
+  - "Create project" - Let's move forward
+  - "Keep exploring" - I want to share more / ask me more
 
-If "Keep exploring" — ask what they want to add or identify gaps and probe naturally.
+If "Keep exploring" - ask what they want to add or identify gaps and probe naturally.
 
-Loop until "Create PROJECT.md" selected.
+Loop until "Create project" selected.
 
 </decision_gate>
 
 <anti_patterns>
 
-- **Checklist walking** — Going through domains regardless of what they said
-- **Canned questions** — "What's your core value?" "What's out of scope?" regardless of context
-- **Corporate speak** — "What are your success criteria?" "Who are your stakeholders?"
-- **Interrogation** — Firing questions without building on answers
-- **Rushing** — Minimizing questions to get to "the work"
-- **Shallow acceptance** — Taking vague answers without probing
-- **Premature constraints** — Asking about tech stack before understanding the idea
-- **User skills** — NEVER ask about user's technical experience. Claude builds.
+- **Checklist walking** - Going through domains regardless of what they said
+- **Canned questions** - "What's your core value?" "What's out of scope?" regardless of context
+- **Corporate speak** - "What are your success criteria?" "Who are your stakeholders?"
+- **Interrogation** - Firing questions without building on answers
+- **Rushing** - Minimizing questions to get to "the work"
+- **Shallow acceptance** - Taking vague answers without probing
+- **Premature constraints** - Asking about tech stack before understanding the idea
+- **User skills** - NEVER ask about user's technical experience. Claude builds.
 
 </anti_patterns>
 
-<mosic_integration>
+<mosic_project_setup>
 
-## Mosic Project Setup Option
+## Mosic Project Creation
 
-During project initialization, offer Mosic integration:
+GSD operates Mosic-first. After understanding the project scope, create the project in Mosic.
 
-**When to offer:**
-After understanding the project scope, before creating PROJECT.md.
+### Workspace Selection
 
-**How to present:**
+If user has multiple workspaces, offer selection:
 
-- header: "Project Tracking"
-- question: "Want to track this project in Mosic for cross-session context?"
-- options:
-  - "Yes, create Mosic project" — Full tracking with tasks, pages, and relations
-  - "No, local files only" — Traditional .planning/ directory
-  - "Link to existing" — Connect to an existing Mosic project
+```javascript
+// List available workspaces
+const workspaces = await mosic_list_workspaces();
 
-**If "Yes, create Mosic project":**
+if (workspaces.length > 1) {
+  // Present selection to user
+}
+```
+
+### Project Creation Flow
 
 ```javascript
 // Create project in Mosic
@@ -164,19 +165,28 @@ const project = await mosic_create_document("MProject", {
   title: project_name,
   description: project_brief,
   workspace: workspace_id,
-  status: "Active",
-  tags: ["gsd-managed"]
+  status: "Active"
 });
 
-// Store reference
-config.mosic = {
-  project_id: project.name,
-  workspace_id: workspace_id,
-  sync_on_commit: true
-};
+// Tag as GSD-managed
+await mosic_add_tag_to_document("MProject", project.name, "gsd-managed");
+
+// Create initial pages
+const requirementsPage = await mosic_create_entity_page("MProject", project.name, {
+  title: "Requirements",
+  page_type: "Spec",
+  icon: "lucide:list-checks"
+});
+
+// Store in config.json
+config.workspace_id = workspace_id;
+config.project_id = project.name;
+config.entity_ids.pages.requirements = requirementsPage.name;
 ```
 
-**If "Link to existing":**
+### Linking to Existing Project
+
+If user wants to link to an existing Mosic project:
 
 - header: "Existing Project"
 - question: "Paste the Mosic project URL or ID:"
@@ -191,19 +201,54 @@ const project = await mosic_get_project(project_id, {
 
 // Check for existing GSD structure
 const existingPages = await mosic_get_entity_pages("MProject", project_id);
-// Analyze what exists, what needs creation
+
+// Identify what exists
+const hasRequirements = existingPages.some(p => p.title === "Requirements");
+const hasRoadmap = existingPages.some(p => p.title === "Roadmap");
+
+// Only create missing elements
+if (!hasRequirements) {
+  await mosic_create_entity_page("MProject", project.name, {
+    title: "Requirements",
+    page_type: "Spec"
+  });
+}
+
+// Store reference in config.json
+config.project_id = project.name;
+config.workspace_id = project.workspace;
 ```
 
-**Follow-up questions if Mosic enabled:**
+### Follow-up Questions
 
-After establishing Mosic integration, you may need:
+After establishing Mosic project, you may need:
 
-- Workspace selection (if user has multiple)
 - Space assignment (if workspace has spaces)
 - Team member assignment (if collaborative)
+- Priority setting
 
 Keep these optional and don't overwhelm the flow.
 
-</mosic_integration>
+</mosic_project_setup>
+
+<no_local_files>
+
+## No Local Planning Files
+
+GSD with Mosic does NOT create local planning files:
+
+**Not created:**
+- `.planning/` directory
+- `PROJECT.md` (project overview is in MProject description + pages)
+- `REQUIREMENTS.md` (stored in Mosic M Page)
+
+**Where this content lives:**
+- Project overview -> MProject description
+- Requirements -> M Page linked to MProject (tag: requirements)
+- Research notes -> M Page linked to MProject (tag: research)
+
+**The only local file:** `config.json` for session state and entity ID caching.
+
+</no_local_files>
 
 </questioning_guide>

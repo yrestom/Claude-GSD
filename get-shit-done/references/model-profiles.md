@@ -41,7 +41,7 @@ Model profiles control which Claude model each GSD agent uses. This allows balan
 Orchestrators resolve model before spawning:
 
 ```
-1. Read .planning/config.json
+1. Read config.json
 2. Get model_profile (default: "balanced")
 3. Look up agent in table above
 4. Pass model parameter to Task call
@@ -51,7 +51,7 @@ Orchestrators resolve model before spawning:
 
 Runtime: `/gsd:set-profile <profile>`
 
-Per-project default: Set in `.planning/config.json`:
+Per-project default: Set in `config.json`:
 ```json
 {
   "model_profile": "balanced"
@@ -120,6 +120,6 @@ When workflows involve significant Mosic state management:
 For budget-conscious workflows:
 
 1. **Batch reads:** Use `mosic_get_project` with `include_task_lists: true` instead of multiple calls
-2. **Cache IDs:** Store entity IDs in `.planning/config.json` to avoid lookups
+2. **Cache IDs:** Store entity IDs in `config.json` to avoid lookups
 3. **Lazy sync:** Update Mosic only on phase completion, not per-task
 4. **Local-first:** Use local markdown files during execution, sync at checkpoints

@@ -8,6 +8,8 @@ Plans execute autonomously. Checkpoints formalize the interaction points where h
 2. **Claude sets up the verification environment** - Start dev servers, seed databases, configure env vars
 3. **User only does what requires human judgment** - Visual checks, UX evaluation, "does this feel right?"
 4. **Secrets come from user, automation comes from Claude** - Ask for API keys, then Claude uses them via CLI
+
+**Mosic integration:** Checkpoint outcomes are tracked as MTask status updates and recorded in M Pages.
 </overview>
 
 <checkpoint_types>
@@ -338,9 +340,9 @@ When Claude encounters `type="checkpoint:*"`:
 
 **For checkpoint:human-verify:**
 ```
-╔═══════════════════════════════════════════════════════╗
-║  CHECKPOINT: Verification Required                    ║
-╚═══════════════════════════════════════════════════════╝
++-------------------------------------------------------+
+|  CHECKPOINT: Verification Required                    |
++-------------------------------------------------------+
 
 Progress: 5/8 tasks complete
 Task: Responsive dashboard layout
@@ -354,16 +356,16 @@ How to verify:
   4. Tablet (768px): Sidebar collapses to icons
   5. Mobile (375px): Sidebar hidden, hamburger menu appears
 
-────────────────────────────────────────────────────────
-→ YOUR ACTION: Type "approved" or describe issues
-────────────────────────────────────────────────────────
+--------------------------------------------------------
+> YOUR ACTION: Type "approved" or describe issues
+--------------------------------------------------------
 ```
 
 **For checkpoint:decision:**
 ```
-╔═══════════════════════════════════════════════════════╗
-║  CHECKPOINT: Decision Required                        ║
-╚═══════════════════════════════════════════════════════╝
++-------------------------------------------------------+
+|  CHECKPOINT: Decision Required                        |
++-------------------------------------------------------+
 
 Progress: 2/6 tasks complete
 Task: Select authentication provider
@@ -385,16 +387,16 @@ Options:
      Pros: Free, no vendor lock-in, widely adopted
      Cons: More setup work, DIY security updates
 
-────────────────────────────────────────────────────────
-→ YOUR ACTION: Select supabase, clerk, or nextauth
-────────────────────────────────────────────────────────
+--------------------------------------------------------
+> YOUR ACTION: Select supabase, clerk, or nextauth
+--------------------------------------------------------
 ```
 
 **For checkpoint:human-action:**
 ```
-╔═══════════════════════════════════════════════════════╗
-║  CHECKPOINT: Action Required                          ║
-╚═══════════════════════════════════════════════════════╝
++-------------------------------------------------------+
+|  CHECKPOINT: Action Required                          |
++-------------------------------------------------------+
 
 Progress: 3/8 tasks complete
 Task: Deploy to Vercel
@@ -409,17 +411,147 @@ What you need to do:
 
 I'll verify: vercel whoami returns your account
 
-────────────────────────────────────────────────────────
-→ YOUR ACTION: Type "done" when authenticated
-────────────────────────────────────────────────────────
+--------------------------------------------------------
+> YOUR ACTION: Type "done" when authenticated
+--------------------------------------------------------
 ```
 </execution_protocol>
+
+<mosic_checkpoint_tracking>
+
+## Tracking Checkpoints in Mosic
+
+Checkpoint state is derived from MTask status, not local files.
+
+### Checkpoint States Mapped to MTask
+
+| Checkpoint State | MTask Status | Notes |
+|------------------|--------------|-------|
+| Pending (not reached) | To Do | Task not yet started |
+| Waiting for user | In Progress | Claude waiting on human |
+| Approved/Done | Done | Checkpoint passed |
+| Issues found | Blocked | User reported problems |
+
+### Recording Checkpoint Outcomes
+
+**For checkpoint:human-verify:**
+```javascript
+// After user approves
+await mosic_update_document("MTask", task_id, {
+  status: "Done"
+});
+
+// Add verification record as comment
+await mosic_create_document("M Comment", {
+  comment_type: "Comment",
+  reference_doctype: "MTask",
+  reference_name: task_id,
+  content: `**Checkpoint Verified**
+- Type: human-verify
+- Result: Approved
+- Verified at: ${timestamp}
+- Notes: ${user_notes || "Passed all checks"}`
+});
+```
+
+**If issues found, create follow-up task:**
+```javascript
+// User reported issues
+await mosic_create_document("MTask", {
+  title: `Fix: ${issue_description}`,
+  task_list: current_task_list_id,
+  status: "To Do",
+  priority: "High",
+  description: `## Issue from Checkpoint
+
+**Original Task:** ${original_task_title}
+**Issue:** ${user_reported_issue}
+
+## Expected
+${expected_behavior}
+
+## Actual
+${actual_behavior}`
+});
+
+// Mark original as blocked
+await mosic_update_document("MTask", task_id, {
+  status: "Blocked"
+});
+```
+
+**For checkpoint:decision:**
+```javascript
+// Record decision in task or create decision page
+const decisionPage = await mosic_create_entity_page("MTask", task_id, {
+  title: `Decision: ${decision_topic}`,
+  page_type: "Note"
+});
+
+await mosic_update_content_blocks(decisionPage.name, [{
+  type: "paragraph",
+  data: {
+    text: `## Decision: ${selected_option}
+
+**Context:** ${decision_context}
+
+**Options Considered:**
+${options.map(o => `- ${o.name}: ${o.summary}`).join('\n')}
+
+**Rationale:** ${rationale}
+
+**Decided at:** ${timestamp}`
+  }
+}]);
+
+// Tag the decision
+await mosic_add_tag_to_document("M Page", decisionPage.name, "decision");
+```
+
+**For checkpoint:human-action (auth gates):**
+```javascript
+// Log authentication completion as comment
+await mosic_create_document("M Comment", {
+  comment_type: "Comment",
+  reference_doctype: "MTask",
+  reference_name: task_id,
+  content: `**Auth Gate Cleared**
+- Service: ${service_name}
+- Completed at: ${timestamp}
+- Verified: ${verification_result}`
+});
+```
+
+### Querying Checkpoint Status
+
+```javascript
+// Find tasks waiting on checkpoints (In Progress status)
+const waitingTasks = await mosic_search_tasks({
+  project_id: config.project_id,
+  status: "In Progress"
+});
+
+// Find blocked tasks (issues from checkpoints)
+const blockedTasks = await mosic_search_tasks({
+  project_id: config.project_id,
+  status: "Blocked"
+});
+
+// Find decisions made
+const decisions = await mosic_search_documents_by_tags({
+  tags: ["decision"],
+  doctypes: ["M Page"],
+  project_id: config.project_id
+});
+```
+
+</mosic_checkpoint_tracking>
 
 <authentication_gates>
 
 **Critical:** When Claude tries CLI/API and gets auth error, this is NOT a failure - it's a gate requiring human input to unblock automation.
 
-**Pattern:** Claude tries automation → auth error → creates checkpoint → you authenticate → Claude retries → continues
+**Pattern:** Claude tries automation -> auth error -> creates checkpoint -> you authenticate -> Claude retries -> continues
 
 **Gate protocol:**
 1. Recognize it's not a failure - missing auth is expected
@@ -437,9 +569,9 @@ Claude: Running `vercel --yes` to deploy...
 
 Error: Not authenticated. Please run 'vercel login'
 
-╔═══════════════════════════════════════════════════════╗
-║  CHECKPOINT: Action Required                          ║
-╚═══════════════════════════════════════════════════════╝
++-------------------------------------------------------+
+|  CHECKPOINT: Action Required                          |
++-------------------------------------------------------+
 
 Progress: 2/8 tasks complete
 Task: Deploy to Vercel
@@ -453,19 +585,19 @@ What you need to do:
 
 I'll verify: vercel whoami returns your account
 
-────────────────────────────────────────────────────────
-→ YOUR ACTION: Type "done" when authenticated
-────────────────────────────────────────────────────────
+--------------------------------------------------------
+> YOUR ACTION: Type "done" when authenticated
+--------------------------------------------------------
 
 User: done
 
 Claude: Verifying authentication...
 Running: vercel whoami
-✓ Authenticated as: user@example.com
+Authenticated as: user@example.com
 
 Retrying deployment...
 Running: vercel --yes
-✓ Deployed to: https://myapp-abc123.vercel.app
+Deployed to: https://myapp-abc123.vercel.app
 
 Task 3 complete. Continuing to task 4...
 ```
@@ -515,7 +647,7 @@ Task 3 complete. Continuing to task 4...
 <!-- WRONG: Asking user to add env vars in dashboard -->
 <task type="checkpoint:human-action">
   <action>Add OPENAI_API_KEY to Convex dashboard</action>
-  <instructions>Go to dashboard.convex.dev → Settings → Environment Variables → Add</instructions>
+  <instructions>Go to dashboard.convex.dev > Settings > Environment Variables > Add</instructions>
 </task>
 
 <!-- RIGHT: Claude asks for value, then adds via CLI -->
@@ -659,83 +791,6 @@ If default port is in use, check what's running and either:
 </task>
 ```
 
-## Mosic Integration
-
-### Syncing Checkpoint Outcomes to Mosic
-
-When checkpoints complete, sync the outcome to the corresponding Mosic task:
-
-**For checkpoint:human-verify:**
-```javascript
-// After user approves
-await mosic_update_document("MTask", task_id, {
-  status: "Done",
-  // Add comment with verification details
-});
-
-// If issues found, create follow-up task
-await mosic_create_document("MTask", {
-  title: "Fix: [issue from checkpoint]",
-  task_list: current_task_list_id,
-  status: "To Do",
-  priority: "High"
-});
-```
-
-**For checkpoint:decision:**
-```javascript
-// Record decision in task or project page
-await mosic_update_content_blocks(decision_page_id, [{
-  type: "paragraph",
-  content: `Decision: ${selected_option} - ${rationale}`
-}]);
-
-// Tag the decision for future reference
-await mosic_add_tag_to_document("M Page", decision_page_id, "decision");
-```
-
-**For checkpoint:human-action (auth gates):**
-```javascript
-// Log authentication completion
-await mosic_create_document("MTask", {
-  title: "Auth completed: [service]",
-  task_list: current_task_list_id,
-  status: "Done",
-  description: "Authentication gate cleared for [service]"
-});
-```
-
-### Checkpoint Status in Mosic
-
-Map checkpoint states to MTask status:
-
-| Checkpoint State | MTask Status |
-|------------------|--------------|
-| Pending (not reached) | To Do |
-| Waiting for user | In Progress |
-| Approved/Done | Done |
-| Issues found | Blocked |
-
-### Recording Verification Results
-
-Create verification records as Mosic task comments or linked pages:
-
-```javascript
-// Add verification result as comment
-await mosic_create_document("M Comment", {
-  parent_doctype: "MTask",
-  parent_name: task_id,
-  content: `Checkpoint verified: ${verification_details}`
-});
-
-// Or create verification page linked to task
-await mosic_create_entity_page("MTask", task_id, {
-  title: "Verification: [checkpoint name]",
-  page_type: "Note",
-  tags: ["verification", "checkpoint"]
-});
-```
-
 ## Quick Reference
 
 | Action | Automatable? | Claude does it? |
@@ -769,8 +824,8 @@ await mosic_create_entity_page("MTask", task_id, {
 
 **DON'T:**
 - Ask human to do work Claude can automate (deploy, create resources, run builds)
-- Assume knowledge: "Configure the usual settings" ❌
-- Skip steps: "Set up database" ❌ (too vague)
+- Assume knowledge: "Configure the usual settings"
+- Skip steps: "Set up database" (too vague)
 - Mix multiple verifications in one checkpoint (split them)
 - Make verification impossible (Claude can't check visual appearance without user confirmation)
 
@@ -781,9 +836,9 @@ await mosic_create_entity_page("MTask", task_id, {
 - **At integration points** - after configuring external services
 
 **Bad placement:**
-- Before Claude automates (asking human to do automatable work) ❌
-- Too frequent (every other task is a checkpoint) ❌
-- Too late (checkpoint is last task, but earlier tasks needed its result) ❌
+- Before Claude automates (asking human to do automatable work)
+- Too frequent (every other task is a checkpoint)
+- Too late (checkpoint is last task, but earlier tasks needed its result)
 </writing_guidelines>
 
 <examples>
@@ -928,7 +983,7 @@ await mosic_create_entity_page("MTask", task_id, {
 
 <anti_patterns>
 
-### ❌ BAD: Asking user to start dev server
+### BAD: Asking user to start dev server
 
 ```xml
 <task type="checkpoint:human-verify" gate="blocking">
@@ -943,7 +998,7 @@ await mosic_create_entity_page("MTask", task_id, {
 
 **Why bad:** Claude can run `npm run dev`. User should only visit URLs, not execute commands.
 
-### ✅ GOOD: Claude starts server, user visits
+### GOOD: Claude starts server, user visits
 
 ```xml
 <task type="auto">
@@ -962,7 +1017,7 @@ await mosic_create_entity_page("MTask", task_id, {
 </task>
 ```
 
-### ❌ BAD: Asking user to add env vars in dashboard
+### BAD: Asking user to add env vars in dashboard
 
 ```xml
 <task type="checkpoint:human-action" gate="blocking">
@@ -970,7 +1025,7 @@ await mosic_create_entity_page("MTask", task_id, {
   <instructions>
     1. Go to dashboard.convex.dev
     2. Select your project
-    3. Navigate to Settings → Environment Variables
+    3. Navigate to Settings > Environment Variables
     4. Add OPENAI_API_KEY with your key
   </instructions>
 </task>
@@ -978,7 +1033,7 @@ await mosic_create_entity_page("MTask", task_id, {
 
 **Why bad:** Convex has `npx convex env set`. Claude should ask for the key value, then run the CLI command.
 
-### ✅ GOOD: Claude collects secret, adds via CLI
+### GOOD: Claude collects secret, adds via CLI
 
 ```xml
 <task type="checkpoint:human-action" gate="blocking">
@@ -998,7 +1053,7 @@ await mosic_create_entity_page("MTask", task_id, {
 </task>
 ```
 
-### ❌ BAD: Asking human to deploy
+### BAD: Asking human to deploy
 
 ```xml
 <task type="checkpoint:human-action" gate="blocking">
@@ -1016,7 +1071,7 @@ await mosic_create_entity_page("MTask", task_id, {
 
 **Why bad:** Vercel has a CLI. Claude should run `vercel --yes`.
 
-### ✅ GOOD: Claude automates, human verifies
+### GOOD: Claude automates, human verifies
 
 ```xml
 <task type="auto">
@@ -1032,7 +1087,7 @@ await mosic_create_entity_page("MTask", task_id, {
 </task>
 ```
 
-### ❌ BAD: Too many checkpoints
+### BAD: Too many checkpoints
 
 ```xml
 <task type="auto">Create schema</task>
@@ -1045,7 +1100,7 @@ await mosic_create_entity_page("MTask", task_id, {
 
 **Why bad:** Verification fatigue. Combine into one checkpoint at end.
 
-### ✅ GOOD: Single verification checkpoint
+### GOOD: Single verification checkpoint
 
 ```xml
 <task type="auto">Create schema</task>
@@ -1059,7 +1114,7 @@ await mosic_create_entity_page("MTask", task_id, {
 </task>
 ```
 
-### ❌ BAD: Asking for automatable file operations
+### BAD: Asking for automatable file operations
 
 ```xml
 <task type="checkpoint:human-action">
@@ -1074,7 +1129,7 @@ await mosic_create_entity_page("MTask", task_id, {
 
 **Why bad:** Claude has Write tool. This should be `type="auto"`.
 
-### ❌ BAD: Vague verification steps
+### BAD: Vague verification steps
 
 ```xml
 <task type="checkpoint:human-verify">
@@ -1086,7 +1141,7 @@ await mosic_create_entity_page("MTask", task_id, {
 
 **Why bad:** No specifics. User doesn't know what to test or what "works" means.
 
-### ✅ GOOD: Specific verification steps (server already running)
+### GOOD: Specific verification steps (server already running)
 
 ```xml
 <task type="checkpoint:human-verify">
@@ -1102,7 +1157,7 @@ await mosic_create_entity_page("MTask", task_id, {
 </task>
 ```
 
-### ❌ BAD: Asking user to run any CLI command
+### BAD: Asking user to run any CLI command
 
 ```xml
 <task type="checkpoint:human-action">
@@ -1117,14 +1172,14 @@ await mosic_create_entity_page("MTask", task_id, {
 
 **Why bad:** Claude can run these commands. User should never execute CLI commands.
 
-### ❌ BAD: Asking user to copy values between services
+### BAD: Asking user to copy values between services
 
 ```xml
 <task type="checkpoint:human-action">
   <action>Configure webhook URL in Stripe</action>
   <instructions>
     1. Copy the deployment URL from terminal
-    2. Go to Stripe Dashboard → Webhooks
+    2. Go to Stripe Dashboard > Webhooks
     3. Add endpoint with URL + /api/webhooks
     4. Copy webhook signing secret
     5. Add to .env file
@@ -1152,4 +1207,10 @@ Checkpoints formalize human-in-the-loop points. Use them when Claude cannot comp
 - File operations (Claude can read files to verify)
 - Code correctness (use tests and static analysis)
 - Anything automatable via CLI/API
+
+**Mosic integration:**
+- Checkpoint state = MTask status (In Progress = waiting, Done = approved, Blocked = issues)
+- Record outcomes as M Comments on tasks
+- Create decision pages tagged with "decision" for architectural choices
+- Query checkpoint status via `mosic_search_tasks` by status
 </summary>

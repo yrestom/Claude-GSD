@@ -1,9 +1,9 @@
 # Verification Patterns
 
-How to verify different types of artifacts are real implementations, not stubs or placeholders.
+How to verify different types of artifacts are real implementations, not stubs or placeholders. Verification results are stored in Mosic M Pages.
 
 <core_principle>
-**Existence ≠ Implementation**
+**Existence does not equal Implementation**
 
 A file existing does not mean the feature works. Verification must check:
 1. **Exists** - File is present at expected path
@@ -12,6 +12,8 @@ A file existing does not mean the feature works. Verification must check:
 4. **Functional** - Actually works when invoked
 
 Levels 1-3 can be checked programmatically. Level 4 often requires human verification.
+
+**Mosic integration:** Verification results are stored as M Pages linked to tasks or phases.
 </core_principle>
 
 <stub_detection>
@@ -350,7 +352,7 @@ grep -E "$VAR_NAME" src/env.ts src/env.mjs 2>/dev/null
 
 Wiring verification checks that components actually communicate. This is where most stubs hide.
 
-### Pattern: Component → API
+### Pattern: Component -> API
 
 **Check:** Does the component actually call the API?
 
@@ -377,7 +379,7 @@ fetch('/api/messages')  // No await, no .then, no assignment
 fetch('/api/message')  // Typo - should be /api/messages
 ```
 
-### Pattern: API → Database
+### Pattern: API -> Database
 
 **Check:** Does the API route actually query the database?
 
@@ -403,7 +405,7 @@ const messages = prisma.message.findMany()  // Missing await
 return Response.json(messages)  // Returns Promise, not data
 ```
 
-### Pattern: Form → Handler
+### Pattern: Form -> Handler
 
 **Check:** Does the form submission actually do something?
 
@@ -432,7 +434,7 @@ const handleSubmit = (data) => {
 onSubmit={() => {}}
 ```
 
-### Pattern: State → Render
+### Pattern: State -> Render
 
 **Check:** Does the component render state, not hardcoded content?
 
@@ -508,10 +510,10 @@ For each artifact type, run through this checklist:
 - [ ] Return values consumed
 
 ### Wiring Checklist
-- [ ] Component → API: fetch/axios call exists and uses response
-- [ ] API → Database: query exists and result returned
-- [ ] Form → Handler: onSubmit calls API/mutation
-- [ ] State → Render: state variables appear in JSX
+- [ ] Component -> API: fetch/axios call exists and uses response
+- [ ] API -> Database: query exists and result returned
+- [ ] Form -> Handler: onSubmit calls API/mutation
+- [ ] State -> Render: state variables appear in JSX
 
 </verification_checklist>
 
@@ -538,7 +540,7 @@ check_stubs() {
 check_wiring() {
   local component="$1"
   local api_path="$2"
-  grep -q "$api_path" "$component" && echo "WIRED: $component → $api_path" || echo "NOT_WIRED: $component → $api_path"
+  grep -q "$api_path" "$component" && echo "WIRED: $component -> $api_path" || echo "NOT_WIRED: $component -> $api_path"
 }
 
 # 4. Check substantive (more than N lines, has expected patterns)
@@ -552,7 +554,7 @@ check_substantive() {
 }
 ```
 
-Run these checks against each must-have artifact. Aggregate results into VERIFICATION.md.
+Run these checks against each must-have artifact. Store results in Mosic verification page.
 
 </automated_verification_script>
 
@@ -600,7 +602,7 @@ Some things can't be verified programmatically. Flag these for human testing:
 
 For automation-first checkpoint patterns, server lifecycle management, CLI installation handling, and error recovery protocols, see:
 
-**@~/.claude/get-shit-done/references/checkpoints.md** → `<automation_reference>` section
+**@get-shit-done/references/checkpoints.md** -> `<automation_reference>` section
 
 Key principles:
 - Claude sets up verification environment BEFORE presenting checkpoints
@@ -611,24 +613,50 @@ Key principles:
 
 </checkpoint_automation_reference>
 
-<mosic_verification_sync>
+<mosic_verification_pages>
 
-## Syncing Verification Results to Mosic
+## Storing Verification Results in Mosic
 
-When verification completes, sync results to the corresponding Mosic entities.
+Verification results are stored as M Pages linked to tasks or phases.
 
-### Verification Report Page
-
-Create a verification page linked to the task or phase:
+### Creating Verification Report Page
 
 ```javascript
-// Create verification report page
-await mosic_create_entity_page("MTask List", phase_task_list_id, {
+// Create verification report linked to phase
+const verificationPage = await mosic_create_entity_page("MTask List", phase_task_list_id, {
   title: `Verification Report: Phase ${phase_number}`,
   page_type: "Document",
-  tags: ["verification", "report", `phase-${phase_number}`],
-  content: verificationMarkdown
+  icon: "lucide:shield-check"
 });
+
+// Add verification content
+await mosic_update_content_blocks(verificationPage.name, [{
+  type: "paragraph",
+  data: {
+    text: `## Verification Report
+
+**Phase:** ${phase_name}
+**Verified at:** ${new Date().toISOString()}
+
+### Summary
+- **Total Checks:** ${totalChecks}
+- **Passed:** ${passedChecks}
+- **Failed:** ${failedChecks}
+- **Needs Review:** ${needsReview}
+
+### Automated Checks
+${automatedResults.map(r => `- [${r.passed ? 'x' : ' '}] ${r.name}: ${r.details}`).join('\n')}
+
+### Human Verification Required
+${humanChecks.map(h => `- [ ] ${h.name}: ${h.instructions}`).join('\n')}`
+  }
+}]);
+
+// Tag the verification page
+await mosic_batch_add_tags_to_document("M Page", verificationPage.name, [
+  "verification",
+  `phase-${phase_number}`
+]);
 ```
 
 ### Verification Status Updates
@@ -649,13 +677,12 @@ When verification fails, create issue tasks automatically:
 ```javascript
 // For each failed verification check
 for (const failure of failedChecks) {
-  await mosic_create_document("MTask", {
+  const issueTask = await mosic_create_document("MTask", {
     title: `Fix: ${failure.artifact} - ${failure.issue}`,
     task_list: phase_task_list_id,
     status: "To Do",
     priority: "High",
-    description: `
-## Verification Failure
+    description: `## Verification Failure
 
 **Artifact:** ${failure.artifact}
 **Check:** ${failure.checkType}
@@ -668,9 +695,19 @@ ${failure.expected}
 ${failure.actual}
 
 ## Suggested Fix
-${failure.suggestion}
-`,
-    tags: ["verification-failure", "bug"]
+${failure.suggestion}`
+  });
+
+  // Tag as verification failure
+  await mosic_add_tag_to_document("MTask", issueTask.name, "verification-failure");
+
+  // Create blocker relation to original task
+  await mosic_create_document("M Relation", {
+    source_doctype: "MTask",
+    source_name: issueTask.name,
+    target_doctype: "MTask",
+    target_name: original_task_id,
+    relation_type: "Blocker"
   });
 }
 ```
@@ -690,23 +727,33 @@ await mosic_create_document("M Relation", {
 });
 ```
 
-### Verification Summary in Mosic
+### Verification Summary in Phase Overview
 
-Update project/phase with verification metrics:
+Update phase overview page with verification metrics:
 
 ```javascript
-// Add verification summary to phase
-await mosic_update_content_blocks(phase_overview_page_id, [{
+// Find or create phase overview page
+const overviewPages = await mosic_get_entity_pages("MTask List", phase_task_list_id, {
+  tags: ["overview"]
+});
+
+const overviewPage = overviewPages[0];
+
+// Add verification summary block
+await mosic_update_content_blocks(overviewPage.name, [{
   type: "paragraph",
-  content: `## Verification Summary
+  data: {
+    text: `## Verification Summary
 
 - **Total Checks:** ${total}
-- **Passed:** ${passed} ✓
-- **Failed:** ${failed} ✗
-- **Needs Review:** ${needsReview} ◆
+- **Passed:** ${passed}
+- **Failed:** ${failed}
+- **Needs Review:** ${needsReview}
 
-Last verified: ${timestamp}`
-}]);
+Last verified: ${timestamp}
+[View Full Report](https://mosic.pro/app/page/${verification_page_id})`
+  }
+}], { append: true });
 ```
 
 ### Automated vs Human Verification Tracking
@@ -717,7 +764,7 @@ Track which verifications were automated vs human:
 // Tag verification results by type
 await mosic_batch_add_tags_to_document("M Page", verification_page_id, [
   "verification",
-  passed ? "auto-verified" : "human-verified",
+  allPassed ? "auto-verified" : "human-verified",
   `phase-${phase_number}`
 ]);
 ```
@@ -729,17 +776,68 @@ Find tasks needing verification:
 ```javascript
 // Find unverified completed tasks
 const unverified = await mosic_search_tasks({
-  project_id: project_id,
-  status: "Done",
-  tags_exclude: ["verified"]
+  project_id: config.project_id,
+  status: "Done"
+  // Then filter for those without verification tag
 });
 
 // Find verification failures
 const failures = await mosic_search_documents_by_tags({
   tags: ["verification-failure"],
   doctypes: ["MTask"],
-  project_id: project_id
+  project_id: config.project_id
+});
+
+// Find tasks blocked by verification issues
+const blockedByVerification = await mosic_search_documents_by_relation({
+  relation_type: "Blocker",
+  target_doctypes: ["MTask"],
+  source_tags: ["verification-failure"]
 });
 ```
 
-</mosic_verification_sync>
+### Verification Report Template
+
+Standard structure for verification pages:
+
+```markdown
+## Verification Report
+
+**Phase:** [Phase Name]
+**Plan:** [Plan Number]
+**Verified at:** [Timestamp]
+
+### Summary
+| Check Type | Total | Passed | Failed |
+|------------|-------|--------|--------|
+| Existence  | X     | X      | X      |
+| Substantive| X     | X      | X      |
+| Wiring     | X     | X      | X      |
+| Functional | X     | X      | X      |
+
+### Detailed Results
+
+#### Existence Checks
+- [x] Component: src/components/Dashboard.tsx
+- [x] API: src/app/api/auth/route.ts
+- [ ] Schema: prisma/schema.prisma (User model missing email field)
+
+#### Substantive Checks
+- [x] Dashboard has meaningful JSX
+- [ ] Auth API has TODO placeholder
+
+#### Wiring Checks
+- [x] Dashboard -> /api/data (fetch verified)
+- [x] Form -> onSubmit (handler implemented)
+
+#### Human Verification Required
+- [ ] Visual: Dashboard layout matches design
+- [ ] Flow: Login -> Dashboard redirect works
+- [ ] Error: Invalid login shows error message
+
+### Issues Created
+- [Fix: Auth API has TODO placeholder](https://mosic.pro/app/MTask/[id])
+- [Fix: User model missing email field](https://mosic.pro/app/MTask/[id])
+```
+
+</mosic_verification_pages>
