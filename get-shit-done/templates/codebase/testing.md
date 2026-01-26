@@ -1,19 +1,15 @@
----
-# Mosic Integration (populated when synced with Mosic MCP)
-mosic_page_id: ""
-mosic_workspace_id: ""
-mosic_tags: ["codebase", "testing", "gsd-managed"]
----
+# Codebase Testing Page Content Pattern
 
-# Testing Patterns Template
+Content structure for codebase testing patterns analysis pages in Mosic.
 
-Template for `.planning/codebase/TESTING.md` - captures test framework and patterns.
-
-**Purpose:** Document how tests are written and run. Guide for adding tests that match existing patterns.
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Codebase Testing", icon: "lucide:test-tube-2" })`
+**Page Type:** Document
+**Icon:** lucide:test-tube-2
+**Tags:** ["gsd-managed", "codebase", "testing"]
 
 ---
 
-## File Template
+## Content Structure
 
 ```markdown
 # Testing Patterns
@@ -216,237 +212,11 @@ it('should reject on failure', async () => {
 *Update when test patterns change*
 ```
 
-<good_examples>
-```markdown
-# Testing Patterns
-
-**Analysis Date:** 2025-01-20
-
-## Test Framework
-
-**Runner:**
-- Vitest 1.0.4
-- Config: vitest.config.ts in project root
-
-**Assertion Library:**
-- Vitest built-in expect
-- Matchers: toBe, toEqual, toThrow, toMatchObject
-
-**Run Commands:**
-```bash
-npm test                              # Run all tests
-npm test -- --watch                   # Watch mode
-npm test -- path/to/file.test.ts     # Single file
-npm run test:coverage                 # Coverage report
-```
-
-## Test File Organization
-
-**Location:**
-- *.test.ts alongside source files
-- No separate tests/ directory
-
-**Naming:**
-- unit-name.test.ts for all tests
-- No distinction between unit/integration in filename
-
-**Structure:**
-```
-src/
-  lib/
-    parser.ts
-    parser.test.ts
-  services/
-    install-service.ts
-    install-service.test.ts
-  bin/
-    install.ts
-    (no test - integration tested via CLI)
-```
-
-## Test Structure
-
-**Suite Organization:**
-```typescript
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-
-describe('ModuleName', () => {
-  describe('functionName', () => {
-    beforeEach(() => {
-      // reset state
-    });
-
-    it('should handle valid input', () => {
-      // arrange
-      const input = createTestInput();
-
-      // act
-      const result = functionName(input);
-
-      // assert
-      expect(result).toEqual(expectedOutput);
-    });
-
-    it('should throw on invalid input', () => {
-      expect(() => functionName(null)).toThrow('Invalid input');
-    });
-  });
-});
-```
-
-**Patterns:**
-- Use beforeEach for per-test setup, avoid beforeAll
-- Use afterEach to restore mocks: vi.restoreAllMocks()
-- Explicit arrange/act/assert comments in complex tests
-- One assertion focus per test (but multiple expects OK)
-
-## Mocking
-
-**Framework:**
-- Vitest built-in mocking (vi)
-- Module mocking via vi.mock() at top of test file
-
-**Patterns:**
-```typescript
-import { vi } from 'vitest';
-import { externalFunction } from './external';
-
-// Mock module
-vi.mock('./external', () => ({
-  externalFunction: vi.fn()
-}));
-
-describe('test suite', () => {
-  it('mocks function', () => {
-    const mockFn = vi.mocked(externalFunction);
-    mockFn.mockReturnValue('mocked result');
-
-    // test code using mocked function
-
-    expect(mockFn).toHaveBeenCalledWith('expected arg');
-  });
-});
-```
-
-**What to Mock:**
-- File system operations (fs-extra)
-- Child process execution (child_process.exec)
-- External API calls
-- Environment variables (process.env)
-
-**What NOT to Mock:**
-- Internal pure functions
-- Simple utilities (string manipulation, array helpers)
-- TypeScript types
-
-## Fixtures and Factories
-
-**Test Data:**
-```typescript
-// Factory functions in test file
-function createTestConfig(overrides?: Partial<Config>): Config {
-  return {
-    targetDir: '/tmp/test',
-    global: false,
-    ...overrides
-  };
-}
-
-// Shared fixtures in tests/fixtures/
-// tests/fixtures/sample-command.md
-export const sampleCommand = `---
-description: Test command
 ---
-Content here`;
-```
-
-**Location:**
-- Factory functions: define in test file near usage
-- Shared fixtures: tests/fixtures/ (for multi-file test data)
-- Mock data: inline in test when simple, factory when complex
-
-## Coverage
-
-**Requirements:**
-- No enforced coverage target
-- Coverage tracked for awareness
-- Focus on critical paths (parsers, service logic)
-
-**Configuration:**
-- Vitest coverage via c8 (built-in)
-- Excludes: *.test.ts, bin/install.ts, config files
-
-**View Coverage:**
-```bash
-npm run test:coverage
-open coverage/index.html
-```
-
-## Test Types
-
-**Unit Tests:**
-- Test single function in isolation
-- Mock all external dependencies (fs, child_process)
-- Fast: each test <100ms
-- Examples: parser.test.ts, validator.test.ts
-
-**Integration Tests:**
-- Test multiple modules together
-- Mock only external boundaries (file system, process)
-- Examples: install-service.test.ts (tests service + parser)
-
-**E2E Tests:**
-- Not currently used
-- CLI integration tested manually
-
-## Common Patterns
-
-**Async Testing:**
-```typescript
-it('should handle async operation', async () => {
-  const result = await asyncFunction();
-  expect(result).toBe('expected');
-});
-```
-
-**Error Testing:**
-```typescript
-it('should throw on invalid input', () => {
-  expect(() => parse(null)).toThrow('Cannot parse null');
-});
-
-// Async error
-it('should reject on file not found', async () => {
-  await expect(readConfig('invalid.txt')).rejects.toThrow('ENOENT');
-});
-```
-
-**File System Mocking:**
-```typescript
-import { vi } from 'vitest';
-import * as fs from 'fs-extra';
-
-vi.mock('fs-extra');
-
-it('mocks file system', () => {
-  vi.mocked(fs.readFile).mockResolvedValue('file content');
-  // test code
-});
-```
-
-**Snapshot Testing:**
-- Not used in this codebase
-- Prefer explicit assertions for clarity
-
----
-
-*Testing analysis: 2025-01-20*
-*Update when test patterns change*
-```
-</good_examples>
 
 <guidelines>
-**What belongs in TESTING.md:**
+
+**What belongs in codebase testing:**
 - Test framework and runner configuration
 - Test file location and naming patterns
 - Test structure (describe/it, beforeEach patterns)
@@ -458,7 +228,7 @@ it('mocks file system', () => {
 
 **What does NOT belong here:**
 - Specific test cases (defer to actual test files)
-- Technology choices (that's STACK.md)
+- Technology choices (that's stack page)
 - CI/CD setup (that's deployment docs)
 
 **When filling this template:**
@@ -484,4 +254,47 @@ it('mocks file system', () => {
 - Look for test utilities, fixtures, factories
 - Note any test types (unit, integration, e2e)
 - Document commands for running tests
+
 </guidelines>
+
+<mosic_operations>
+
+**Create codebase testing page:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: "Codebase Testing",
+  icon: "lucide:test-tube-2",
+  content: testingContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "codebase", "testing"]
+});
+```
+
+**Read testing patterns for planning:**
+```javascript
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const testing = pages.find(p => p.title === "Codebase Testing");
+const content = await mosic_get_page(testing.name, { content_format: "markdown" });
+```
+
+**Update testing analysis:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+**Find all codebase testing pages:**
+```javascript
+const testingPages = await mosic_search_documents_by_tags({
+  workspace_id,
+  tags: ["codebase", "testing"],
+  doctype: "M Page"
+});
+```
+
+</mosic_operations>

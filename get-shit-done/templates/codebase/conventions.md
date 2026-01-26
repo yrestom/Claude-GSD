@@ -1,19 +1,15 @@
----
-# Mosic Integration (populated when synced with Mosic MCP)
-mosic_page_id: ""
-mosic_workspace_id: ""
-mosic_tags: ["codebase", "conventions", "gsd-managed"]
----
+# Codebase Conventions Page Content Pattern
 
-# Coding Conventions Template
+Content structure for codebase coding conventions analysis pages in Mosic.
 
-Template for `.planning/codebase/CONVENTIONS.md` - captures coding style and patterns.
-
-**Purpose:** Document how code is written in this codebase. Prescriptive guide for Claude to match existing style.
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Codebase Conventions", icon: "lucide:scroll-text" })`
+**Page Type:** Document
+**Icon:** lucide:scroll-text
+**Tags:** ["gsd-managed", "codebase", "conventions"]
 
 ---
 
-## File Template
+## Content Structure
 
 ```markdown
 # Coding Conventions
@@ -137,7 +133,10 @@ Template for `.planning/codebase/CONVENTIONS.md` - captures coding style and pat
 *Update when patterns change*
 ```
 
+---
+
 <good_examples>
+
 ```markdown
 # Coding Conventions
 
@@ -272,10 +271,12 @@ Template for `.planning/codebase/CONVENTIONS.md` - captures coding style and pat
 *Convention analysis: 2025-01-20*
 *Update when patterns change*
 ```
+
 </good_examples>
 
 <guidelines>
-**What belongs in CONVENTIONS.md:**
+
+**What belongs in codebase conventions:**
 - Naming patterns observed in the codebase
 - Formatting rules (Prettier config, linting rules)
 - Import organization patterns
@@ -285,10 +286,10 @@ Template for `.planning/codebase/CONVENTIONS.md` - captures coding style and pat
 - Function and module design patterns
 
 **What does NOT belong here:**
-- Architecture decisions (that's ARCHITECTURE.md)
-- Technology choices (that's STACK.md)
-- Test patterns (that's TESTING.md)
-- File organization (that's STRUCTURE.md)
+- Architecture decisions (that's architecture page)
+- Technology choices (that's stack page)
+- Test patterns (that's testing page)
+- File organization (that's structure page)
 
 **When filling this template:**
 - Check .prettierrc, .eslintrc, or similar config files
@@ -311,4 +312,47 @@ Template for `.planning/codebase/CONVENTIONS.md` - captures coding style and pat
 - Read 5-10 files to identify function naming, error handling
 - Look for config files (.prettierrc, eslint.config.js)
 - Note patterns in imports, comments, function signatures
+
 </guidelines>
+
+<mosic_operations>
+
+**Create codebase conventions page:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: "Codebase Conventions",
+  icon: "lucide:scroll-text",
+  content: conventionsContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "codebase", "conventions"]
+});
+```
+
+**Read conventions for planning:**
+```javascript
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const conventions = pages.find(p => p.title === "Codebase Conventions");
+const content = await mosic_get_page(conventions.name, { content_format: "markdown" });
+```
+
+**Update conventions analysis:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+**Find all codebase conventions pages:**
+```javascript
+const conventionPages = await mosic_search_documents_by_tags({
+  workspace_id,
+  tags: ["codebase", "conventions"],
+  doctype: "M Page"
+});
+```
+
+</mosic_operations>

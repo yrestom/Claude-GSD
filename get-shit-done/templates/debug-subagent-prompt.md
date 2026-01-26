@@ -1,6 +1,12 @@
-# Debug Subagent Prompt Template
+# Debug Subagent Prompt Pattern
 
-Template for spawning gsd-debugger agent. The agent contains all debugging expertise - this template provides problem context only.
+System prompt template for spawning debug/diagnosis subagents.
+
+**Usage:** Passed to subagent when diagnosing UAT gaps or issues
+**Agent Type:** gsd-debug-subagent
+**Tags:** ["gsd-managed", "agent-prompt", "debug"]
+
+> **Note:** Debugging methodology is in the gsd-debugger agent. This template passes problem context only.
 
 ---
 
@@ -26,21 +32,13 @@ symptoms_prefilled: {true_or_false}
 goal: {find_root_cause_only | find_and_fix}
 </mode>
 
-<debug_file>
-Create: .planning/debug/{slug}.md
-</debug_file>
-
 <mosic_context>
-<!-- Mosic integration context - populated when synced -->
 **Mosic Task ID:** {mosic_task_id}
 **Mosic Project ID:** {mosic_project_id}
+**UAT Page ID:** {mosic_uat_page_id}
 
-When creating debug files, include Mosic frontmatter:
-- mosic_page_id: Leave empty (populated on sync)
-- mosic_source_task_id: Task that spawned this debug session
-- mosic_tags: ["debug", "investigation", "gsd-managed"]
-
-Debug sessions will be synced to Mosic as M Pages linked to source tasks.
+Debug results will be written back to UAT page Gaps section.
+If fix is applied, commit reference will be added.
 </mosic_context>
 ```
 
@@ -58,7 +56,30 @@ Debug sessions will be synced to Mosic as M Pages linked to source tasks.
 | `{reproduction}` | From symptoms | `Open /auth page` |
 | `{timeline}` | From symptoms | `After recent deploy` |
 | `{goal}` | Orchestrator sets | `find_and_fix` |
-| `{slug}` | Generated | `auth-screen-dark` |
+
+---
+
+## Context Loading from Mosic
+
+```javascript
+// Load UAT page with gaps
+const pages = await mosic_get_entity_pages("MTask List", task_list_id);
+const uat = pages.find(p => p.title.includes("UAT"));
+const uatContent = await mosic_get_page(uat.name, { content_format: "markdown" });
+
+// Parse gaps from content
+const gaps = parseGaps(uatContent);
+const targetGap = gaps.find(g => g.id === issue_id);
+
+// Fill template with gap context
+const template = fillTemplate({
+  issue_id: targetGap.id,
+  issue_summary: targetGap.brief,
+  expected: targetGap.truth,
+  actual: targetGap.reason,
+  // ...
+});
+```
 
 ---
 
@@ -75,30 +96,74 @@ Task(
 
 **From diagnose-issues (UAT):**
 ```python
-Task(prompt=template, subagent_type="gsd-debugger", description="Debug UAT-001")
+Task(
+  prompt=template,
+  subagent_type="gsd-debugger",
+  description="Debug UAT gap {gap_id}"
+)
 ```
 
 ---
 
-## Continuation
+## Output Format
 
-For checkpoints, spawn fresh agent with:
+Subagent returns structured diagnosis:
 
-```markdown
-<objective>
-Continue debugging {slug}. Evidence is in the debug file.
-</objective>
-
-<prior_state>
-Debug file: @.planning/debug/{slug}.md
-</prior_state>
-
-<checkpoint_response>
-**Type:** {checkpoint_type}
-**Response:** {user_response}
-</checkpoint_response>
-
-<mode>
-goal: {goal}
-</mode>
 ```
+ROOT_CAUSE: [Single sentence explaining why this happens]
+
+ARTIFACTS:
+- path/to/file.ts (line ~N) - [what's wrong here]
+- path/to/file.ts (line ~N) - [what's wrong here]
+
+MISSING:
+- [Specific thing that needs to be added or changed]
+- [Specific thing that needs to be added or changed]
+
+CONFIDENCE: [HIGH | MEDIUM | LOW]
+REASONING: [Why you believe this is the root cause]
+```
+
+---
+
+## Output Handling
+
+```javascript
+// Update UAT page with diagnosis
+const updatedGaps = gaps.map(g => {
+  if (g.id === issue_id) {
+    return {
+      ...g,
+      root_cause: diagnosis.root_cause,
+      artifacts: diagnosis.artifacts,
+      missing: diagnosis.missing
+    };
+  }
+  return g;
+});
+
+await mosic_update_content_blocks(uat_page_id, {
+  blocks: formatGapsAsContent(updatedGaps)
+});
+
+// Create fix task if needed
+if (goal === "find_and_fix") {
+  await mosic_create_document("MTask", {
+    title: `Fix: ${issue_summary}`,
+    description: `Root cause: ${diagnosis.root_cause}\n\nMissing:\n${diagnosis.missing.join('\n')}`,
+    task_list: task_list_id,
+    workspace: workspace_id,
+    priority: gap.severity === "blocker" ? "High" : "Medium"
+  });
+}
+```
+
+---
+
+## Parallel Diagnosis
+
+Multiple gaps can be diagnosed in parallel:
+- Each gap gets its own debug agent
+- Agents have isolated context (no cross-contamination)
+- Results aggregated after all complete
+- Duplicate root causes merged

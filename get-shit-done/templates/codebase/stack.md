@@ -1,19 +1,15 @@
----
-# Mosic Integration (populated when synced with Mosic MCP)
-mosic_page_id: ""
-mosic_workspace_id: ""
-mosic_tags: ["codebase", "stack", "gsd-managed"]
----
+# Codebase Stack Page Content Pattern
 
-# Technology Stack Template
+Content structure for codebase technology stack analysis pages in Mosic.
 
-Template for `.planning/codebase/STACK.md` - captures the technology foundation.
-
-**Purpose:** Document what technologies run this codebase. Focused on "what executes when you run the code."
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Codebase Stack", icon: "lucide:layers" })`
+**Page Type:** Document
+**Icon:** lucide:layers
+**Tags:** ["gsd-managed", "codebase", "stack"]
 
 ---
 
-## File Template
+## Content Structure
 
 ```markdown
 # Technology Stack
@@ -88,7 +84,10 @@ Template for `.planning/codebase/STACK.md` - captures the technology foundation.
 *Update after major dependency changes*
 ```
 
+---
+
 <good_examples>
+
 ```markdown
 # Technology Stack
 
@@ -161,10 +160,12 @@ Template for `.planning/codebase/STACK.md` - captures the technology foundation.
 *Stack analysis: 2025-01-20*
 *Update after major dependency changes*
 ```
+
 </good_examples>
 
 <guidelines>
-**What belongs in STACK.md:**
+
+**What belongs in codebase stack:**
 - Languages and versions
 - Runtime requirements (Node, Bun, Deno, browser)
 - Package manager and lockfile
@@ -174,8 +175,8 @@ Template for `.planning/codebase/STACK.md` - captures the technology foundation.
 - Platform/deployment requirements
 
 **What does NOT belong here:**
-- File structure (that's STRUCTURE.md)
-- Architectural patterns (that's ARCHITECTURE.md)
+- File structure (that's structure page)
+- Architectural patterns (that's architecture page)
 - Every dependency in package.json (only critical ones)
 - Implementation details (defer to code)
 
@@ -190,4 +191,47 @@ Template for `.planning/codebase/STACK.md` - captures the technology foundation.
 - Upgrading frameworks (know what's in use)
 - Choosing implementation approach (must work with existing stack)
 - Understanding build requirements
+
 </guidelines>
+
+<mosic_operations>
+
+**Create codebase stack page:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: "Codebase Stack",
+  icon: "lucide:layers",
+  content: stackContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "codebase", "stack"]
+});
+```
+
+**Read stack for planning:**
+```javascript
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const stack = pages.find(p => p.title === "Codebase Stack");
+const content = await mosic_get_page(stack.name, { content_format: "markdown" });
+```
+
+**Update stack analysis:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+**Find all codebase stack pages:**
+```javascript
+const stackPages = await mosic_search_documents_by_tags({
+  workspace_id,
+  tags: ["codebase", "stack"],
+  doctype: "M Page"
+});
+```
+
+</mosic_operations>

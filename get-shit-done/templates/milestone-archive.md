@@ -1,133 +1,169 @@
-# Milestone Archive Template
+# Milestone Archive Page Content Pattern
 
-This template is used by the complete-milestone workflow to create archive files in `.planning/milestones/`.
+Content structure for comprehensive milestone archive documentation in Mosic.
+
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "v[X.Y] [Name] Archive", icon: "lucide:archive" })`
+**Page Type:** Document
+**Icon:** lucide:archive
+**Tags:** ["gsd-managed", "milestone-archive", "v1.0"]
 
 ---
 
-## File Template
+## Content Structure
 
----
-# Mosic Integration (optional - populated when synced with Mosic)
-mosic_milestone_id: ""         # Mosic milestone/release tracking ID
-mosic_page_id: ""              # M Page ID for this milestone archive
-mosic_project_id: ""           # Parent MProject ID
-mosic_archived_task_lists: []  # MTask List IDs archived with this milestone
-mosic_archive_url: ""          # URL to Mosic milestone page
----
+```markdown
+# Milestone v[VERSION]: [MILESTONE_NAME] Archive
 
-# Milestone v{{VERSION}}: {{MILESTONE_NAME}}
-
-**Status:** ✅ SHIPPED {{DATE}}
-**Phases:** {{PHASE_START}}-{{PHASE_END}}
-**Total Plans:** {{TOTAL_PLANS}}
-**Mosic URL:** {{MOSIC_MILESTONE_URL}}
+**Status:** SHIPPED [DATE]
+**Phases:** [PHASE_START]-[PHASE_END]
+**Total Plans:** [TOTAL_PLANS]
 
 ## Overview
 
-{{MILESTONE_DESCRIPTION}}
+[MILESTONE_DESCRIPTION]
 
 ## Phases
 
-{{PHASES_SECTION}}
+### Phase [PHASE_NUM]: [PHASE_NAME]
 
-[For each phase in this milestone, include:]
+**Goal**: [PHASE_GOAL]
+**Depends on**: [DEPENDS_ON]
+**Plans completed:** [PLAN_COUNT]
 
-### Phase {{PHASE_NUM}}: {{PHASE_NAME}}
+**Plans:**
+- [x] [PHASE]-01: [PLAN_DESCRIPTION]
+- [x] [PHASE]-02: [PLAN_DESCRIPTION]
 
-**Goal**: {{PHASE_GOAL}}
-**Depends on**: {{DEPENDS_ON}}
-**Plans**: {{PLAN_COUNT}} plans
-
-Plans:
-
-- [x] {{PHASE}}-01: {{PLAN_DESCRIPTION}}
-- [x] {{PHASE}}-02: {{PLAN_DESCRIPTION}}
-      [... all plans ...]
-
-**Details:**
-{{PHASE_DETAILS_FROM_ROADMAP}}
-
-**For decimal phases, include (INSERTED) marker:**
-
-### Phase 2.1: Critical Security Patch (INSERTED)
-
-**Goal**: Fix authentication bypass vulnerability
-**Depends on**: Phase 2
-**Plans**: 1 plan
-
-Plans:
-
-- [x] 02.1-01: Patch auth vulnerability
-
-**Details:**
-{{PHASE_DETAILS_FROM_ROADMAP}}
+**Summary:** [Brief phase summary from phase summary page]
 
 ---
 
+### Phase [PHASE_NUM].1: [PHASE_NAME] (INSERTED)
+
+**Goal**: [Urgent work inserted between phases]
+**Depends on**: Phase [N]
+**Plans completed:** 1
+
+**Plans:**
+- [x] [PHASE].1-01: [Description]
+
+**Summary:** [Brief summary]
+
+---
+
+[... continue for all phases in milestone ...]
+
 ## Milestone Summary
 
-**Decimal Phases:**
+### Decimal Phases
 
 - Phase 2.1: Critical Security Patch (inserted after Phase 2 for urgent fix)
 - Phase 5.1: Performance Hotfix (inserted after Phase 5 for production issue)
 
-**Key Decisions:**
-{{DECISIONS_FROM_PROJECT_STATE}}
-[Example:]
+### Key Decisions
 
-- Decision: Use ROADMAP.md split (Rationale: Constant context cost)
-- Decision: Decimal phase numbering (Rationale: Clear insertion semantics)
+[Decisions made during this milestone:]
 
-**Issues Resolved:**
-{{ISSUES_RESOLVED_DURING_MILESTONE}}
-[Example:]
+| Decision | Rationale | Outcome |
+|----------|-----------|---------|
+| [Choice] | [Why] | [Result] |
 
-- Fixed context overflow at 100+ phases
-- Resolved phase insertion confusion
+### Issues Resolved
 
-**Issues Deferred:**
-{{ISSUES_DEFERRED_TO_LATER}}
-[Example:]
+- [Issue resolved during milestone]
+- [Another issue resolved]
 
-- PROJECT-STATE.md tiering (deferred until decisions > 300)
+### Issues Deferred
 
-**Technical Debt Incurred:**
-{{SHORTCUTS_NEEDING_FUTURE_WORK}}
-[Example:]
+- [Issue] (deferred to [when/why])
 
-- Some workflows still have hardcoded paths (fix in Phase 5)
+### Technical Debt Incurred
+
+- [Shortcut taken] (needs addressing in [future phase])
 
 ---
-
-_For current project status, see .planning/ROADMAP.md_
+*Archived: [date]*
+```
 
 ---
-
-## Usage Guidelines
 
 <guidelines>
+
 **When to create milestone archives:**
 - After completing all phases in a milestone (v1.0, v1.1, v2.0, etc.)
 - Triggered by complete-milestone workflow
 - Before planning next milestone work
 
-**How to fill template:**
-
-- Replace {{PLACEHOLDERS}} with actual values
-- Extract phase details from ROADMAP.md
+**How to populate:**
+- Extract phase details from MTask Lists
+- Gather decisions from project overview and phase summaries
 - Document decimal phases with (INSERTED) marker
-- Include key decisions from PROJECT-STATE.md or SUMMARY files
 - List issues resolved vs deferred
 - Capture technical debt for future reference
 
-**Archive location:**
-
-- Save to `.planning/milestones/v{VERSION}-{NAME}.md`
-- Example: `.planning/milestones/v1.0-mvp.md`
-
 **After archiving:**
-
-- Update ROADMAP.md to collapse completed milestone in `<details>` tag
-- Update PROJECT.md to brownfield format with Current State section
+- Update Roadmap page to show milestone as complete
+- Update Project Overview with milestone accomplishments
 - Continue phase numbering in next milestone (never restart at 01)
-  </guidelines>
+
+</guidelines>
+
+<mosic_operations>
+
+**Create milestone archive:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: `v${version} ${name} Archive`,
+  icon: "lucide:archive",
+  content: archiveContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "milestone-archive", `v${version}`]
+});
+```
+
+**Gather milestone data:**
+```javascript
+// Get all phases (task lists) in milestone range
+const project = await mosic_get_project(project_id, { include_task_lists: true });
+const milestonePhases = project.task_lists.filter(tl => {
+  const phaseNum = parseInt(tl.title.match(/Phase (\d+)/)?.[1] || 0);
+  return phaseNum >= startPhase && phaseNum <= endPhase;
+});
+
+// Get summaries for each phase
+for (const phase of milestonePhases) {
+  const pages = await mosic_get_entity_pages("MTask List", phase.name);
+  const summary = pages.find(p => p.title.includes("Summary"));
+  // Include summary content in archive
+}
+```
+
+**Link archive to phases:**
+```javascript
+// Create relations to archived task lists
+for (const phase of milestonePhases) {
+  await mosic_create_document("M Relation", {
+    from_doctype: "M Page",
+    from_name: archive_page_id,
+    to_doctype: "MTask List",
+    to_name: phase.name,
+    relation_type: "Related"
+  });
+}
+```
+
+**Update roadmap after archive:**
+```javascript
+// Mark milestone as shipped in roadmap page
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const roadmap = pages.find(p => p.title === "Roadmap");
+await mosic_update_content_blocks(roadmap.name, {
+  blocks: updatedRoadmapWithShippedMilestone
+});
+```
+
+</mosic_operations>

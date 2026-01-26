@@ -1,32 +1,23 @@
-# PROJECT.md Template
+# Project Overview Page Content Pattern
 
-Template for `.planning/PROJECT.md` — the living project context document.
+Content structure for the MProject's linked overview page in Mosic.
 
-<template>
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Project Overview", icon: "lucide:book-open" })`
+**Page Type:** Document
+**Icon:** lucide:book-open
+**Tags:** ["gsd-managed", "overview"]
+
+---
+
+## Content Structure
 
 ```markdown
----
-# Mosic Integration (optional - populated when synced with Mosic)
-mosic_project_id: ""           # MProject document ID
-mosic_workspace_id: ""         # Workspace containing the project
-mosic_space_id: ""             # M Space the project belongs to
-mosic_page_id: ""              # M Page ID for this project document
-mosic_project_url: ""          # URL to Mosic project dashboard
-mosic_sync_enabled: false      # Whether Mosic sync is active
----
-
 # [Project Name]
 
 ## What This Is
 
 [Current accurate description — 2-3 sentences. What does this product do and who is it for?
 Use the user's language and framing. Update whenever reality drifts from this description.]
-
-## Mosic Integration
-
-**Status:** [Not configured / Configured / Synced]
-**Project URL:** [Mosic project URL if configured]
-**Workspace:** [Workspace name if configured]
 
 ## Core Value
 
@@ -83,7 +74,7 @@ Common types: Tech stack, Timeline, Budget, Dependencies, Compatibility, Perform
 *Last updated: [date] after [trigger]*
 ```
 
-</template>
+---
 
 <guidelines>
 
@@ -142,7 +133,7 @@ Common types: Tech stack, Timeline, Budget, Dependencies, Compatibility, Perform
 
 <evolution>
 
-PROJECT.md evolves throughout the project lifecycle.
+Project overview page evolves throughout the project lifecycle.
 
 **After each phase transition:**
 1. Requirements invalidated? → Move to Out of Scope with reason
@@ -182,19 +173,61 @@ For existing codebases:
 
 </brownfield>
 
+<mosic_operations>
+
+**Create project overview page:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: "Project Overview",
+  icon: "lucide:book-open",
+  content: overviewContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "overview"]
+});
+```
+
+**Read project context:**
+```javascript
+// Get project with all pages
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const overview = pages.find(p => p.title === "Project Overview");
+const content = await mosic_get_page(overview.name, { content_format: "markdown" });
+```
+
+**Update project overview:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+**Query project information:**
+```javascript
+// Get project metadata
+const project = await mosic_get_project(project_id);
+
+// Core value is in project description or overview page
+// Requirements tracking via requirements page
+// Decisions via key decisions in overview page
+```
+
+</mosic_operations>
+
 <state_reference>
 
-STATE.md references PROJECT.md:
+Project State page references this overview:
 
 ```markdown
 ## Project Reference
-
-See: .planning/PROJECT.md (updated [date])
 
 **Core value:** [One-liner from Core Value section]
 **Current focus:** [Current phase name]
 ```
 
-This ensures Claude reads current PROJECT.md context.
+This ensures agents read current project context.
 
 </state_reference>

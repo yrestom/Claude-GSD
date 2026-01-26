@@ -1,15 +1,15 @@
+# Stack Research Page Content Pattern
+
+Content structure for domain stack research pages in Mosic.
+
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Stack Research", icon: "lucide:layers" })`
+**Page Type:** Document
+**Icon:** lucide:layers
+**Tags:** ["gsd-managed", "research-project", "stack"]
+
 ---
-type: stack
-# Mosic Integration (optional - populated when synced with Mosic)
-mosic_page_id: ""
-mosic_tags: ["research-project", "stack", "gsd-managed"]
----
 
-# Stack Research Template
-
-Template for `.planning/research/STACK.md` — recommended technologies for the project domain.
-
-<template>
+## Content Structure
 
 ```markdown
 # Stack Research
@@ -97,7 +97,7 @@ npm install -D [packages]
 *Researched: [date]*
 ```
 
-</template>
+---
 
 <guidelines>
 
@@ -125,3 +125,45 @@ npm install -D [packages]
 - Critical for avoiding debugging time later
 
 </guidelines>
+
+<mosic_operations>
+
+**Create stack research page:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: "Stack Research",
+  icon: "lucide:layers",
+  content: stackContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "research-project", "stack"]
+});
+```
+
+**Read stack for planning:**
+```javascript
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const stack = pages.find(p => p.title === "Stack Research");
+const content = await mosic_get_page(stack.name, { content_format: "markdown" });
+```
+
+**Update stack research:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+**Find all stack research:**
+```javascript
+const stackPages = await mosic_search_documents_by_tags({
+  workspace_id,
+  tags: ["research-project", "stack"],
+  doctype: "M Page"
+});
+```
+
+</mosic_operations>

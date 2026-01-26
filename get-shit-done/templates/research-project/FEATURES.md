@@ -1,15 +1,15 @@
+# Features Research Page Content Pattern
+
+Content structure for domain features research pages in Mosic.
+
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Features Research", icon: "lucide:list-checks" })`
+**Page Type:** Document
+**Icon:** lucide:list-checks
+**Tags:** ["gsd-managed", "research-project", "features"]
+
 ---
-type: features
-# Mosic Integration (optional - populated when synced with Mosic)
-mosic_page_id: ""
-mosic_tags: ["research-project", "features", "gsd-managed"]
----
 
-# Features Research Template
-
-Template for `.planning/research/FEATURES.md` — feature landscape for the project domain.
-
-<template>
+## Content Structure
 
 ```markdown
 # Feature Research
@@ -122,7 +122,7 @@ Features to defer until product-market fit is established.
 *Researched: [date]*
 ```
 
-</template>
+---
 
 <guidelines>
 
@@ -133,7 +133,7 @@ Features to defer until product-market fit is established.
 
 **Differentiators:**
 - These are where you compete
-- Should align with the Core Value from PROJECT.md
+- Should align with the Core Value from project requirements
 - Don't try to differentiate on everything
 
 **Anti-Features:**
@@ -152,3 +152,45 @@ Features to defer until product-market fit is established.
 - Launch with less, validate, then expand
 
 </guidelines>
+
+<mosic_operations>
+
+**Create features research page:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: "Features Research",
+  icon: "lucide:list-checks",
+  content: featuresContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "research-project", "features"]
+});
+```
+
+**Read features for planning:**
+```javascript
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const features = pages.find(p => p.title === "Features Research");
+const content = await mosic_get_page(features.name, { content_format: "markdown" });
+```
+
+**Update features research:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+**Find all features research:**
+```javascript
+const featurePages = await mosic_search_documents_by_tags({
+  workspace_id,
+  tags: ["research-project", "features"],
+  doctype: "M Page"
+});
+```
+
+</mosic_operations>

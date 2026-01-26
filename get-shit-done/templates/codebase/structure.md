@@ -1,19 +1,15 @@
----
-# Mosic Integration (populated when synced with Mosic MCP)
-mosic_page_id: ""
-mosic_workspace_id: ""
-mosic_tags: ["codebase", "structure", "gsd-managed"]
----
+# Codebase Structure Page Content Pattern
 
-# Structure Template
+Content structure for codebase structure analysis pages in Mosic.
 
-Template for `.planning/codebase/STRUCTURE.md` - captures physical file organization.
-
-**Purpose:** Document where things physically live in the codebase. Answers "where do I put X?"
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Codebase Structure", icon: "lucide:folder-tree" })`
+**Page Type:** Document
+**Icon:** lucide:folder-tree
+**Tags:** ["gsd-managed", "codebase", "structure"]
 
 ---
 
-## File Template
+## Content Structure
 
 ```markdown
 # Codebase Structure
@@ -121,7 +117,10 @@ Template for `.planning/codebase/STRUCTURE.md` - captures physical file organiza
 *Update when directory structure changes*
 ```
 
+---
+
 <good_examples>
+
 ```markdown
 # Codebase Structure
 
@@ -136,7 +135,7 @@ get-shit-done/
 │   └── gsd/           # GSD-specific commands
 ├── get-shit-done/     # Skill resources
 │   ├── references/    # Principle documents
-│   ├── templates/     # File templates
+│   ├── templates/     # Page content patterns
 │   └── workflows/     # Multi-step procedures
 ├── src/               # Source code (if applicable)
 ├── tests/             # Test files
@@ -165,10 +164,10 @@ get-shit-done/
 - Subdirectories: None
 
 **get-shit-done/templates/**
-- Purpose: Document templates for .planning/ files
-- Contains: Template definitions with frontmatter
-- Key files: project.md, roadmap.md, plan.md, summary.md
-- Subdirectories: codebase/ (new - for stack/architecture/structure templates)
+- Purpose: Page content patterns for Mosic M Pages
+- Contains: Template definitions describing M Page content structure
+- Key files: project.md, roadmap.md, state.md, summary.md
+- Subdirectories: codebase/, research-project/
 
 **get-shit-done/workflows/**
 - Purpose: Reusable multi-step procedures
@@ -250,10 +249,12 @@ get-shit-done/
 *Structure analysis: 2025-01-20*
 *Update when directory structure changes*
 ```
+
 </good_examples>
 
 <guidelines>
-**What belongs in STRUCTURE.md:**
+
+**What belongs in codebase structure:**
 - Directory layout (ASCII tree)
 - Purpose of each directory
 - Key file locations (entry points, configs, core logic)
@@ -262,8 +263,8 @@ get-shit-done/
 - Special/generated directories
 
 **What does NOT belong here:**
-- Conceptual architecture (that's ARCHITECTURE.md)
-- Technology stack (that's STACK.md)
+- Conceptual architecture (that's architecture page)
+- Technology stack (that's stack page)
 - Code implementation details (defer to code reading)
 - Every single file (focus on directories and key files)
 
@@ -289,4 +290,47 @@ root/
 - Understanding project organization
 - Finding where specific logic lives
 - Following existing conventions
+
 </guidelines>
+
+<mosic_operations>
+
+**Create codebase structure page:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: "Codebase Structure",
+  icon: "lucide:folder-tree",
+  content: structureContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "codebase", "structure"]
+});
+```
+
+**Read structure for planning:**
+```javascript
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const structure = pages.find(p => p.title === "Codebase Structure");
+const content = await mosic_get_page(structure.name, { content_format: "markdown" });
+```
+
+**Update structure analysis:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+**Find all codebase structure pages:**
+```javascript
+const structurePages = await mosic_search_documents_by_tags({
+  workspace_id,
+  tags: ["codebase", "structure"],
+  doctype: "M Page"
+});
+```
+
+</mosic_operations>

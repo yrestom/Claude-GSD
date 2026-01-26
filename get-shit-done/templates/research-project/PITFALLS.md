@@ -1,15 +1,15 @@
+# Pitfalls Research Page Content Pattern
+
+Content structure for domain pitfalls research pages in Mosic.
+
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Pitfalls Research", icon: "lucide:alert-triangle" })`
+**Page Type:** Document
+**Icon:** lucide:alert-triangle
+**Tags:** ["gsd-managed", "research-project", "pitfalls"]
+
 ---
-type: pitfalls
-# Mosic Integration (optional - populated when synced with Mosic)
-mosic_page_id: ""
-mosic_tags: ["research-project", "pitfalls", "gsd-managed"]
----
 
-# Pitfalls Research Template
-
-Template for `.planning/research/PITFALLS.md` — common mistakes to avoid in the project domain.
-
-<template>
+## Content Structure
 
 ```markdown
 # Pitfalls Research
@@ -170,7 +170,7 @@ How roadmap phases should address these pitfalls.
 *Researched: [date]*
 ```
 
-</template>
+---
 
 <guidelines>
 
@@ -205,3 +205,45 @@ How roadmap phases should address these pitfalls.
 - Informs phase ordering and success criteria
 
 </guidelines>
+
+<mosic_operations>
+
+**Create pitfalls research page:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: "Pitfalls Research",
+  icon: "lucide:alert-triangle",
+  content: pitfallsContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "research-project", "pitfalls"]
+});
+```
+
+**Read pitfalls for planning:**
+```javascript
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const pitfalls = pages.find(p => p.title === "Pitfalls Research");
+const content = await mosic_get_page(pitfalls.name, { content_format: "markdown" });
+```
+
+**Update pitfalls research:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+**Find all pitfalls research:**
+```javascript
+const pitfallPages = await mosic_search_documents_by_tags({
+  workspace_id,
+  tags: ["research-project", "pitfalls"],
+  doctype: "M Page"
+});
+```
+
+</mosic_operations>

@@ -1,53 +1,17 @@
-# Summary Template
+# Task Summary Page Content Pattern
 
-Template for `.planning/phases/XX-name/{phase}-{plan}-SUMMARY.md` - phase completion documentation.
+Content structure for MTask completion documentation in Mosic.
+
+**Created via:** `mosic_create_entity_page("MTask", task_id, { title: "[Phase]-[Plan] Summary", icon: "lucide:check-circle" })`
+**Page Type:** Document
+**Icon:** lucide:check-circle
+**Tags:** ["gsd-managed", "summary", "phase-XX"]
 
 ---
 
-## File Template
+## Content Structure
 
 ```markdown
----
-phase: XX-name
-plan: YY
-subsystem: [primary category: auth, payments, ui, api, database, infra, testing, etc.]
-tags: [searchable tech: jwt, stripe, react, postgres, prisma]
-
-# Mosic Integration (optional - populated when synced with Mosic)
-mosic_task_id: ""              # MTask ID this summary is linked to
-mosic_page_id: ""              # M Page ID for this summary document
-mosic_task_list_id: ""         # MTask List (phase) this belongs to
-
-# Dependency graph
-requires:
-  - phase: [prior phase this depends on]
-    provides: [what that phase built that this uses]
-provides:
-  - [bullet list of what this phase built/delivered]
-affects: [list of phase names or keywords that will need this context]
-
-# Tech tracking
-tech-stack:
-  added: [libraries/tools added in this phase]
-  patterns: [architectural/code patterns established]
-
-key-files:
-  created: [important files created]
-  modified: [important files modified]
-
-key-decisions:
-  - "Decision 1"
-  - "Decision 2"
-
-patterns-established:
-  - "Pattern 1: description"
-  - "Pattern 2: description"
-
-# Metrics
-duration: Xmin
-completed: YYYY-MM-DD
----
-
 # Phase [X]: [Name] Summary
 
 **[Substantive one-liner describing outcome - NOT "phase complete" or "implementation finished"]**
@@ -114,13 +78,10 @@ _Note: TDD tasks may have multiple commits (test → feat → refactor)_
 
 ## User Setup Required
 
-[If USER-SETUP.md was generated:]
-**External services require manual configuration.** See [{phase}-USER-SETUP.md](./{phase}-USER-SETUP.md) for:
-- Environment variables to add
-- Dashboard configuration steps
-- Verification commands
+[If external services require manual configuration:]
+**External services require manual configuration.** Related user setup task has been created.
 
-[If no USER-SETUP.md:]
+[If no setup required:]
 None - no external service configuration required.
 
 ## Next Phase Readiness
@@ -132,22 +93,23 @@ None - no external service configuration required.
 *Completed: [date]*
 ```
 
+---
+
 <frontmatter_guidance>
-**Purpose:** Enable automatic context assembly via dependency graph. Frontmatter makes summary metadata machine-readable so plan-phase can scan all summaries quickly and select relevant ones based on dependencies.
 
-**Fast scanning:** Frontmatter is first ~25 lines, cheap to scan across all summaries without reading full content.
+**Purpose:** Summary metadata is captured in MTask fields and M Page relations, enabling automatic context assembly via Mosic search.
 
-**Dependency graph:** `requires`/`provides`/`affects` create explicit links between phases, enabling transitive closure for context selection.
+**Dependency tracking:** Use M Relations to link:
+- Summary page → Plan page (via "Related" relation)
+- Summary page → Prior summaries this depends on (via "Depends" relation)
+- Summary page → Key files created (via M External Link or description)
 
-**Subsystem:** Primary categorization (auth, payments, ui, api, database, infra, testing) for detecting related phases.
+**Phase identification:** Use tags like `phase-01`, `phase-02` for filtering summaries by phase.
 
-**Tags:** Searchable technical keywords (libraries, frameworks, tools) for tech stack awareness.
+**Key files:** Document in page content for @context references in future plans.
 
-**Key-files:** Important files for @context references in PLAN.md.
+**Patterns:** Established conventions noted in content for future phases to maintain.
 
-**Patterns:** Established conventions future phases should maintain.
-
-**Population:** Frontmatter is populated during summary creation in execute-plan.md. See `<step name="create_summary">` for field-by-field guidance.
 </frontmatter_guidance>
 
 <one_liner_rules>
@@ -238,14 +200,47 @@ The one-liner should tell someone what actually shipped.
 </example>
 
 <guidelines>
-**Frontmatter:** MANDATORY - complete all fields. Enables automatic context assembly for future planning.
 
 **One-liner:** Must be substantive. "JWT auth with refresh rotation using jose library" not "Authentication implemented".
 
 **Decisions section:**
 - Key decisions made during execution with rationale
-- Extracted to STATE.md accumulated context
+- Reference these decisions in future planning
 - Use "None - followed plan as specified" if no deviations
 
-**After creation:** STATE.md updated with position, decisions, issues.
+**After creation:**
+- Link summary page to MTask via `mosic_create_entity_page`
+- Add tags for phase identification
+- Create M Relations to dependent summaries
+
 </guidelines>
+
+<mosic_operations>
+
+**Create summary page:**
+```javascript
+await mosic_create_entity_page("MTask", task_id, {
+  title: `${phase}-${plan} Summary`,
+  icon: "lucide:check-circle",
+  content: summaryContent,
+  page_type: "Document"
+});
+
+// Add tags
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "summary", `phase-${phase}`]
+});
+```
+
+**Query summaries for context:**
+```javascript
+// Get all summaries for a phase
+const pages = await mosic_get_entity_pages("MTask List", task_list_id);
+const summaries = pages.filter(p => p.title.includes("Summary"));
+
+// Get summary content
+const content = await mosic_get_page(page_id, { content_format: "markdown" });
+```
+
+</mosic_operations>

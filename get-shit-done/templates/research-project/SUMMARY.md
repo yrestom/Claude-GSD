@@ -1,20 +1,20 @@
+# Research Summary Page Content Pattern
+
+Content structure for project research summary pages in Mosic.
+
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Research Summary", icon: "lucide:file-text" })`
+**Page Type:** Document
+**Icon:** lucide:file-text
+**Tags:** ["gsd-managed", "research-project", "summary"]
+
 ---
-type: summary
-# Mosic Integration (optional - populated when synced with Mosic)
-mosic_page_id: ""
-mosic_tags: ["research-project", "summary", "gsd-managed"]
----
 
-# Research Summary Template
-
-Template for `.planning/research/SUMMARY.md` — executive summary of project research with roadmap implications.
-
-<template>
+## Content Structure
 
 ```markdown
 # Project Research Summary
 
-**Project:** [name from PROJECT.md]
+**Project:** [name]
 **Domain:** [inferred domain type]
 **Researched:** [date]
 **Confidence:** [HIGH/MEDIUM/LOW]
@@ -31,7 +31,7 @@ Template for `.planning/research/SUMMARY.md` — executive summary of project re
 
 ### Recommended Stack
 
-[Summary from STACK.md — 1-2 paragraphs]
+[Summary from Stack Research page — 1-2 paragraphs]
 
 **Core technologies:**
 - [Technology]: [purpose] — [why recommended]
@@ -40,7 +40,7 @@ Template for `.planning/research/SUMMARY.md` — executive summary of project re
 
 ### Expected Features
 
-[Summary from FEATURES.md]
+[Summary from Features Research page]
 
 **Must have (table stakes):**
 - [Feature] — users expect this
@@ -55,7 +55,7 @@ Template for `.planning/research/SUMMARY.md` — executive summary of project re
 
 ### Architecture Approach
 
-[Summary from ARCHITECTURE.md — 1 paragraph]
+[Summary from Architecture Research page — 1 paragraph]
 
 **Major components:**
 1. [Component] — [responsibility]
@@ -64,7 +64,7 @@ Template for `.planning/research/SUMMARY.md` — executive summary of project re
 
 ### Critical Pitfalls
 
-[Top 3-5 from PITFALLS.md]
+[Top 3-5 from Pitfalls Research page]
 
 1. **[Pitfall]** — [how to avoid]
 2. **[Pitfall]** — [how to avoid]
@@ -77,13 +77,13 @@ Based on research, suggested phase structure:
 ### Phase 1: [Name]
 **Rationale:** [why this comes first based on research]
 **Delivers:** [what this phase produces]
-**Addresses:** [features from FEATURES.md]
-**Avoids:** [pitfall from PITFALLS.md]
+**Addresses:** [features from research]
+**Avoids:** [pitfall from research]
 
 ### Phase 2: [Name]
 **Rationale:** [why this order]
 **Delivers:** [what this phase produces]
-**Uses:** [stack elements from STACK.md]
+**Uses:** [stack elements from research]
 **Implements:** [architecture component]
 
 ### Phase 3: [Name]
@@ -142,7 +142,7 @@ Phases with standard patterns (skip research-phase):
 *Ready for roadmap: yes*
 ```
 
-</template>
+---
 
 <guidelines>
 
@@ -152,8 +152,8 @@ Phases with standard patterns (skip research-phase):
 - 2-3 paragraphs maximum
 
 **Key Findings:**
-- Summarize, don't duplicate full documents
-- Link to detailed docs (STACK.md, FEATURES.md, etc.)
+- Summarize, don't duplicate full research pages
+- Reference related pages (Stack, Features, Architecture, Pitfalls)
 - Focus on what matters for roadmap decisions
 
 **Implications for Roadmap:**
@@ -170,8 +170,52 @@ Phases with standard patterns (skip research-phase):
 - LOW = single source or inference
 
 **Integration with roadmap creation:**
-- This file is loaded as context during roadmap creation
+- This page is loaded as context during roadmap creation
 - Phase suggestions here become starting point for roadmap
 - Research flags inform phase planning
 
 </guidelines>
+
+<mosic_operations>
+
+**Create research summary page:**
+```javascript
+const pages = await mosic_get_entity_pages("MProject", project_id);
+
+await mosic_create_entity_page("MProject", project_id, {
+  title: "Research Summary",
+  icon: "lucide:file-text",
+  content: summaryContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "research-project", "summary"]
+});
+```
+
+**Read summary for roadmap creation:**
+```javascript
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const summary = pages.find(p => p.title === "Research Summary");
+const content = await mosic_get_page(summary.name, { content_format: "markdown" });
+```
+
+**Update summary with new findings:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+**Find all research summaries:**
+```javascript
+const summaries = await mosic_search_documents_by_tags({
+  workspace_id,
+  tags: ["research-project", "summary"],
+  doctype: "M Page"
+});
+```
+
+</mosic_operations>

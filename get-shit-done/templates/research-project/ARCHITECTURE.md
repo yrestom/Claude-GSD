@@ -1,15 +1,15 @@
+# Architecture Research Page Content Pattern
+
+Content structure for domain architecture research pages in Mosic.
+
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Architecture Research", icon: "lucide:boxes" })`
+**Page Type:** Document
+**Icon:** lucide:boxes
+**Tags:** ["gsd-managed", "research-project", "architecture"]
+
 ---
-type: architecture
-# Mosic Integration (optional - populated when synced with Mosic)
-mosic_page_id: ""
-mosic_tags: ["research-project", "architecture", "gsd-managed"]
----
 
-# Architecture Research Template
-
-Template for `.planning/research/ARCHITECTURE.md` — system structure patterns for the project domain.
-
-<template>
+## Content Structure
 
 ```markdown
 # Architecture Research
@@ -179,7 +179,7 @@ src/
 *Researched: [date]*
 ```
 
-</template>
+---
 
 <guidelines>
 
@@ -209,3 +209,45 @@ src/
 - Helps prevent common mistakes during implementation
 
 </guidelines>
+
+<mosic_operations>
+
+**Create architecture research page:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: "Architecture Research",
+  icon: "lucide:boxes",
+  content: architectureContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "research-project", "architecture"]
+});
+```
+
+**Read architecture for planning:**
+```javascript
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const arch = pages.find(p => p.title === "Architecture Research");
+const content = await mosic_get_page(arch.name, { content_format: "markdown" });
+```
+
+**Update architecture research:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+**Find all architecture research:**
+```javascript
+const archPages = await mosic_search_documents_by_tags({
+  workspace_id,
+  tags: ["research-project", "architecture"],
+  doctype: "M Page"
+});
+```
+
+</mosic_operations>

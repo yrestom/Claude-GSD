@@ -6,10 +6,6 @@
     "plan_check": true,
     "verifier": true
   },
-  "planning": {
-    "commit_docs": true,
-    "search_gitignored": false
-  },
   "parallelization": {
     "enabled": true,
     "plan_level": true,
@@ -33,27 +29,36 @@
     "always_confirm_external_services": true
   },
   "mosic": {
-    "enabled": false,
-    "workspace_id": null,
+    "enabled": true,
+    "workspace_id": "b0dd6682-3b21-4556-aeba-59229d454a27",
     "space_id": null,
     "project_id": null,
-    "sync_on_commit": true,
-    "auto_detect": true,
-    "task_lists": {},
-    "tasks": {},
-    "pages": {},
-    "checklists": {},
+    "current_phase_id": null,
+    "current_task_id": null,
+    "session": {
+      "active_project": null,
+      "active_phase": null,
+      "active_task": null,
+      "last_action": null,
+      "last_updated": null
+    },
+    "cache": {
+      "project": null,
+      "phases": [],
+      "current_phase_tasks": [],
+      "ttl_seconds": 300
+    },
     "tags": {
-      "gsd_managed": null,
-      "requirements": null,
-      "research": null,
-      "plan": null,
-      "summary": null,
-      "verification": null,
-      "uat": null,
-      "quick": null,
-      "fix": null,
-      "phase_tags": {}
+      "gsd_managed": "gsd-managed",
+      "requirements": "requirements",
+      "research": "research",
+      "plan": "plan",
+      "summary": "summary",
+      "verification": "verification",
+      "uat": "uat",
+      "quick": "quick",
+      "fix": "fix",
+      "codebase": "codebase"
     },
     "page_types": {
       "overview": "Document",
@@ -92,8 +97,6 @@
       "documentation": "Related",
       "dependency": "Depends",
       "blocker": "Blocker"
-    },
-    "pending_sync": [],
-    "last_sync": null
+    }
   }
 }

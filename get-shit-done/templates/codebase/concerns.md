@@ -1,19 +1,15 @@
----
-# Mosic Integration (populated when synced with Mosic MCP)
-mosic_page_id: ""
-mosic_workspace_id: ""
-mosic_tags: ["codebase", "concerns", "gsd-managed"]
----
+# Codebase Concerns Page Content Pattern
 
-# Codebase Concerns Template
+Content structure for codebase concerns and issues analysis pages in Mosic.
 
-Template for `.planning/codebase/CONCERNS.md` - captures known issues and areas requiring care.
-
-**Purpose:** Surface actionable warnings about the codebase. Focused on "what to watch out for when making changes."
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Codebase Concerns", icon: "lucide:alert-circle" })`
+**Page Type:** Document
+**Icon:** lucide:alert-circle
+**Tags:** ["gsd-managed", "codebase", "concerns"]
 
 ---
 
-## File Template
+## Content Structure
 
 ```markdown
 # Codebase Concerns
@@ -126,7 +122,10 @@ Template for `.planning/codebase/CONCERNS.md` - captures known issues and areas 
 *Update as issues are fixed or new ones discovered*
 ```
 
+---
+
 <good_examples>
+
 ```markdown
 # Codebase Concerns
 
@@ -158,14 +157,6 @@ Template for `.planning/codebase/CONCERNS.md` - captures known issues and areas 
 - Root cause: Webhook processing slower than user navigation, no optimistic UI update
 - Fix: Add polling in `app/checkout/success/page.tsx` after redirect
 
-**Inconsistent session state after logout:**
-- Symptoms: User redirected to /dashboard after logout instead of /login
-- Trigger: Logout via button in mobile nav (desktop works fine)
-- File: `components/MobileNav.tsx` (line ~45, logout handler)
-- Workaround: Manual URL navigation to /login works
-- Root cause: Mobile nav component not awaiting supabase.auth.signOut()
-- Fix: Add await to logout handler in `components/MobileNav.tsx`
-
 ## Security Considerations
 
 **Admin role check client-side only:**
@@ -173,12 +164,6 @@ Template for `.planning/codebase/CONCERNS.md` - captures known issues and areas 
 - Files: `app/admin/page.tsx`, `app/admin/users/page.tsx`, `components/AdminGuard.tsx`
 - Current mitigation: None (relying on UI hiding)
 - Recommendations: Add middleware to admin routes in `middleware.ts`, verify role server-side
-
-**Unvalidated file uploads:**
-- Risk: Users can upload any file type to avatar bucket (no size/type validation)
-- File: `components/AvatarUpload.tsx` (upload handler)
-- Current mitigation: Supabase bucket limits to 2MB (configured in dashboard)
-- Recommendations: Add file type validation (image/* only) in `lib/storage/validate.ts`
 
 ## Performance Bottlenecks
 
@@ -189,13 +174,6 @@ Template for `.planning/codebase/CONCERNS.md` - captures known issues and areas 
 - Cause: N+1 query pattern (separate query per course for lessons)
 - Improvement path: Use Prisma include to eager-load lessons in `lib/db/courses.ts`, add Redis caching
 
-**Dashboard initial load:**
-- Problem: Waterfall of 5 serial API calls on mount
-- File: `app/dashboard/page.tsx`
-- Measurement: 3.5s until interactive on slow 3G
-- Cause: Each component fetches own data independently
-- Improvement path: Convert to Server Component with single parallel fetch
-
 ## Fragile Areas
 
 **Authentication middleware chain:**
@@ -205,13 +183,6 @@ Template for `.planning/codebase/CONCERNS.md` - captures known issues and areas 
 - Safe modification: Add tests before changing order, document dependencies in comments
 - Test coverage: No integration tests for middleware chain (only unit tests)
 
-**Stripe webhook event handling:**
-- File: `app/api/webhooks/stripe/route.ts`
-- Why fragile: Giant switch statement with 12 event types, shared transaction logic
-- Common failures: New event type added without handling, partial DB updates on error
-- Safe modification: Extract each event handler to `lib/stripe/handlers/*.ts`
-- Test coverage: Only 3 of 12 event types have tests
-
 ## Scaling Limits
 
 **Supabase Free Tier:**
@@ -219,12 +190,6 @@ Template for `.planning/codebase/CONCERNS.md` - captures known issues and areas 
 - Limit: ~5000 users estimated before hitting limits
 - Symptoms at limit: 429 rate limit errors, DB writes fail
 - Scaling path: Upgrade to Pro ($25/mo) extends to 8GB DB, 100GB storage
-
-**Server-side render blocking:**
-- Current capacity: ~50 concurrent users before slowdown
-- Limit: Vercel Hobby plan (10s function timeout, 100GB-hrs/mo)
-- Symptoms at limit: 504 gateway timeouts on course pages
-- Scaling path: Upgrade to Vercel Pro ($20/mo), add edge caching
 
 ## Dependencies at Risk
 
@@ -241,12 +206,6 @@ Template for `.planning/codebase/CONCERNS.md` - captures known issues and areas 
 - Blocks: Can't retain users with expired cards, no dunning process
 - Implementation complexity: Medium (Stripe webhooks + email flow + UI)
 
-**Course progress tracking:**
-- Problem: No persistent state for which lessons completed
-- Current workaround: Users manually track progress
-- Blocks: Can't show completion percentage, can't recommend next lesson
-- Implementation complexity: Low (add completed_lessons junction table)
-
 ## Test Coverage Gaps
 
 **Payment flow end-to-end:**
@@ -255,21 +214,17 @@ Template for `.planning/codebase/CONCERNS.md` - captures known issues and areas 
 - Priority: High
 - Difficulty to test: Need Stripe test fixtures and webhook simulation setup
 
-**Error boundary behavior:**
-- What's not tested: How app behaves when components throw errors
-- Risk: White screen of death for users, no error reporting
-- Priority: Medium
-- Difficulty to test: Need to intentionally trigger errors in test environment
-
 ---
 
 *Concerns audit: 2025-01-20*
 *Update as issues are fixed or new ones discovered*
 ```
+
 </good_examples>
 
 <guidelines>
-**What belongs in CONCERNS.md:**
+
+**What belongs in codebase concerns:**
 - Tech debt with clear impact and fix approach
 - Known bugs with reproduction steps
 - Security gaps and mitigation recommendations
@@ -314,4 +269,47 @@ Template for `.planning/codebase/CONCERNS.md` - captures known issues and areas 
 
 **How this gets populated:**
 Explore agents detect these during codebase mapping. Manual additions welcome for human-discovered issues. This is living documentation, not a complaint list.
+
 </guidelines>
+
+<mosic_operations>
+
+**Create codebase concerns page:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: "Codebase Concerns",
+  icon: "lucide:alert-circle",
+  content: concernsContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "codebase", "concerns"]
+});
+```
+
+**Read concerns for planning:**
+```javascript
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const concerns = pages.find(p => p.title === "Codebase Concerns");
+const content = await mosic_get_page(concerns.name, { content_format: "markdown" });
+```
+
+**Update concerns analysis:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+**Find all codebase concerns pages:**
+```javascript
+const concernPages = await mosic_search_documents_by_tags({
+  workspace_id,
+  tags: ["codebase", "concerns"],
+  doctype: "M Page"
+});
+```
+
+</mosic_operations>

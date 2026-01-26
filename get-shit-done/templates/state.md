@@ -1,28 +1,22 @@
-# State Template
+# Project State Page Content Pattern
 
-Template for `.planning/STATE.md` — the project's living memory.
+Content structure for the MProject's linked state page in Mosic.
+
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Project State", icon: "lucide:activity" })`
+**Page Type:** Document
+**Icon:** lucide:activity
+**Tags:** ["gsd-managed", "state"]
 
 ---
 
-## File Template
+## Content Structure
 
 ```markdown
----
-# Mosic Integration (optional - populated when synced with Mosic)
-mosic_project_id: ""           # MProject document ID
-mosic_workspace_id: ""         # Workspace containing the project
-mosic_page_id: ""              # M Page ID for this state document
-mosic_last_sync: ""            # ISO timestamp of last sync
-mosic_sync_status: "unsynced"  # unsynced | synced | pending | error
----
-
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated [date])
-
-**Core value:** [One-liner from PROJECT.md Core Value section]
+**Core value:** [One-liner from project description]
 **Current focus:** [Current phase name]
 
 ## Current Position
@@ -33,15 +27,6 @@ Status: [Ready to plan / Planning / Ready to execute / In progress / Phase compl
 Last activity: [YYYY-MM-DD] — [What happened]
 
 Progress: [░░░░░░░░░░] 0%
-
-## Mosic Sync Status
-
-**Last sync:** [Never / YYYY-MM-DD HH:MM]
-**Sync status:** [Unsynced / Synced / Pending changes / Error]
-**Pending items:**
-- [None / List of items awaiting sync]
-
-**Project URL:** [Mosic project URL if synced]
 
 ## Performance Metrics
 
@@ -66,15 +51,14 @@ Progress: [░░░░░░░░░░] 0%
 
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
+Decisions logged in project Key Decisions. Recent decisions affecting current work:
 
 - [Phase X]: [Decision summary]
 - [Phase Y]: [Decision summary]
 
 ### Pending Todos
 
-[From .planning/todos/pending/ — ideas captured during sessions]
+[Ideas captured during sessions]
 
 None yet.
 
@@ -88,18 +72,20 @@ None yet.
 
 Last session: [YYYY-MM-DD HH:MM]
 Stopped at: [Description of last completed action]
-Resume file: [Path to .continue-here*.md if exists, otherwise "None"]
+Resume context: [Reference to continuation page if exists, otherwise "None"]
 ```
+
+---
 
 <purpose>
 
-STATE.md is the project's short-term memory spanning all phases and sessions.
+The Project State page is the project's short-term memory spanning all phases and sessions.
 
 **Problem it solves:** Information is captured in summaries, issues, and decisions but not systematically consumed. Sessions start without context.
 
-**Solution:** A single, small file that's:
-- Read first in every workflow
-- Updated after every significant action
+**Solution:** A single page that's:
+- Read first in every workflow via `mosic_get_entity_pages("MProject", project_id)`
+- Updated after every significant action via `mosic_update_content_blocks`
 - Contains digest of accumulated context
 - Enables instant session restoration
 
@@ -107,8 +93,8 @@ STATE.md is the project's short-term memory spanning all phases and sessions.
 
 <lifecycle>
 
-**Creation:** After ROADMAP.md is created (during init)
-- Reference PROJECT.md (read it for current context)
+**Creation:** After project roadmap is created (during init)
+- Reference project description (read via `mosic_get_project`)
 - Initialize empty accumulated context sections
 - Set position to "Phase 1 ready to plan"
 
@@ -118,10 +104,10 @@ STATE.md is the project's short-term memory spanning all phases and sessions.
 - execute: Know current position
 - transition: Know what's complete
 
-**Writing:** After every significant action
-- execute: After SUMMARY.md created
+**Writing:** After every significant action via `mosic_update_content_blocks`
+- execute: After task summary created
   - Update position (phase, plan, status)
-  - Note new decisions (detail in PROJECT.md)
+  - Note new decisions
   - Add blockers/concerns
 - transition: After phase marked complete
   - Update progress bar
@@ -133,12 +119,12 @@ STATE.md is the project's short-term memory spanning all phases and sessions.
 <sections>
 
 ### Project Reference
-Points to PROJECT.md for full context. Includes:
+Points to project overview for full context. Includes:
 - Core value (the ONE thing that matters)
 - Current focus (which phase)
 - Last update date (triggers re-read if stale)
 
-Claude reads PROJECT.md directly for requirements, constraints, and decisions.
+Load project context via `mosic_get_project(project_id)`.
 
 ### Current Position
 Where we are right now:
@@ -161,12 +147,11 @@ Updated after each plan completion.
 
 ### Accumulated Context
 
-**Decisions:** Reference to PROJECT.md Key Decisions table, plus recent decisions summary for quick access. Full decision log lives in PROJECT.md.
+**Decisions:** Reference to project Key Decisions, plus recent decisions summary for quick access.
 
-**Pending Todos:** Ideas captured via /gsd:add-todo
+**Pending Todos:** Ideas captured via quick tasks
 - Count of pending todos
-- Reference to .planning/todos/pending/
-- Brief list if few, count if many (e.g., "5 pending todos — see /gsd:check-todos")
+- Brief list if few, count if many
 
 **Blockers/Concerns:** From "Next Phase Readiness" sections
 - Issues that affect future work
@@ -177,18 +162,49 @@ Updated after each plan completion.
 Enables instant resumption:
 - When was last session
 - What was last completed
-- Is there a .continue-here file to resume from
+- Is there a continuation context page to resume from
 
 </sections>
 
 <size_constraint>
 
-Keep STATE.md under 100 lines.
+Keep state page content concise.
 
 It's a DIGEST, not an archive. If accumulated context grows too large:
-- Keep only 3-5 recent decisions in summary (full log in PROJECT.md)
+- Keep only 3-5 recent decisions in summary
 - Keep only active blockers, remove resolved ones
 
 The goal is "read once, know where we are" — if it's too long, that fails.
 
 </size_constraint>
+
+<mosic_operations>
+
+**Read state:**
+```javascript
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const statePage = pages.find(p => p.title === "Project State");
+const content = await mosic_get_page(statePage.name, { content_format: "markdown" });
+```
+
+**Update state:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: [{ type: "paragraph", content: "Updated content" }]
+});
+```
+
+**Derive state from live data:**
+```javascript
+// Get task completion status
+const tasks = await mosic_search_tasks({
+  project_id,
+  status__in: ["In Progress", "Blocked"]
+});
+
+// Calculate phase progress
+const phase = await mosic_get_task_list(task_list_id, { include_tasks: true });
+const progress = phase.tasks.filter(t => t.done).length / phase.tasks.length;
+```
+
+</mosic_operations>

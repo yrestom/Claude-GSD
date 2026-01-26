@@ -1,43 +1,30 @@
-# Phase Context Template
+# Phase Context Page Content Pattern
 
-Template for `.planning/phases/XX-name/{phase}-CONTEXT.md` - captures implementation decisions for a phase.
+Content structure for capturing implementation decisions for a phase in Mosic.
+
+**Created via:** `mosic_create_entity_page("MTask List", task_list_id, { title: "[Phase] Context", icon: "lucide:message-square" })`
+**Page Type:** Document
+**Icon:** lucide:message-square
+**Tags:** ["gsd-managed", "context", "phase-XX"]
 
 **Purpose:** Document decisions that downstream agents need. Researcher uses this to know WHAT to investigate. Planner uses this to know WHAT choices are locked vs flexible.
 
 **Key principle:** Categories are NOT predefined. They emerge from what was actually discussed for THIS phase. A CLI phase has CLI-relevant sections, a UI phase has UI-relevant sections.
 
-**Downstream consumers:**
-- `gsd-phase-researcher` — Reads decisions to focus research (e.g., "card layout" → research card component patterns)
-- `gsd-planner` — Reads decisions to create specific tasks (e.g., "infinite scroll" → task includes virtualization)
-
 ---
 
-## File Template
+## Content Structure
 
 ```markdown
----
-phase: XX-name
-type: context
-
-# Mosic Integration (optional - populated when synced with Mosic)
-mosic_page_id: ""              # M Page ID for this context document
-mosic_task_list_id: ""         # MTask List (phase) this context belongs to
-mosic_tags: ["context", "gsd-managed"]  # Tags applied in Mosic
----
-
 # Phase [X]: [Name] - Context
 
 **Gathered:** [date]
 **Status:** Ready for planning
 
-<domain>
 ## Phase Boundary
 
-[Clear statement of what this phase delivers — the scope anchor. This comes from ROADMAP.md and is fixed. Discussion clarifies implementation within this boundary.]
+[Clear statement of what this phase delivers - the scope anchor. This comes from roadmap and is fixed. Discussion clarifies implementation within this boundary.]
 
-</domain>
-
-<decisions>
 ## Implementation Decisions
 
 ### [Area 1 that was discussed]
@@ -51,33 +38,26 @@ mosic_tags: ["context", "gsd-managed"]  # Tags applied in Mosic
 - [Specific decision made]
 
 ### Claude's Discretion
-[Areas where user explicitly said "you decide" — Claude has flexibility here during planning/implementation]
+[Areas where user explicitly said "you decide" - Claude has flexibility here during planning/implementation]
 
-</decisions>
-
-<specifics>
 ## Specific Ideas
 
 [Any particular references, examples, or "I want it like X" moments from discussion. Product references, specific behaviors, interaction patterns.]
 
-[If none: "No specific requirements — open to standard approaches"]
+[If none: "No specific requirements - open to standard approaches"]
 
-</specifics>
-
-<deferred>
 ## Deferred Ideas
 
 [Ideas that came up during discussion but belong in other phases. Captured here so they're not lost, but explicitly out of scope for this phase.]
 
-[If none: "None — discussion stayed within phase scope"]
-
-</deferred>
+[If none: "None - discussion stayed within phase scope"]
 
 ---
-
 *Phase: XX-name*
 *Context gathered: [date]*
 ```
+
+---
 
 <good_examples>
 
@@ -89,20 +69,16 @@ mosic_tags: ["context", "gsd-managed"]  # Tags applied in Mosic
 **Gathered:** 2025-01-20
 **Status:** Ready for planning
 
-<domain>
 ## Phase Boundary
 
 Display posts from followed users in a scrollable feed. Users can view posts and see engagement counts. Creating posts and interactions are separate phases.
 
-</domain>
-
-<decisions>
 ## Implementation Decisions
 
 ### Layout style
 - Card-based layout, not timeline or list
 - Each card shows: author avatar, name, timestamp, full post content, reaction counts
-- Cards have subtle shadows, rounded corners — modern feel
+- Cards have subtle shadows, rounded corners - modern feel
 
 ### Loading behavior
 - Infinite scroll, not pagination
@@ -118,26 +94,17 @@ Display posts from followed users in a scrollable feed. Users can view posts and
 - Exact spacing and typography
 - Error state handling
 
-</decisions>
-
-<specifics>
 ## Specific Ideas
 
 - "I like how Twitter shows the new posts indicator without disrupting your scroll position"
-- Cards should feel like Linear's issue cards — clean, not cluttered
+- Cards should feel like Linear's issue cards - clean, not cluttered
 
-</specifics>
-
-<deferred>
 ## Deferred Ideas
 
-- Commenting on posts — Phase 5
-- Bookmarking posts — add to backlog
-
-</deferred>
+- Commenting on posts - Phase 5
+- Bookmarking posts - add to backlog
 
 ---
-
 *Phase: 03-post-feed*
 *Context gathered: 2025-01-20*
 ```
@@ -150,14 +117,10 @@ Display posts from followed users in a scrollable feed. Users can view posts and
 **Gathered:** 2025-01-20
 **Status:** Ready for planning
 
-<domain>
 ## Phase Boundary
 
 CLI command to backup database to local file or S3. Supports full and incremental backups. Restore command is a separate phase.
 
-</domain>
-
-<decisions>
 ## Implementation Decisions
 
 ### Output format
@@ -180,95 +143,25 @@ CLI command to backup database to local file or S3. Supports full and incrementa
 - Compression algorithm choice
 - Temp file handling
 
-</decisions>
-
-<specifics>
 ## Specific Ideas
 
-- "I want it to feel like pg_dump — familiar to database people"
+- "I want it to feel like pg_dump - familiar to database people"
 - Should work in CI pipelines (exit codes, no interactive prompts)
 
-</specifics>
-
-<deferred>
 ## Deferred Ideas
 
-- Scheduled backups — separate phase
-- Backup rotation/retention — add to backlog
-
-</deferred>
+- Scheduled backups - separate phase
+- Backup rotation/retention - add to backlog
 
 ---
-
 *Phase: 02-backup-command*
-*Context gathered: 2025-01-20*
-```
-
-**Example 3: Organization task (Photo library)**
-
-```markdown
-# Phase 1: Photo Organization - Context
-
-**Gathered:** 2025-01-20
-**Status:** Ready for planning
-
-<domain>
-## Phase Boundary
-
-Organize existing photo library into structured folders. Handle duplicates and apply consistent naming. Tagging and search are separate phases.
-
-</domain>
-
-<decisions>
-## Implementation Decisions
-
-### Grouping criteria
-- Primary grouping by year, then by month
-- Events detected by time clustering (photos within 2 hours = same event)
-- Event folders named by date + location if available
-
-### Duplicate handling
-- Keep highest resolution version
-- Move duplicates to _duplicates folder (don't delete)
-- Log all duplicate decisions for review
-
-### Naming convention
-- Format: YYYY-MM-DD_HH-MM-SS_originalname.ext
-- Preserve original filename as suffix for searchability
-- Handle name collisions with incrementing suffix
-
-### Claude's Discretion
-- Exact clustering algorithm
-- How to handle photos with no EXIF data
-- Folder emoji usage
-
-</decisions>
-
-<specifics>
-## Specific Ideas
-
-- "I want to be able to find photos by roughly when they were taken"
-- Don't delete anything — worst case, move to a review folder
-
-</specifics>
-
-<deferred>
-## Deferred Ideas
-
-- Face detection grouping — future phase
-- Cloud sync — out of scope for now
-
-</deferred>
-
----
-
-*Phase: 01-photo-organization*
 *Context gathered: 2025-01-20*
 ```
 
 </good_examples>
 
 <guidelines>
+
 **This template captures DECISIONS for downstream agents.**
 
 The output should answer: "What does the researcher need to investigate? What choices are locked for the planner?"
@@ -285,9 +178,42 @@ The output should answer: "What does the researcher need to investigate? What ch
 - "Fast and responsive"
 - "Easy to use"
 
-**After creation:**
-- File lives in phase directory: `.planning/phases/XX-name/{phase}-CONTEXT.md`
-- `gsd-phase-researcher` uses decisions to focus investigation
-- `gsd-planner` uses decisions + research to create executable tasks
-- Downstream agents should NOT need to ask the user again about captured decisions
+**Downstream consumers:**
+- Researcher reads decisions to focus investigation
+- Planner reads decisions to create specific tasks
+- Neither should need to ask user again about captured decisions
+
 </guidelines>
+
+<mosic_operations>
+
+**Create context page:**
+```javascript
+await mosic_create_entity_page("MTask List", task_list_id, {
+  title: `Phase ${num} Context`,
+  icon: "lucide:message-square",
+  content: contextContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "context", `phase-${num}`]
+});
+```
+
+**Read context for planning:**
+```javascript
+const pages = await mosic_get_entity_pages("MTask List", task_list_id);
+const context = pages.find(p => p.title.includes("Context"));
+const content = await mosic_get_page(context.name, { content_format: "markdown" });
+```
+
+**Update context with new decisions:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+</mosic_operations>

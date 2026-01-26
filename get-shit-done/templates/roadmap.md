@@ -1,33 +1,22 @@
-# Roadmap Template
+# Roadmap Page Content Pattern
 
-Template for `.planning/ROADMAP.md`.
+Content structure for the MProject's roadmap documentation page in Mosic.
 
-## Initial Roadmap (v1.0 Greenfield)
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Roadmap", icon: "lucide:map" })`
+**Page Type:** Document
+**Icon:** lucide:map
+**Tags:** ["gsd-managed", "roadmap"]
+
+---
+
+## Content Structure (Initial Roadmap v1.0)
 
 ```markdown
----
-# Mosic Integration (optional - populated when synced with Mosic)
-mosic_project_id: ""           # MProject document ID
-mosic_project_url: ""          # URL to Mosic project
-mosic_workspace_id: ""         # Workspace containing the project
-mosic_page_id: ""              # M Page ID for this roadmap document
-
-# Phase to Task List mapping (populated during sync)
-mosic_phases: {}               # Map of phase number to MTask List ID
-# Example:
-# mosic_phases:
-#   "01": "task-list-uuid-1"
-#   "02": "task-list-uuid-2"
-#   "02.1": "task-list-uuid-3"
----
-
 # Roadmap: [Project Name]
 
 ## Overview
 
 [One paragraph describing the journey from start to finish]
-
-**Mosic Project:** [Link to Mosic project if synced]
 
 ## Phases
 
@@ -52,12 +41,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   1. [Observable behavior from user perspective]
   2. [Observable behavior from user perspective]
   3. [Observable behavior from user perspective]
-**Plans**: [Number of plans, e.g., "3 plans" or "TBD"]
-
-Plans:
-- [ ] 01-01: [Brief description of first plan]
-- [ ] 01-02: [Brief description of second plan]
-- [ ] 01-03: [Brief description of third plan]
+**Task List:** [Link to MTask List in Mosic]
 
 ### Phase 2: [Name]
 **Goal**: [What this phase delivers]
@@ -66,21 +50,14 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. [Observable behavior from user perspective]
   2. [Observable behavior from user perspective]
-**Plans**: [Number of plans]
-
-Plans:
-- [ ] 02-01: [Brief description]
-- [ ] 02-02: [Brief description]
+**Task List:** [Link to MTask List]
 
 ### Phase 2.1: Critical Fix (INSERTED)
 **Goal**: [Urgent work inserted between phases]
 **Depends on**: Phase 2
 **Success Criteria** (what must be TRUE):
   1. [What the fix achieves]
-**Plans**: 1 plan
-
-Plans:
-- [ ] 02.1-01: [Description]
+**Task List:** [Link to MTask List]
 
 ### Phase 3: [Name]
 **Goal**: [What this phase delivers]
@@ -90,30 +67,14 @@ Plans:
   1. [Observable behavior from user perspective]
   2. [Observable behavior from user perspective]
   3. [Observable behavior from user perspective]
-**Plans**: [Number of plans]
-
-Plans:
-- [ ] 03-01: [Brief description]
-- [ ] 03-02: [Brief description]
-
-### Phase 4: [Name]
-**Goal**: [What this phase delivers]
-**Depends on**: Phase 3
-**Requirements**: [REQ-09, REQ-10]
-**Success Criteria** (what must be TRUE):
-  1. [Observable behavior from user perspective]
-  2. [Observable behavior from user perspective]
-**Plans**: [Number of plans]
-
-Plans:
-- [ ] 04-01: [Brief description]
+**Task List:** [Link to MTask List]
 
 ## Progress
 
 **Execution Order:**
 Phases execute in numeric order: 2 → 2.1 → 2.2 → 3 → 3.1 → 4
 
-| Phase | Plans Complete | Status | Completed |
+| Phase | Tasks Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. [Name] | 0/3 | Not started | - |
 | 2. [Name] | 0/2 | Not started | - |
@@ -121,27 +82,30 @@ Phases execute in numeric order: 2 → 2.1 → 2.2 → 3 → 3.1 → 4
 | 4. [Name] | 0/1 | Not started | - |
 ```
 
+---
+
 <guidelines>
+
 **Initial planning (v1.0):**
 - Phase count depends on depth setting (quick: 3-5, standard: 5-8, comprehensive: 8-12)
 - Each phase delivers something coherent
-- Phases can have 1+ plans (split if >3 tasks or multiple subsystems)
-- Plans use naming: {phase}-{plan}-PLAN.md (e.g., 01-02-PLAN.md)
+- Each phase corresponds to an MTask List in Mosic
+- Tasks within phases are MTasks in the corresponding MTask List
 - No time estimates (this isn't enterprise PM)
-- Progress table updated by execute workflow
-- Plan count can be "TBD" initially, refined during planning
+- Progress derived from MTask completion status
 
 **Success criteria:**
 - 2-5 observable behaviors per phase (from user's perspective)
 - Cross-checked against requirements during roadmap creation
-- Flow downstream to `must_haves` in plan-phase
-- Verified by verify-phase after execution
+- Flow downstream to `must_haves` in task planning
+- Verified after execution
 - Format: "User can [action]" or "[Thing] works/exists"
 
 **After milestones ship:**
-- Collapse completed milestones in `<details>` tags
+- Collapse completed milestones in summary section
 - Add new milestone sections for upcoming work
 - Keep continuous phase numbering (never restart at 01)
+
 </guidelines>
 
 <status_values>
@@ -150,6 +114,8 @@ Phases execute in numeric order: 2 → 2.1 → 2.2 → 3 → 3.1 → 4
 - `Complete` - Done (add completion date)
 - `Deferred` - Pushed to later (with reason)
 </status_values>
+
+---
 
 ## Milestone-Grouped Roadmap (After v1.0 Ships)
 
@@ -160,44 +126,28 @@ After completing first milestone, reorganize with milestone groupings:
 
 ## Milestones
 
-- ✅ **v1.0 MVP** - Phases 1-4 (shipped YYYY-MM-DD)
-- 🚧 **v1.1 [Name]** - Phases 5-6 (in progress)
-- 📋 **v2.0 [Name]** - Phases 7-10 (planned)
+- **v1.0 MVP** - Phases 1-4 (shipped YYYY-MM-DD)
+- **v1.1 [Name]** - Phases 5-6 (in progress)
+- **v2.0 [Name]** - Phases 7-10 (planned)
 
 ## Phases
 
-<details>
-<summary>✅ v1.0 MVP (Phases 1-4) - SHIPPED YYYY-MM-DD</summary>
+### v1.0 MVP (Phases 1-4) - SHIPPED YYYY-MM-DD
 
-### Phase 1: [Name]
-**Goal**: [What this phase delivers]
-**Plans**: 3 plans
+[Summary of completed phases]
 
-Plans:
-- [x] 01-01: [Brief description]
-- [x] 01-02: [Brief description]
-- [x] 01-03: [Brief description]
-
-[... remaining v1.0 phases ...]
-
-</details>
-
-### 🚧 v1.1 [Name] (In Progress)
+### v1.1 [Name] (In Progress)
 
 **Milestone Goal:** [What v1.1 delivers]
 
 #### Phase 5: [Name]
 **Goal**: [What this phase delivers]
 **Depends on**: Phase 4
-**Plans**: 2 plans
-
-Plans:
-- [ ] 05-01: [Brief description]
-- [ ] 05-02: [Brief description]
+**Task List:** [Link to MTask List]
 
 [... remaining v1.1 phases ...]
 
-### 📋 v2.0 [Name] (Planned)
+### v2.0 [Name] (Planned)
 
 **Milestone Goal:** [What v2.0 delivers]
 
@@ -205,7 +155,7 @@ Plans:
 
 ## Progress
 
-| Phase | Milestone | Plans Complete | Status | Completed |
+| Phase | Milestone | Tasks Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 1. Foundation | v1.0 | 3/3 | Complete | YYYY-MM-DD |
 | 2. Features | v1.0 | 2/2 | Complete | YYYY-MM-DD |
@@ -213,8 +163,87 @@ Plans:
 ```
 
 **Notes:**
-- Milestone emoji: ✅ shipped, 🚧 in progress, 📋 planned
-- Completed milestones collapsed in `<details>` for readability
+- Milestone status: shipped, in progress, planned
+- Completed milestones summarized
 - Current/future milestones expanded
 - Continuous phase numbering (01-99)
 - Progress table includes milestone column
+
+---
+
+<mosic_operations>
+
+**Create roadmap page:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: "Roadmap",
+  icon: "lucide:map",
+  content: roadmapContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "roadmap"]
+});
+```
+
+**Create phase (MTask List):**
+```javascript
+await mosic_create_document("MTask List", {
+  title: `Phase ${num}: ${name}`,
+  description: phaseGoal,
+  project: project_id,
+  workspace: workspace_id,
+  prefix: `P${num}`
+});
+```
+
+**Get roadmap progress from live data:**
+```javascript
+// Get all task lists (phases) for project
+const project = await mosic_get_project(project_id, { include_task_lists: true });
+
+// Calculate progress per phase
+for (const taskList of project.task_lists) {
+  const phase = await mosic_get_task_list(taskList.name, { include_tasks: true });
+  const complete = phase.tasks.filter(t => t.done).length;
+  const total = phase.tasks.length;
+  console.log(`${taskList.title}: ${complete}/${total}`);
+}
+```
+
+**Update roadmap page:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+</mosic_operations>
+
+<mosic_hierarchy>
+
+The roadmap maps to Mosic hierarchy as follows:
+
+```
+MProject (GSD Project)
+├── M Page: Roadmap (this document)
+├── M Page: Project State
+├── M Page: Requirements
+│
+├── MTask List: Phase 1 (01-foundation)
+│   ├── MTask: Plan 01-01
+│   ├── MTask: Plan 01-02
+│   └── M Page: Phase 1 Summary
+│
+├── MTask List: Phase 2 (02-features)
+│   ├── MTask: Plan 02-01
+│   └── M Page: Phase 2 Summary
+│
+└── MTask List: Phase 3 (03-polish)
+    ├── MTask: Plan 03-01
+    └── M Page: Phase 3 Summary
+```
+
+</mosic_hierarchy>

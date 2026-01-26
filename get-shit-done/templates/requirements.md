@@ -1,21 +1,21 @@
-# Requirements Template
+# Requirements Page Content Pattern
 
-Template for `.planning/REQUIREMENTS.md` — checkable requirements that define "done."
+Content structure for checkable requirements documentation in Mosic.
 
-<template>
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Requirements", icon: "lucide:list-checks" })`
+**Page Type:** Document
+**Icon:** lucide:list-checks
+**Tags:** ["gsd-managed", "requirements"]
+
+---
+
+## Content Structure
 
 ```markdown
----
-# Mosic Integration (optional - populated when synced with Mosic)
-mosic_page_id: ""              # M Page ID for this requirements document
-mosic_project_id: ""           # Parent MProject ID
-mosic_tags: ["requirements", "gsd-managed"]  # Tags applied in Mosic
----
-
 # Requirements: [Project Name]
 
 **Defined:** [date]
-**Core Value:** [from PROJECT.md]
+**Core Value:** [from project overview]
 
 ## v1 Requirements
 
@@ -79,7 +79,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 *Last updated: [date] after [trigger]*
 ```
 
-</template>
+---
 
 <guidelines>
 
@@ -89,7 +89,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 - Checkbox: Only for v1 requirements (v2 are not yet actionable)
 
 **Categories:**
-- Derive from research FEATURES.md categories
+- Derive from research FEATURES section
 - Keep consistent with domain conventions
 - Typical: Authentication, Content, Social, Notifications, Moderation, Payments, Admin
 
@@ -236,3 +236,42 @@ Which phases cover which requirements. Updated during roadmap creation.
 ```
 
 </example>
+
+<mosic_operations>
+
+**Create requirements page:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: "Requirements",
+  icon: "lucide:list-checks",
+  content: requirementsContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "requirements"]
+});
+```
+
+**Read requirements:**
+```javascript
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const reqPage = pages.find(p => p.title === "Requirements");
+const content = await mosic_get_page(reqPage.name, { content_format: "markdown" });
+```
+
+**Update requirements status:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+**Track requirement completion via tasks:**
+```javascript
+// Requirements can also be tracked as MTask checklists
+// Each MTask in a phase can have acceptance criteria in check_list field
+```
+
+</mosic_operations>

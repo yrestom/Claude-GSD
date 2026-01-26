@@ -1,19 +1,15 @@
----
-# Mosic Integration (populated when synced with Mosic MCP)
-mosic_page_id: ""
-mosic_workspace_id: ""
-mosic_tags: ["codebase", "integrations", "gsd-managed"]
----
+# Codebase Integrations Page Content Pattern
 
-# External Integrations Template
+Content structure for codebase external integrations analysis pages in Mosic.
 
-Template for `.planning/codebase/INTEGRATIONS.md` - captures external service dependencies.
-
-**Purpose:** Document what external systems this codebase communicates with. Focused on "what lives outside our code that we depend on."
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Codebase Integrations", icon: "lucide:plug" })`
+**Page Type:** Document
+**Icon:** lucide:plug
+**Tags:** ["gsd-managed", "codebase", "integrations"]
 
 ---
 
-## File Template
+## Content Structure
 
 ```markdown
 # External Integrations
@@ -133,7 +129,10 @@ Template for `.planning/codebase/INTEGRATIONS.md` - captures external service de
 *Update when adding/removing external services*
 ```
 
+---
+
 <good_examples>
+
 ```markdown
 # External Integrations
 
@@ -246,10 +245,12 @@ Template for `.planning/codebase/INTEGRATIONS.md` - captures external service de
 *Integration audit: 2025-01-20*
 *Update when adding/removing external services*
 ```
+
 </good_examples>
 
 <guidelines>
-**What belongs in INTEGRATIONS.md:**
+
+**What belongs in codebase integrations:**
 - External services the code communicates with
 - Authentication patterns (where secrets live, not the secrets themselves)
 - SDKs and client libraries used
@@ -261,10 +262,10 @@ Template for `.planning/codebase/INTEGRATIONS.md` - captures external service de
 
 **What does NOT belong here:**
 - Actual API keys or secrets (NEVER write these)
-- Internal architecture (that's ARCHITECTURE.md)
-- Code patterns (that's PATTERNS.md)
-- Technology choices (that's STACK.md)
-- Performance issues (that's CONCERNS.md)
+- Internal architecture (that's architecture page)
+- Code patterns (that's conventions page)
+- Technology choices (that's stack page)
+- Performance issues (that's concerns page)
 
 **When filling this template:**
 - Check .env.example or .env.template for required env vars
@@ -284,4 +285,47 @@ Template for `.planning/codebase/INTEGRATIONS.md` - captures external service de
 
 **Security note:**
 Document WHERE secrets live (env vars, Vercel dashboard, 1Password), never WHAT the secrets are.
+
 </guidelines>
+
+<mosic_operations>
+
+**Create codebase integrations page:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: "Codebase Integrations",
+  icon: "lucide:plug",
+  content: integrationsContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "codebase", "integrations"]
+});
+```
+
+**Read integrations for planning:**
+```javascript
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const integrations = pages.find(p => p.title === "Codebase Integrations");
+const content = await mosic_get_page(integrations.name, { content_format: "markdown" });
+```
+
+**Update integrations analysis:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+**Find all codebase integrations pages:**
+```javascript
+const integrationPages = await mosic_search_documents_by_tags({
+  workspace_id,
+  tags: ["codebase", "integrations"],
+  doctype: "M Page"
+});
+```
+
+</mosic_operations>

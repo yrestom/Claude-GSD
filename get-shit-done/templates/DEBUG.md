@@ -1,175 +1,217 @@
-# Debug Template
+# Debug Session Page Content Pattern
 
-Template for `.planning/debug/[slug].md` — active debug session tracking.
+Content structure for active debug session tracking in Mosic.
+
+**Created via:** `mosic_create_entity_page("MTask", task_id, { title: "Debug: [Issue]", icon: "lucide:bug" })`
+**Page Type:** Document
+**Icon:** lucide:bug
+**Tags:** ["gsd-managed", "debug", "active"]
 
 ---
 
-## File Template
+## Content Structure
 
 ```markdown
----
-slug: ""
-type: debug
-status: gathering | investigating | fixing | verifying | resolved
-trigger: "[verbatim user input]"
-created: [ISO timestamp]
-updated: [ISO timestamp]
+# Debug: [Issue Brief]
 
-# Mosic Integration (populated when synced with Mosic)
-mosic_page_id: ""              # M Page ID for this debug session
-mosic_uat_page_id: ""          # Linked UAT page ID
-mosic_issue_task_id: ""        # Linked issue task ID
-mosic_tags: ["debug", "fix", "gsd-managed"]
----
+**Status:** gathering | investigating | fixing | verifying | resolved
+**Started:** [ISO timestamp]
+**Updated:** [ISO timestamp]
+**Trigger:** "[verbatim user input]"
 
 ## Current Focus
+
 <!-- OVERWRITE on each update - always reflects NOW -->
 
-hypothesis: [current theory being tested]
-test: [how testing it]
-expecting: [what result means if true/false]
-next_action: [immediate next step]
+**Hypothesis:** [current theory being tested]
+**Test:** [how testing it]
+**Expecting:** [what result means if true/false]
+**Next action:** [immediate next step]
 
 ## Symptoms
+
 <!-- Written during gathering, then immutable -->
 
-expected: [what should happen]
-actual: [what actually happens]
-errors: [error messages if any]
-reproduction: [how to trigger]
-started: [when it broke / always broken]
+**Expected:** [what should happen]
+**Actual:** [what actually happens]
+**Errors:** [error messages if any]
+**Reproduction:** [how to trigger]
+**Started:** [when it broke / always broken]
 
 ## Eliminated
-<!-- APPEND only - prevents re-investigating after /clear -->
 
-- hypothesis: [theory that was wrong]
-  evidence: [what disproved it]
-  timestamp: [when eliminated]
+<!-- APPEND only - prevents re-investigating after context reset -->
+
+| Hypothesis | Evidence | When |
+|------------|----------|------|
+| [theory that was wrong] | [what disproved it] | [timestamp] |
 
 ## Evidence
+
 <!-- APPEND only - facts discovered during investigation -->
 
-- timestamp: [when found]
-  checked: [what was examined]
-  found: [what was observed]
-  implication: [what this means]
+| When | Checked | Found | Implication |
+|------|---------|-------|-------------|
+| [timestamp] | [what examined] | [what observed] | [what this means] |
 
 ## Resolution
+
 <!-- OVERWRITE as understanding evolves -->
 
-root_cause: [empty until found]
-fix: [empty until applied]
-verification: [empty until verified]
-files_changed: []
+**Root cause:** [empty until found]
+**Fix:** [empty until applied]
+**Verification:** [empty until verified]
+**Files changed:** [list of files modified]
+**Commit:** [hash if committed]
+
+---
+*Debug session: [slug]*
+*Created: [date]*
 ```
 
 ---
 
 <section_rules>
 
-**Frontmatter (identity and status):**
-- `slug`: IMMUTABLE - the debug session identifier
-- `type`: IMMUTABLE - always "debug"
-- `status`: OVERWRITE - reflects current phase
-- `trigger`: IMMUTABLE - verbatim user input, never changes
-- `created`: IMMUTABLE - set once
-- `updated`: OVERWRITE - update on every change
-
-**Frontmatter (Mosic integration):**
-- `mosic_page_id`: OVERWRITE - populated when synced with Mosic
-- `mosic_uat_page_id`: OVERWRITE - linked UAT page ID
-- `mosic_issue_task_id`: OVERWRITE - linked issue task ID
-- `mosic_tags`: OVERWRITE - tags applied in Mosic (default: ["debug", "fix", "gsd-managed"])
+**Status:**
+- OVERWRITE - reflects current phase
+- Values: gathering, investigating, fixing, verifying, resolved
 
 **Current Focus:**
 - OVERWRITE entirely on each update
 - Always reflects what Claude is doing RIGHT NOW
-- If Claude reads this after /clear, it knows exactly where to resume
+- If Claude reads after context reset, knows exactly where to resume
 - Fields: hypothesis, test, expecting, next_action
 
 **Symptoms:**
 - Written during initial gathering phase
 - IMMUTABLE after gathering complete
 - Reference point for what we're trying to fix
-- Fields: expected, actual, errors, reproduction, started
 
 **Eliminated:**
 - APPEND only - never remove entries
 - Prevents re-investigating dead ends after context reset
-- Each entry: hypothesis, evidence that disproved it, timestamp
-- Critical for efficiency across /clear boundaries
+- Critical for efficiency across session boundaries
 
 **Evidence:**
 - APPEND only - never remove entries
 - Facts discovered during investigation
-- Each entry: timestamp, what checked, what found, implication
 - Builds the case for root cause
 
 **Resolution:**
 - OVERWRITE as understanding evolves
 - May update multiple times as fixes are tried
 - Final state shows confirmed root cause and verified fix
-- Fields: root_cause, fix, verification, files_changed
 
 </section_rules>
 
 <lifecycle>
 
-**Creation:** Immediately when /gsd:debug is called
-- Create file with trigger from user input
+**Creation:** When /gsd:debug is called
+- Create page linked to debug task
 - Set status to "gathering"
 - Current Focus: next_action = "gather symptoms"
-- Symptoms: empty, to be filled
 
 **During symptom gathering:**
 - Update Symptoms section as user answers questions
 - Update Current Focus with each question
-- When complete: status → "investigating"
+- When complete: status -> "investigating"
 
 **During investigation:**
 - OVERWRITE Current Focus with each hypothesis
 - APPEND to Evidence with each finding
 - APPEND to Eliminated when hypothesis disproved
-- Update timestamp in frontmatter
 
 **During fixing:**
-- status → "fixing"
+- status -> "fixing"
 - Update Resolution.root_cause when confirmed
 - Update Resolution.fix when applied
 - Update Resolution.files_changed
 
 **During verification:**
-- status → "verifying"
+- status -> "verifying"
 - Update Resolution.verification with results
-- If verification fails: status → "investigating", try again
+- If verification fails: status -> "investigating", try again
 
 **On resolution:**
-- status → "resolved"
-- Move file to .planning/debug/resolved/
+- status -> "resolved"
+- Add "resolved" tag
+- Remove "active" tag
 
 </lifecycle>
 
 <resume_behavior>
 
-When Claude reads this file after /clear:
+When Claude reads this page after context reset:
 
-1. Parse frontmatter → know status
-2. Read Current Focus → know exactly what was happening
-3. Read Eliminated → know what NOT to retry
-4. Read Evidence → know what's been learned
+1. Parse status -> know phase
+2. Read Current Focus -> know exactly what was happening
+3. Read Eliminated -> know what NOT to retry
+4. Read Evidence -> know what's been learned
 5. Continue from next_action
 
-The file IS the debugging brain. Claude should be able to resume perfectly from any interruption point.
+The page IS the debugging brain. Claude should be able to resume perfectly from any interruption point.
 
 </resume_behavior>
 
-<size_constraint>
+<mosic_operations>
 
-Keep debug files focused:
-- Evidence entries: 1-2 lines each, just the facts
-- Eliminated: brief - hypothesis + why it failed
-- No narrative prose - structured data only
+**Create debug session:**
+```javascript
+// Create debug task
+const task = await mosic_create_document("MTask", {
+  title: `Debug: ${issueBrief}`,
+  description: `Investigating: ${issueDescription}`,
+  task_list: task_list_id,
+  workspace: workspace_id,
+  priority: "High"
+});
 
-If evidence grows very large (10+ entries), consider whether you're going in circles. Check Eliminated to ensure you're not re-treading.
+// Create linked page
+await mosic_create_entity_page("MTask", task.name, {
+  title: `Debug: ${issueBrief}`,
+  icon: "lucide:bug",
+  content: debugContent,
+  page_type: "Document"
+});
 
-</size_constraint>
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "debug", "active"]
+});
+```
+
+**Update investigation:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+**Mark resolved:**
+```javascript
+// Update tags
+await mosic_remove_tag_from_document("M Page", page_id, {
+  workspace_id,
+  tag: "active"
+});
+
+await mosic_add_tag_to_document("M Page", page_id, {
+  workspace_id,
+  tag: "resolved"
+});
+
+// Complete task
+await mosic_complete_task(task_id);
+```
+
+**Find active debug sessions:**
+```javascript
+const sessions = await mosic_search_documents_by_tags({
+  workspace_id,
+  tags: ["debug", "active"],
+  doctype: "M Page"
+});
+```
+
+</mosic_operations>

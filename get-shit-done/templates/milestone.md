@@ -1,52 +1,56 @@
-# Milestone Entry Template
+# Milestone Entry Page Content Pattern
 
-Add this entry to `.planning/MILESTONES.md` when completing a milestone:
+Content structure for milestone completion documentation in Mosic.
+
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "v[X.Y] [Name] Milestone", icon: "lucide:flag" })`
+**Page Type:** Document
+**Icon:** lucide:flag
+**Tags:** ["gsd-managed", "milestone", "v1.0"]
+
+---
+
+## Content Structure
 
 ```markdown
----
-# Mosic Integration (optional - populated when synced with Mosic)
-mosic_milestone_id: ""         # Mosic milestone/release tracking ID if applicable
-mosic_page_id: ""              # M Page ID for this milestone document
-mosic_project_id: ""           # Parent MProject ID
-mosic_completed_task_lists: [] # MTask List IDs completed in this milestone
----
+# v[X.Y] [Name] Milestone
 
-## v[X.Y] [Name] (Shipped: YYYY-MM-DD)
-
-**Delivered:** [One sentence describing what shipped]
-
+**Status:** SHIPPED [YYYY-MM-DD]
 **Phases completed:** [X-Y] ([Z] plans total)
 
-**Key accomplishments:**
+## Delivered
+
+[One sentence describing what shipped]
+
+## Key Accomplishments
+
 - [Major achievement 1]
 - [Major achievement 2]
 - [Major achievement 3]
 - [Major achievement 4]
 
-**Stats:**
-- [X] files created/modified
-- [Y] lines of code (primary language)
-- [Z] phases, [N] plans, [M] tasks
-- [D] days from start to ship (or milestone to milestone)
+## Stats
 
-**Git range:** `feat(XX-XX)` → `feat(YY-YY)`
+- **Files created/modified:** [X]
+- **Lines of code:** [Y] (primary language)
+- **Phases:** [Z], Plans: [N], Tasks: [M]
+- **Duration:** [D] days from start to ship
 
-**What's next:** [Brief description of next milestone goals, or "Project complete"]
+## Git Range
+
+`feat(XX-XX)` → `feat(YY-YY)`
+
+## What's Next
+
+[Brief description of next milestone goals, or "Project complete"]
 
 ---
+*Milestone completed: [date]*
 ```
 
-<structure>
-If MILESTONES.md doesn't exist, create it with header:
-
-```markdown
-# Project Milestones: [Project Name]
-
-[Entries in reverse chronological order - newest first]
-```
-</structure>
+---
 
 <guidelines>
+
 **When to create milestones:**
 - Initial v1.0 MVP shipped
 - Major version releases (v2.0, v3.0)
@@ -60,64 +64,129 @@ If MILESTONES.md doesn't exist, create it with header:
 
 **Stats to include:**
 - Count modified files: `git diff --stat feat(XX-XX)..feat(YY-YY) | tail -1`
-- Count LOC: `find . -name "*.swift" -o -name "*.ts" | xargs wc -l` (or relevant extension)
-- Phase/plan/task counts from ROADMAP
+- Count LOC: `find . -name "*.ts" -o -name "*.tsx" | xargs wc -l`
+- Phase/plan/task counts from project structure
 - Timeline from first phase commit to last phase commit
 
 **Git range format:**
 - First commit of milestone → last commit of milestone
 - Example: `feat(01-01)` → `feat(04-01)` for phases 1-4
+
 </guidelines>
 
 <example>
+
 ```markdown
-# Project Milestones: WeatherBar
+# v1.1 Security & Polish Milestone
 
-## v1.1 Security & Polish (Shipped: 2025-12-10)
-
-**Delivered:** Security hardening with Keychain integration and comprehensive error handling
-
+**Status:** SHIPPED 2025-12-10
 **Phases completed:** 5-6 (3 plans total)
 
-**Key accomplishments:**
+## Delivered
+
+Security hardening with Keychain integration and comprehensive error handling.
+
+## Key Accomplishments
+
 - Migrated API key storage from plaintext to macOS Keychain
 - Implemented comprehensive error handling for network failures
 - Added Sentry crash reporting integration
 - Fixed memory leak in auto-refresh timer
 
-**Stats:**
-- 23 files modified
-- 650 lines of Swift added
-- 2 phases, 3 plans, 12 tasks
-- 8 days from v1.0 to v1.1
+## Stats
 
-**Git range:** `feat(05-01)` → `feat(06-02)`
+- **Files created/modified:** 23
+- **Lines of code:** 650 (Swift)
+- **Phases:** 2, Plans: 3, Tasks: 12
+- **Duration:** 8 days from v1.0 to v1.1
 
-**What's next:** v2.0 SwiftUI redesign with widget support
+## Git Range
+
+`feat(05-01)` → `feat(06-02)`
+
+## What's Next
+
+v2.0 SwiftUI redesign with widget support
 
 ---
-
-## v1.0 MVP (Shipped: 2025-11-25)
-
-**Delivered:** Menu bar weather app with current conditions and 3-day forecast
-
-**Phases completed:** 1-4 (7 plans total)
-
-**Key accomplishments:**
-- Menu bar app with popover UI (AppKit)
-- OpenWeather API integration with auto-refresh
-- Current weather display with conditions icon
-- 3-day forecast list with high/low temperatures
-- Code signed and notarized for distribution
-
-**Stats:**
-- 47 files created
-- 2,450 lines of Swift
-- 4 phases, 7 plans, 28 tasks
-- 12 days from start to ship
-
-**Git range:** `feat(01-01)` → `feat(04-01)`
-
-**What's next:** Security audit and hardening for v1.1
+*Milestone completed: 2025-12-10*
 ```
+
 </example>
+
+<mosic_operations>
+
+**Create milestone page:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: `v${version} ${name} Milestone`,
+  icon: "lucide:flag",
+  content: milestoneContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "milestone", `v${version}`]
+});
+```
+
+**Link milestone to completed phases:**
+```javascript
+// Create relations to completed task lists
+for (const taskListId of completedPhases) {
+  await mosic_create_document("M Relation", {
+    from_doctype: "M Page",
+    from_name: milestone_page_id,
+    to_doctype: "MTask List",
+    to_name: taskListId,
+    relation_type: "Related"
+  });
+}
+```
+
+**Query milestones:**
+```javascript
+const pages = await mosic_search_documents_by_tags({
+  workspace_id,
+  tags: ["milestone"],
+  doctype: "M Page"
+});
+```
+
+**Update project after milestone:**
+```javascript
+// Update roadmap page with milestone completion
+const roadmapPages = await mosic_get_entity_pages("MProject", project_id);
+const roadmap = roadmapPages.find(p => p.title === "Roadmap");
+await mosic_update_content_blocks(roadmap.name, {
+  blocks: updatedRoadmapContent
+});
+```
+
+</mosic_operations>
+
+<project_milestones_page>
+
+If tracking multiple milestones, create a Project Milestones index page:
+
+```markdown
+# Project Milestones: [Project Name]
+
+## Released
+
+### v1.1 Security & Polish (Shipped: 2025-12-10)
+Security hardening with Keychain integration and comprehensive error handling.
+[View milestone details →](mosic://page/milestone-page-id)
+
+### v1.0 MVP (Shipped: 2025-11-25)
+Menu bar weather app with current conditions and 3-day forecast.
+[View milestone details →](mosic://page/milestone-page-id)
+
+## Upcoming
+
+### v2.0 SwiftUI Redesign (Planned)
+Complete UI rewrite with SwiftUI and widget support.
+```
+
+</project_milestones_page>

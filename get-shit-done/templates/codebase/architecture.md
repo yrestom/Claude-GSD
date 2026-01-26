@@ -1,22 +1,18 @@
----
-# Mosic Integration (populated when synced with Mosic MCP)
-mosic_page_id: ""
-mosic_workspace_id: ""
-mosic_tags: ["codebase", "architecture", "gsd-managed"]
----
+# Codebase Architecture Page Content Pattern
 
-# Architecture Template
+Content structure for codebase architecture analysis pages in Mosic.
 
-Template for `.planning/codebase/ARCHITECTURE.md` - captures conceptual code organization.
-
-**Purpose:** Document how the code is organized at a conceptual level. Complements STRUCTURE.md (which shows physical file locations).
+**Created via:** `mosic_create_entity_page("MProject", project_id, { title: "Codebase Architecture", icon: "lucide:network" })`
+**Page Type:** Document
+**Icon:** lucide:network
+**Tags:** ["gsd-managed", "codebase", "architecture"]
 
 ---
 
-## File Template
+## Content Structure
 
 ```markdown
-# Architecture
+# Codebase Architecture
 
 **Analysis Date:** [YYYY-MM-DD]
 
@@ -110,9 +106,12 @@ Template for `.planning/codebase/ARCHITECTURE.md` - captures conceptual code org
 *Update when major patterns change*
 ```
 
+---
+
 <good_examples>
+
 ```markdown
-# Architecture
+# Codebase Architecture
 
 **Analysis Date:** 2025-01-20
 
@@ -156,13 +155,13 @@ Template for `.planning/codebase/ARCHITECTURE.md` - captures conceptual code org
 1. User runs: `gsd new-project`
 2. Commander parses args and flags
 3. Command handler invoked (`src/commands/new-project.ts`)
-4. Handler calls service methods (`src/services/project.ts` → `create()`)
+4. Handler calls service methods (`src/services/project.ts` -> `create()`)
 5. Service reads templates, processes files, writes output
 6. Results logged to console
 7. Process exits with status code
 
 **State Management:**
-- File-based: All state lives in `.planning/` directory
+- File-based: All state lives in Mosic via MCP
 - No persistent in-memory state
 - Each command execution is independent
 
@@ -180,8 +179,8 @@ Template for `.planning/codebase/ARCHITECTURE.md` - captures conceptual code org
 
 **Template:**
 - Purpose: Reusable document structures
-- Examples: PROJECT.md, PLAN.md templates
-- Pattern: Markdown files with substitution variables
+- Examples: Page content patterns for Mosic
+- Pattern: Markdown content with substitution variables
 
 ## Entry Points
 
@@ -216,20 +215,22 @@ Template for `.planning/codebase/ARCHITECTURE.md` - captures conceptual code org
 - Manual validation in command handlers
 - Fail fast on invalid input
 
-**File Operations:**
-- FileService abstraction over fs-extra
+**State Operations:**
+- Mosic MCP for all state management
 - All paths validated before operations
-- Atomic writes (temp file + rename)
+- Atomic writes via MCP transactions
 
 ---
 
 *Architecture analysis: 2025-01-20*
 *Update when major patterns change*
 ```
+
 </good_examples>
 
 <guidelines>
-**What belongs in ARCHITECTURE.md:**
+
+**What belongs in codebase architecture:**
 - Overall architectural pattern (monolith, microservices, layered, etc.)
 - Conceptual layers and their relationships
 - Data flow / request lifecycle
@@ -239,8 +240,8 @@ Template for `.planning/codebase/ARCHITECTURE.md` - captures conceptual code org
 - Cross-cutting concerns (logging, auth, validation)
 
 **What does NOT belong here:**
-- Exhaustive file listings (that's STRUCTURE.md)
-- Technology choices (that's STACK.md)
+- Exhaustive file listings (that's structure page)
+- Technology choices (that's stack page)
 - Line-by-line code walkthrough (defer to code reading)
 - Implementation details of specific features
 
@@ -259,4 +260,47 @@ Include file paths as concrete examples of abstractions. Use backtick formatting
 - Refactoring (understanding current patterns)
 - Identifying where to add code (which layer handles X?)
 - Understanding dependencies between components
+
 </guidelines>
+
+<mosic_operations>
+
+**Create codebase architecture page:**
+```javascript
+await mosic_create_entity_page("MProject", project_id, {
+  title: "Codebase Architecture",
+  icon: "lucide:network",
+  content: architectureContent,
+  page_type: "Document"
+});
+
+await mosic_batch_add_tags_to_document("M Page", page_id, {
+  workspace_id,
+  tags: ["gsd-managed", "codebase", "architecture"]
+});
+```
+
+**Read architecture for planning:**
+```javascript
+const pages = await mosic_get_entity_pages("MProject", project_id);
+const arch = pages.find(p => p.title === "Codebase Architecture");
+const content = await mosic_get_page(arch.name, { content_format: "markdown" });
+```
+
+**Update architecture analysis:**
+```javascript
+await mosic_update_content_blocks(page_id, {
+  blocks: updatedContent
+});
+```
+
+**Find all codebase architecture pages:**
+```javascript
+const archPages = await mosic_search_documents_by_tags({
+  workspace_id,
+  tags: ["codebase", "architecture"],
+  doctype: "M Page"
+});
+```
+
+</mosic_operations>
