@@ -11,6 +11,7 @@ GSD is a **meta-prompting system** where every file is both implementation and s
 - **Solo developer + Claude workflow** (no enterprise patterns)
 - **Context engineering** (manage Claude's context window deliberately)
 - **Plans as prompts** (PLAN.md files are executable, not documents to transform)
+- **Mosic-only architecture** (all state in Mosic MCP, local config.json for session context only)
 
 ---
 
@@ -23,14 +24,14 @@ GSD is a **meta-prompting system** where every file is both implementation and s
 name: gsd:command-name
 description: One-line description
 argument-hint: "<required>" or "[optional]"
-allowed-tools: [Read, Write, Bash, Glob, Grep, AskUserQuestion]
+allowed-tools: [Read, Write, Bash, Glob, Grep, AskUserQuestion, mcp__mosic_pro__*]
 ---
 ```
 
 **Section order:**
 1. `<objective>` — What/why/when (always present)
 2. `<execution_context>` — @-references to workflows, templates, references
-3. `<context>` — Dynamic content: `$ARGUMENTS`, bash output, @file refs
+3. `<context>` — Dynamic content: `$ARGUMENTS`, Mosic queries, config.json refs
 4. `<process>` or `<step>` elements — Implementation steps
 5. `<success_criteria>` — Measurable completion checklist
 
@@ -165,12 +166,12 @@ Build authentication system
 **Static references** (always load):
 ```
 @~/.claude/get-shit-done/workflows/execute-phase.md
-@.planning/PROJECT.md
+@config.json
 ```
 
 **Conditional references** (based on existence):
 ```
-@.planning/DISCOVERY.md (if exists)
+@~/.claude/get-shit-done/references/mosic-patterns.md (if exists)
 ```
 
 **@-references are lazy loading signals.** They tell Claude what to read, not pre-loaded content.
@@ -185,7 +186,7 @@ Build authentication system
 | Commands | `gsd:kebab-case` | `gsd:execute-phase` |
 | XML tags | kebab-case | `<execution_context>` |
 | Step names | snake_case | `name="load_project_state"` |
-| Bash variables | CAPS_UNDERSCORES | `PHASE_ARG`, `PLAN_START_TIME` |
+| Bash variables | CAPS_UNDERSCORES | `PHASE_ARG`, `WORKSPACE_ID` |
 | Type attributes | colon separator | `type="checkpoint:human-verify"` |
 
 ---
@@ -194,9 +195,9 @@ Build authentication system
 
 ### Imperative Voice
 
-**DO:** "Execute tasks", "Create file", "Read STATE.md"
+**DO:** "Execute tasks", "Create MTask", "Load from Mosic"
 
-**DON'T:** "Execution is performed", "The file should be created"
+**DON'T:** "Execution is performed", "The task should be created"
 
 ### No Filler
 
@@ -232,9 +233,10 @@ Use subagents for autonomous work. Reserve main context for user interaction.
 
 ### State Preservation
 
-- `STATE.md` — Living memory across sessions
-- `agent-history.json` — Subagent tracking for resume
-- SUMMARY.md frontmatter — Machine-readable for dependency graphs
+- `config.json` — Session context and Mosic entity IDs
+- Mosic M Pages — Plans, summaries, research
+- Mosic M Comments — Progress notes, handoffs
+- Mosic MTasks — Work items with status
 
 ---
 
@@ -260,6 +262,12 @@ Use subagents for autonomous work. Reserve main context for user interaction.
 **DON'T:** `<section>`, `<item>`, `<content>`
 
 **DO:** Semantic purpose tags: `<objective>`, `<verification>`, `<action>`
+
+### Local File References (Banned in Mosic-only Architecture)
+
+**DON'T:** `.planning/STATE.md`, `.planning/todos/`, `.planning/ROADMAP.md`
+
+**DO:** `config.json`, `mosic_get_project()`, `mosic_search_tasks()`
 
 ### Vague Tasks (Banned)
 
@@ -306,7 +314,7 @@ Use subagents for autonomous work. Reserve main context for user interaction.
 
 - One commit per task during execution
 - Stage files individually (never `git add .`)
-- Capture hash for SUMMARY.md
+- Capture hash for summary
 - Include Co-Authored-By line
 
 ---
@@ -396,46 +404,22 @@ Quick mode provides GSD guarantees for ad-hoc tasks without full planning overhe
 
 ### Quick Task Structure
 
+Quick tasks are MTasks with "lucide:zap" icon in Mosic:
+
 ```
-.planning/quick/
-├── 001-add-dark-mode/
-│   ├── PLAN.md
-│   └── SUMMARY.md
-├── 002-fix-login-bug/
-│   ├── PLAN.md
-│   └── SUMMARY.md
+mosic_create_document("MTask", {
+  workspace_id: WORKSPACE_ID,
+  project: PROJECT_ID,
+  title: "Quick: [description]",
+  icon: "lucide:zap",
+  status: "In Progress"
+})
 ```
-
-Numbering: 3-digit sequential (001, 002, 003...)
-Slug: kebab-case from description, max 40 chars
-
-### Quick Mode Tracking
-
-Quick tasks update STATE.md, NOT ROADMAP.md:
-
-```markdown
-### Quick Tasks Completed
-
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 001 | Add dark mode toggle | 2026-01-19 | abc123f | [001-add-dark-mode](./quick/001-add-dark-mode/) |
-```
-
-### Quick Mode Orchestration
-
-Unlike full phases, quick mode orchestration is inline in the command file — no separate workflow. The simplified flow:
-
-1. Validate ROADMAP.md exists (project active)
-2. Get task description
-3. Spawn planner (quick constraints)
-4. Spawn executor
-5. Update STATE.md
-6. Commit artifacts
 
 ### Commit Convention
 
 ```
-docs(quick-NNN): description
+docs(quick): description
 
 Quick task completed.
 
@@ -485,7 +469,7 @@ How to make tests pass
 
 ## Mosic Integration Patterns
 
-GSD integrates with Mosic MCP for cloud-based project management. Key patterns:
+GSD uses Mosic MCP exclusively for project management. **No local `.planning/` files.**
 
 ### Mosic Hierarchy
 
@@ -494,31 +478,56 @@ M Workspace → M Space → MProject → MTask List → MTask → MTask (subtask
 ```
 
 **GSD mapping:**
-- MProject = GSD Project (from PROJECT.md)
-- MTask List = Phase (from ROADMAP.md phases)
-- MTask = Plan execution unit (from PLAN.md)
-- M Page = Documentation (plans, summaries, research)
-- M Tag = Cross-cutting labels (gsd-managed, plan, research, phase-NN)
+- MProject = GSD Project
+- MTask List = Phase (roadmap structure)
+- MTask = Plan execution unit / Todo / Quick task
+- M Page = Documentation (plans, summaries, research, requirements)
+- M Tag = Cross-cutting labels (gsd-managed, plan, research, phase-NN, area-*)
 - M Relation = Links between entities (Related, Depends, Blocker)
+- M Comment = Progress notes, handoffs, agent communication
 
-### Frontmatter Convention
+### Local Files
 
-All GSD templates include Mosic integration fields:
+**ONLY local file:** `config.json` (or `gsd-config.json`)
 
-```yaml
----
-# Mosic Integration (populated when synced with Mosic)
-mosic_page_id: ""              # M Page ID
-mosic_task_id: ""              # Linked MTask ID (if applicable)
-mosic_workspace_id: ""         # Workspace ID
-mosic_tags: ["gsd-managed", "category", "phase-NN"]
----
+```json
+{
+  "mosic": {
+    "workspace_id": "uuid",
+    "project_id": "uuid",
+    "task_lists": {
+      "phase-1": "uuid",
+      "phase-2": "uuid"
+    },
+    "pages": {
+      "overview": "uuid",
+      "requirements": "uuid"
+    },
+    "tags": {
+      "gsd_managed": "uuid",
+      "phase_tags": {}
+    }
+  },
+  "session": {
+    "current_task_id": "uuid",
+    "current_phase": "1",
+    "status": "in_progress"
+  },
+  "model_profile": "balanced",
+  "workflow_mode": "interactive"
+}
 ```
 
-**Field behavior:**
-- Fields start empty (local-first workflow)
-- Populated when `/gsd:sync` or auto-sync runs
-- Read during subsequent syncs to update vs create
+### Icon Conventions
+
+| Content Type | Icon |
+|--------------|------|
+| Phase (MTask List) | lucide:layers |
+| Regular MTask | (default) |
+| Todo | lucide:lightbulb |
+| Quick task | lucide:zap |
+| Gap closure | lucide:wrench |
+| Debug | lucide:bug |
 
 ### Page Types
 
@@ -535,8 +544,8 @@ mosic_tags: ["gsd-managed", "category", "phase-NN"]
 | Relationship | Mosic Relation | Use Case |
 |--------------|----------------|----------|
 | Documentation | Related | Plan → Summary, Task → Page |
-| Dependencies | Depends | Plan → Plan, Phase → Phase |
-| Blockers | Blocker | Issue → Task |
+| Dependencies | Depends | Phase → Phase, Task → Task |
+| Blockers | Blocker | Issue → Task, Gap → Project |
 
 ### Error Handling
 
@@ -562,8 +571,10 @@ Standard tags (stored in config.json):
 - `research` — Research documents
 - `requirements` — Requirements specs
 - `phase-01`, `phase-02` — Phase identification
+- `area-api`, `area-ui` — Area tags for todos
 - `quick` — Quick tasks outside roadmap
 - `debug` — Debug sessions
+- `fix` — Gap closure work
 
 ---
 
@@ -584,5 +595,6 @@ Standard tags (stored in config.json):
 13. **Deviation rules are automatic** — no permission for bugs/critical
 14. **Depth controls compression** — derive from actual work
 15. **TDD gets dedicated plans** — cycle too heavy to embed
-16. **Mosic integration is optional** — local-first, sync on demand
+16. **Mosic-only architecture** — all state in Mosic, local config.json for session
 17. **Mosic failures graceful** — queue and retry, never block
+18. **No local .planning/ files** — config.json is the only local file

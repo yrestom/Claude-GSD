@@ -6,7 +6,7 @@
 
 **Solves context rot — the quality degradation that happens as Claude fills its context window.**
 
-**Now with [Mosic MCP](https://mosic.pro) integration for cloud-based project management.**
+**Powered by [Mosic MCP](https://mosic.pro) - all project state lives in the cloud, not local files.**
 
 [![npm version](https://img.shields.io/npm/v/get-shit-done-cc?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/get-shit-done-cc)
 [![npm downloads](https://img.shields.io/npm/dm/get-shit-done-cc?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/get-shit-done-cc)
@@ -192,7 +192,13 @@ One command, one flow. The system:
 
 You approve the roadmap. Now you're ready to build.
 
-**Creates:** `PROJECT.md`, `REQUIREMENTS.md`, `ROADMAP.md`, `STATE.md`, `.planning/research/`
+**Creates in Mosic:**
+- MProject with metadata (title, description, dates, status)
+- M Pages: Overview, Requirements, Roadmap (linked to project)
+- MTask Lists for each phase
+- Research M Pages (tagged `research`, `gsd-managed`)
+
+**Local:** `config.json` stores Mosic entity IDs for session continuity
 
 ---
 
@@ -220,7 +226,7 @@ For each area you select, it asks until you're satisfied. The output — `CONTEX
 
 The deeper you go here, the more the system builds what you actually want. Skip it and you get reasonable defaults. Use it and you get *your* vision.
 
-**Creates:** `{phase}-CONTEXT.md`
+**Creates in Mosic:** Phase Context M Page (linked to MTask List, tagged `context`)
 
 ---
 
@@ -238,7 +244,11 @@ The system:
 
 Each plan is small enough to execute in a fresh context window. No degradation, no "I'll be more concise now."
 
-**Creates:** `{phase}-RESEARCH.md`, `{phase}-{N}-PLAN.md`
+**Creates in Mosic:**
+- Phase Research M Page (tagged `research`)
+- MTasks for each plan (with checklists for acceptance criteria)
+- Plan M Pages (type: Spec, linked to MTasks)
+- M Relations for task dependencies
 
 ---
 
@@ -257,7 +267,11 @@ The system:
 
 Walk away, come back to completed work with clean git history.
 
-**Creates:** `{phase}-{N}-SUMMARY.md`, `{phase}-VERIFICATION.md`
+**Creates in Mosic:**
+- Updates MTask status to Completed
+- Marks checklist items as done
+- Summary M Pages (type: Document, linked to MTasks)
+- Verification M Page (linked to MTask List)
 
 ---
 
@@ -280,7 +294,10 @@ The system:
 
 If everything passes, you move on. If something's broken, you don't manually debug — you just run `/gsd:execute-phase` again with the fix plans it created.
 
-**Creates:** `{phase}-UAT.md`, fix plans if issues found
+**Creates in Mosic:**
+- UAT M Page (linked to MTask List)
+- Issue MTasks with Blocker relations (if failures found)
+- Fix plan M Pages (if issues need resolution)
 
 ---
 
@@ -318,7 +335,7 @@ Quick mode gives you GSD guarantees (atomic commits, state tracking) with a fast
 
 - **Same agents** — Planner + executor, same quality
 - **Skips optional steps** — No research, no plan checker, no verifier
-- **Separate tracking** — Lives in `.planning/quick/`, not phases
+- **Separate tracking** — MTasks tagged `quick` in Mosic, outside roadmap phases
 
 Use for: bug fixes, small features, config changes, one-off tasks.
 
@@ -327,7 +344,10 @@ Use for: bug fixes, small features, config changes, one-off tasks.
 > What do you want to do? "Add dark mode toggle to settings"
 ```
 
-**Creates:** `.planning/quick/001-add-dark-mode-toggle/PLAN.md`, `SUMMARY.md`
+**Creates in Mosic:**
+- MTask (tagged `quick`, outside roadmap phases)
+- Plan M Page (type: Spec)
+- Summary M Page (type: Document) on completion
 
 ---
 
@@ -337,20 +357,20 @@ Use for: bug fixes, small features, config changes, one-off tasks.
 
 Claude Code is incredibly powerful *if* you give it the context it needs. Most people don't.
 
-GSD handles it for you:
+GSD handles it for you via Mosic M Pages:
 
-| File | What it does |
-|------|--------------|
-| `PROJECT.md` | Project vision, always loaded |
-| `research/` | Ecosystem knowledge (stack, features, architecture, pitfalls) |
-| `REQUIREMENTS.md` | Scoped v1/v2 requirements with phase traceability |
-| `ROADMAP.md` | Where you're going, what's done |
-| `STATE.md` | Decisions, blockers, position — memory across sessions |
-| `PLAN.md` | Atomic task with XML structure, verification steps |
-| `SUMMARY.md` | What happened, what changed, committed to history |
-| `todos/` | Captured ideas and tasks for later work |
+| Mosic Entity | What it does |
+|--------------|--------------|
+| Project Overview Page | Project vision, always loaded via `mosic_get_entity_pages` |
+| Research Pages | Ecosystem knowledge (stack, features, architecture, pitfalls) |
+| Requirements Page | Scoped v1/v2 requirements with phase traceability |
+| MTask Lists | Where you're going, what's done (phases as task lists) |
+| MTask status + checklists | Live state — decisions, blockers, position across sessions |
+| Plan Pages (Spec type) | Atomic task with XML structure, verification steps |
+| Summary Pages | What happened, what changed, linked to completed tasks |
+| MTasks (tagged `quick`) | Captured ideas and tasks for later work |
 
-Size limits based on where Claude's quality degrades. Stay under, get consistent excellence.
+State is derived from live Mosic data, not static files. Use `content_format: "markdown"` for token-efficient context loading.
 
 ### XML Prompt Formatting
 
@@ -478,7 +498,7 @@ You're never locked in. The system adapts.
 
 ## Configuration
 
-GSD stores project settings in `.planning/config.json`. Configure during `/gsd:new-project` or update later with `/gsd:settings`.
+GSD stores session settings in local `config.json`. Configure during `/gsd:new-project` or update later with `/gsd:settings`. This file contains Mosic entity IDs and workflow preferences — project documentation itself lives in Mosic M Pages.
 
 ### Core Settings
 
@@ -523,98 +543,98 @@ Use `/gsd:settings` to toggle these, or override per-invocation:
 | Setting | Default | What it controls |
 |---------|---------|------------------|
 | `parallelization.enabled` | `true` | Run independent plans simultaneously |
-| `planning.commit_docs` | `true` | Track `.planning/` in git |
+| `planning.commit_config` | `true` | Track `config.json` in git (Mosic entity IDs) |
 
 ---
 
 ## Mosic MCP Integration
 
-GSD integrates with **[Mosic](https://mosic.pro)** for cloud-based project management. When enabled, your local `.planning/` files sync bidirectionally with Mosic's visual interface — kanban boards, timelines, and dependency graphs.
+**Mosic is the primary and only storage backend for GSD.** There are no local `.planning/` files for documentation or state. All project data lives in Mosic — M Pages, MTasks, MTask Lists, and MProjects.
 
-### What Syncs
+### Architecture: Mosic-Only Storage
 
 ```
-LOCAL (.planning/)              CLOUD (Mosic)
-═════════════════               ════════════════
-PROJECT.md          ───────►    MProject + Overview Page
-ROADMAP.md          ───────►    MTask Lists (phases) + Roadmap Page
-PLAN.md files       ───────►    MTasks + Plan Pages (Spec type)
-SUMMARY.md files    ───────►    Summary Pages (Document type)
-Plan tasks          ───────►    MTask CheckLists
-Dependencies        ───────►    M Relations (Depends/Blocker)
-                    ◄───────    Live status, cross-session updates
+MOSIC (Primary Storage)                     LOCAL (Session Only)
+════════════════════════                    ════════════════════
+MProject + Overview Page    ◄────────►      config.json (entity IDs)
+MTask Lists (phases)
+MTasks + Plan Pages (Spec type)
+Summary Pages (Document type)
+MTask CheckLists
+M Relations (Depends/Blocker)
+Research Pages (tagged)
+Live status, cross-session state
 ```
 
-### Enabling Mosic
+**The only local file is `config.json`** which stores Mosic entity IDs so Claude can reconnect to your project across sessions.
 
-```bash
-/gsd:settings → Mosic Integration → Enable
-```
+### Setup
 
 You'll need:
 1. A Mosic workspace ID (from Mosic settings)
 2. Optionally, a space ID for project organization
+3. MCP configuration in `.mcp.json` (provided by default)
 
 ### How It Works
 
 **During `/gsd:new-project`:**
-- Creates or links MProject with metadata
+- Creates MProject with metadata (title, description, dates)
 - Creates MTask Lists for each phase
-- Creates M Pages (Overview, Requirements, Roadmap)
+- Creates M Pages: Overview, Requirements, Roadmap
+- Creates Research M Pages (tagged `research`, `gsd-managed`)
 - Sets up tags (gsd-managed, phase-01, phase-02, etc.)
+- Stores all entity IDs in local `config.json`
 
 **During `/gsd:plan-phase`:**
-- Creates MTasks for each plan
-- Creates plan M Pages (type: Spec)
-- Creates CheckLists from plan tasks
-- Creates dependency relations between plans
+- Creates MTasks for each plan in the phase's MTask List
+- Creates Plan M Pages (type: Spec) linked to MTasks
+- Creates CheckLists from plan acceptance criteria
+- Creates M Relations for task dependencies
 
 **During `/gsd:execute-phase`:**
-- Updates task status (In Progress → Completed)
+- Updates MTask status (In Progress → Completed)
 - Marks checklist items as done
-- Creates summary M Pages
-- Adds commit hashes as comments
+- Creates Summary M Pages linked to completed MTasks
+- Adds commit hashes as M Comments
 
 **During `/gsd:verify-work`:**
-- Creates UAT M Page
-- Creates issue tasks with Blocker relations
+- Creates UAT M Page linked to MTask List
+- Creates issue MTasks with Blocker relations (if failures)
 - Updates phase status based on results
 
-### Error Handling
-
-Mosic sync failures **never block local work**. If Mosic is unavailable:
-1. Warning displayed
-2. Failed operation queued in `pending_sync`
-3. Local operation continues normally
-4. Retry on next `/gsd:progress` or manual sync
+**During `/gsd:progress`:**
+- Derives state from live Mosic data (no static STATE.md)
+- Shows completion percentages from MTask status
+- Lists blockers from M Relations
 
 ### Configuration
 
-All Mosic IDs stored in `.planning/config.json`:
+Entity IDs stored in local `config.json`:
 
 ```json
 {
   "mosic": {
-    "enabled": true,
     "workspace_id": "your-workspace-id",
+    "space_id": "optional-space-id",
     "project_id": "created-project-id",
     "task_lists": { "phase-01": "...", "phase-02": "..." },
     "tasks": { "phase-01-plan-01": "..." },
-    "pages": { "overview": "...", "roadmap": "..." },
-    "pending_sync": []
+    "pages": { "overview": "...", "roadmap": "...", "requirements": "..." }
   }
 }
 ```
 
 ### Benefits
 
-| Feature | Without Mosic | With Mosic |
-|---------|---------------|------------|
-| View progress | Run `/gsd:progress` | Dashboard always visible |
-| Share status | Share terminal output | Send Mosic URL |
-| Cross-session | STATE.md only | Live task updates |
-| Visualization | None | Kanban, timeline, graphs |
-| Backup | Git only | Git + cloud |
+| Feature | What GSD Provides |
+|---------|-------------------|
+| View progress | Dashboard always visible at mosic.pro |
+| Share status | Send Mosic URL (project, task, or page) |
+| Cross-session | Live task state, no file parsing needed |
+| Visualization | Kanban boards, timelines, dependency graphs |
+| State derivation | Query live data instead of static files |
+| Collaboration | Multiple agents can coordinate via MTasks |
+| Search | Full-text search across all documentation |
 
 ---
 
