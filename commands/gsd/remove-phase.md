@@ -146,10 +146,11 @@ Wait for confirmation.
 
 ```
 # Update task list to Cancelled/Archived status
+# IMPORTANT: MTask List descriptions use HTML format
 mosic_update_document("MTask List", target_task_list_id, {
   status: "Cancelled",
   title: "[REMOVED] " + target_title,
-  description: target_phase.description + "\n\n---\n**REMOVED:** This phase was removed from the roadmap. Historical record preserved."
+  description: target_phase.description + "<hr><p><strong>REMOVED:</strong> This phase was removed from the roadmap. Historical record preserved.</p>"
 })
 
 # Remove from config mappings

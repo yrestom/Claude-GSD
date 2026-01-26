@@ -377,16 +377,18 @@ mosic_update_document("MProject", PROJECT_ID, {
 })
 
 # Add completion comment
+# IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: WORKSPACE_ID,
   reference_doctype: "MProject",
   reference_name: PROJECT_ID,
-  content: "## Milestone v" + version + " Completed\n\n" +
-    "**Phases:** " + phase_stats.length + "\n" +
-    "**Tasks:** " + completed_tasks + "\n" +
-    "**Timeline:** " + START_DATE + " - " + END_DATE + "\n\n" +
-    "**Key Accomplishments:**\n" + top_accomplishments.map(a => "- " + a).join("\n") + "\n\n" +
-    "[View Archive](https://mosic.pro/app/page/" + ARCHIVE_PAGE_ID + ")"
+  content: "<h2>Milestone v" + version + " Completed</h2>" +
+    "<p><strong>Phases:</strong> " + phase_stats.length + "</p>" +
+    "<p><strong>Tasks:</strong> " + completed_tasks + "</p>" +
+    "<p><strong>Timeline:</strong> " + START_DATE + " - " + END_DATE + "</p>" +
+    "<p><strong>Key Accomplishments:</strong></p>" +
+    "<ul>" + top_accomplishments.map(a => "<li>" + a + "</li>").join("") + "</ul>" +
+    "<p><a href=\"https://mosic.pro/app/page/" + ARCHIVE_PAGE_ID + "\">View Archive</a></p>"
 })
 
 DISPLAY: "Project marked completed: https://mosic.pro/app/MProject/" + PROJECT_ID

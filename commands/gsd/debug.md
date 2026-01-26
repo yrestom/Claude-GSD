@@ -351,11 +351,12 @@ IF response == "fix":
   # Mark task complete after fix
   mosic_complete_task(DEBUG_TASK_ID)
 
+  # IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace_id: WORKSPACE_ID,
     reference_doctype: "MTask",
     reference_name: DEBUG_TASK_ID,
-    content: "**Resolved**\n\nFix applied via /gsd:debug"
+    content: "<p><strong>Resolved</strong></p><p>Fix applied via /gsd:debug</p>"
   })
 
 ELIF response == "plan":
@@ -364,11 +365,12 @@ ELIF response == "plan":
 ELIF response == "done":
   mosic_complete_task(DEBUG_TASK_ID)
 
+  # IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace_id: WORKSPACE_ID,
     reference_doctype: "MTask",
     reference_name: DEBUG_TASK_ID,
-    content: "**Resolved**\n\nManual fix applied"
+    content: "<p><strong>Resolved</strong></p><p>Manual fix applied</p>"
   })
 ```
 
@@ -376,11 +378,12 @@ ELIF response == "done":
 
 ```
 # Add checkpoint comment
+# IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: WORKSPACE_ID,
   reference_doctype: "MTask",
   reference_name: DEBUG_TASK_ID,
-  content: "**Checkpoint:** " + checkpoint_type + "\n\n" + checkpoint_details
+  content: "<p><strong>Checkpoint:</strong> " + checkpoint_type + "</p><p>" + checkpoint_details + "</p>"
 })
 
 DISPLAY:
@@ -431,11 +434,14 @@ mosic_update_document("MTask", DEBUG_TASK_ID, {
 })
 
 # Add inconclusive comment
+# IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: WORKSPACE_ID,
   reference_doctype: "MTask",
   reference_name: DEBUG_TASK_ID,
-  content: "**Investigation Inconclusive**\n\n**Checked:**\n" + checked_items + "\n\n**Eliminated:**\n" + eliminated_items
+  content: "<p><strong>Investigation Inconclusive</strong></p>" +
+    "<p><strong>Checked:</strong></p><p>" + checked_items + "</p>" +
+    "<p><strong>Eliminated:</strong></p><p>" + eliminated_items + "</p>"
 })
 
 DISPLAY:

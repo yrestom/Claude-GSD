@@ -144,27 +144,50 @@ ELSE:
 **Create MTask for the todo in Mosic:**
 
 ```
-todo_description = """
-## Problem
-
-[problem description - enough context for future Claude to understand weeks later]
-
-## Solution
-
-[approach hints or "TBD"]
-
-## Files
-[list of relevant file paths]
-
----
-*Captured via /gsd:add-todo*
-"""
-
+# IMPORTANT: Task descriptions must use Editor.js format
 todo_task = mosic_create_document("MTask", {
   workspace_id: WORKSPACE_ID,
   project: PROJECT_ID,
   title: "[todo title]",
-  description: todo_description,
+  description: {
+    blocks: [
+      {
+        type: "header",
+        data: { text: "Problem", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: "[problem description - enough context for future Claude to understand weeks later]" }
+      },
+      {
+        type: "header",
+        data: { text: "Solution", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: "[approach hints or 'TBD']" }
+      },
+      {
+        type: "header",
+        data: { text: "Files", level: 2 }
+      },
+      {
+        type: "list",
+        data: {
+          style: "unordered",
+          items: files_list  // Array of file paths
+        }
+      },
+      {
+        type: "delimiter",
+        data: {}
+      },
+      {
+        type: "paragraph",
+        data: { text: "*Captured via /gsd:add-todo*" }
+      }
+    ]
+  },
   icon: "lucide:lightbulb",  # Marks this as a todo
   status: "Backlog",
   priority: "Normal"

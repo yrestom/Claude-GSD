@@ -132,10 +132,12 @@ IF QUICK_LIST_ID is null or empty:
     DISPLAY: "Found existing Quick Tasks list"
   ELSE:
     # Create Quick Tasks list
+    # IMPORTANT: MTask List descriptions use HTML format
     quick_list = mosic_create_document("MTask List", {
       workspace_id: WORKSPACE_ID,
       title: "Quick Tasks",
-      description: "Ad-hoc tasks completed via `/gsd:quick`.\n\nThese are small, atomic tasks that don't require full planning cycles.",
+      description: "<p>Ad-hoc tasks completed via <code>/gsd:quick</code>.</p>" +
+        "<p>These are small, atomic tasks that don't require full planning cycles.</p>",
       icon: "lucide:zap",
       color: "amber",
       status: "In Progress",
@@ -187,11 +189,23 @@ DISPLAY: "Creating quick task " + TASK_IDENTIFIER + ": " + DESCRIPTION
 
 ```
 # Create the task (not yet done - will be marked done after execution)
+# IMPORTANT: Task descriptions must use Editor.js format
 quick_task = mosic_create_document("MTask", {
   workspace_id: WORKSPACE_ID,
   task_list: QUICK_LIST_ID,
   title: DESCRIPTION,
-  description: "Quick task initiated via /gsd:quick\n\n**Status:** Planning...",
+  description: {
+    blocks: [
+      {
+        type: "paragraph",
+        data: { text: "Quick task initiated via /gsd:quick" }
+      },
+      {
+        type: "paragraph",
+        data: { text: "**Status:** Planning..." }
+      }
+    ]
+  },
   icon: "lucide:zap",
   status: "In Progress",
   priority: "Normal",
@@ -378,11 +392,14 @@ mosic_batch_add_tags_to_document("M Page", SUMMARY_PAGE_ID, [
 mosic_complete_task(TASK_ID)
 
 # Add completion comment
+# IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: WORKSPACE_ID,
   reference_doctype: "MTask",
   reference_name: TASK_ID,
-  content: "**Completed**\n\nCommit: `" + commit_hash + "`\n\n[View Summary](https://mosic.pro/app/page/" + SUMMARY_PAGE_ID + ")"
+  content: "<p><strong>Completed</strong></p>" +
+    "<p>Commit: <code>" + commit_hash + "</code></p>" +
+    "<p><a href=\"https://mosic.pro/app/page/" + SUMMARY_PAGE_ID + "\">View Summary</a></p>"
 })
 
 DISPLAY: "Summary created: https://mosic.pro/app/page/" + SUMMARY_PAGE_ID

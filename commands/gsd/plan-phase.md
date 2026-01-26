@@ -392,11 +392,49 @@ Parse planner output for `## PLANNING COMPLETE`:
 plan_number = printf("%02d", plan_index + 1)
 
 # Create MTask for this plan
+# IMPORTANT: Task descriptions must use Editor.js format
 plan_task = mosic_create_document("MTask", {
   workspace: workspace_id,
   task_list: task_list_id,
   title: "Plan " + plan_number + ": " + plan_objective.substring(0, 100),
-  description: plan_summary_markdown,
+  description: {
+    blocks: [
+      {
+        type: "paragraph",
+        data: { text: plan_objective }
+      },
+      {
+        type: "header",
+        data: { text: "Wave", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: "Wave " + wave + (dependencies.length > 0 ? " (depends on: " + dependencies.join(", ") + ")" : "") }
+      },
+      {
+        type: "header",
+        data: { text: "Tasks", level: 2 }
+      },
+      {
+        type: "list",
+        data: {
+          style: "ordered",
+          items: plan_tasks.map(t => t.name + ": " + t.description)
+        }
+      },
+      {
+        type: "header",
+        data: { text: "Verification", level: 2 }
+      },
+      {
+        type: "list",
+        data: {
+          style: "unordered",
+          items: verification_criteria
+        }
+      }
+    ]
+  },
   icon: "lucide:file-code",
   status: "ToDo",
   priority: (wave == 1) ? "High" : "Normal"

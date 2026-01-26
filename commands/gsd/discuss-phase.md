@@ -253,10 +253,12 @@ mosic_batch_add_tags_to_document("M Page", context_page_id, [
 key_decisions = extract_key_decisions(context_content)
 
 # Update phase description with decisions summary
+# IMPORTANT: MTask List descriptions use HTML format
 current_description = phase.description or ""
 
 mosic_update_document("MTask List", task_list_id, {
-  description: current_description + "\n\n## Key Decisions\n\n" + key_decisions
+  description: current_description + "<h2>Key Decisions</h2>" +
+    "<ul>" + key_decisions.map(d => "<li>" + d + "</li>").join("") + "</ul>"
 })
 ```
 

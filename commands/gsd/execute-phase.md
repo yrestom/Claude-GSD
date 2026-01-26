@@ -260,11 +260,14 @@ FOR each completed_plan:
   config.mosic.pages["phase-" + PHASE + "-summary-" + plan.number] = summary_page.name
 
   # Add completion comment with commit info
+  # IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace: workspace_id,
     reference_doctype: "MTask",
     reference_name: plan.task.name,
-    content: "Completed\n\n**Commits:**\n" + format_commits(executor_summary.commits)
+    content: "<p><strong>Completed</strong></p>" +
+      "<p><strong>Commits:</strong></p>" +
+      "<ul>" + executor_summary.commits.map(c => "<li><code>" + c.hash + "</code>: " + c.message + "</li>").join("") + "</ul>"
   })
 
   # Create relation between plan page and summary page

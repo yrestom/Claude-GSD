@@ -161,14 +161,15 @@ slug = DESCRIPTION.toLowerCase()
 
 ```
 # Create MTask List with INSERTED marker
+# IMPORTANT: MTask List descriptions use HTML format
 new_phase = mosic_create_document("MTask List", {
   workspace_id: WORKSPACE_ID,
   project: PROJECT_ID,
   title: DESCRIPTION + " (INSERTED)",
-  description: "**Goal:** [Urgent work - to be planned]\n\n" +
-    "**Status:** Not planned yet\n\n" +
-    "**INSERTED:** This phase was inserted after " + AFTER_IDENTIFIER + " for urgent work.\n\n" +
-    "Run `/gsd:plan-phase " + NEW_IDENTIFIER + "` to create execution plans.",
+  description: "<p><strong>Goal:</strong> [Urgent work - to be planned]</p>" +
+    "<p><strong>Status:</strong> Not planned yet</p>" +
+    "<p><strong>INSERTED:</strong> This phase was inserted after " + AFTER_IDENTIFIER + " for urgent work.</p>" +
+    "<p>Run <code>/gsd:plan-phase " + NEW_IDENTIFIER + "</code> to create execution plans.</p>",
   icon: "lucide:alert-triangle",
   color: "orange",
   status: "Backlog",
@@ -243,14 +244,15 @@ IF NEXT_PHASE_ID:
 
 ```
 # Add comment noting the insertion
+# IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: WORKSPACE_ID,
   reference_doctype: "MProject",
   reference_name: PROJECT_ID,
-  content: "**Phase Inserted**\n\n" +
-    "**" + NEW_IDENTIFIER + ":** " + DESCRIPTION + "\n\n" +
-    "Inserted after " + AFTER_IDENTIFIER + " for urgent work.\n\n" +
-    "[View Phase](https://mosic.pro/app/MTask%20List/" + NEW_PHASE_ID + ")"
+  content: "<p><strong>Phase Inserted</strong></p>" +
+    "<p><strong>" + NEW_IDENTIFIER + ":</strong> " + DESCRIPTION + "</p>" +
+    "<p>Inserted after " + AFTER_IDENTIFIER + " for urgent work.</p>" +
+    "<p><a href=\"https://mosic.pro/app/MTask%20List/" + NEW_PHASE_ID + "\">View Phase</a></p>"
 })
 ```
 

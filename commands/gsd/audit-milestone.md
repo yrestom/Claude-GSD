@@ -207,23 +207,40 @@ FOR each phase in verification_results:
   task_list_id = phase.task_list_id
 
   # Add audit status as comment
+  # IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace_id: WORKSPACE_ID,
     reference_doctype: "MTask List",
     reference_name: task_list_id,
-    content: "**Audit Status:** " + phase.status + "\n\n" +
-      (phase.critical_gaps.length > 0 ? "**Gaps:**\n- " + phase.critical_gaps.join("\n- ") : "No gaps") + "\n\n" +
-      (phase.tech_debt.length > 0 ? "**Tech Debt:**\n- " + phase.tech_debt.join("\n- ") : "No tech debt")
+    content: "<p><strong>Audit Status:</strong> " + phase.status + "</p>" +
+      (phase.critical_gaps.length > 0 ? "<p><strong>Gaps:</strong></p><ul>" + phase.critical_gaps.map(g => "<li>" + g + "</li>").join("") + "</ul>" : "<p>No gaps</p>") +
+      (phase.tech_debt.length > 0 ? "<p><strong>Tech Debt:</strong></p><ul>" + phase.tech_debt.map(t => "<li>" + t + "</li>").join("") + "</ul>" : "<p>No tech debt</p>")
   })
 
   # If gaps found, create blocking tasks
   IF phase.critical_gaps.length > 0:
     FOR each gap in phase.critical_gaps:
+      # IMPORTANT: Task descriptions must use Editor.js format
       gap_task = mosic_create_document("MTask", {
         workspace_id: WORKSPACE_ID,
         task_list: task_list_id,
         title: "Gap: " + gap.description,
-        description: "**Audit Gap**\n\n" + gap.details + "\n\n**Requirement:** " + gap.requirement_id,
+        description: {
+          blocks: [
+            {
+              type: "paragraph",
+              data: { text: "**Audit Gap**" }
+            },
+            {
+              type: "paragraph",
+              data: { text: gap.details }
+            },
+            {
+              type: "paragraph",
+              data: { text: "**Requirement:** " + gap.requirement_id }
+            }
+          ]
+        },
         icon: "lucide:alert-triangle",
         status: "ToDo",
         priority: "High"

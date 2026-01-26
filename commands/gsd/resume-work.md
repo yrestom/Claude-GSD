@@ -135,11 +135,12 @@ IF .continue-here.md exists:
     })
 
     # Add resume comment
+    # IMPORTANT: Comments must use HTML format
     mosic_create_document("M Comment", {
       workspace_id: WORKSPACE_ID,
       ref_doc: "MTask",
       ref_name: TASK_ID,
-      content: "▶️ **Work Resumed**\n\n**Resumed at:** " + timestamp
+      content: "<p><strong>Work Resumed</strong></p><p><strong>Resumed at:</strong> " + timestamp + "</p>"
     })
 
 # Update task list status if needed

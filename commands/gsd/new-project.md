@@ -1070,11 +1070,12 @@ a) Create phase-specific tag:
    })
 
 b) Create MTask List:
+   // IMPORTANT: MTask List descriptions use HTML format
    mosic_create_document('MTask List', {
      workspace_id,
      project: project_id,
      title: 'Phase NN: [name]',
-     description: '[goal]\n\nSuccess Criteria:\n- [criterion 1]\n- [criterion 2]',
+     description: '<p>[goal]</p><p><strong>Success Criteria:</strong></p><ul><li>[criterion 1]</li><li>[criterion 2]</li></ul>',
      prefix: 'PNN',
      status: 'Open'
    })

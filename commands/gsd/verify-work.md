@@ -291,11 +291,12 @@ IF failed == 0:
   })
 
   # Add success comment
+  # IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace_id: WORKSPACE_ID,
     reference_doctype: "MTask List",
     reference_name: PHASE_ID,
-    content: "✅ **UAT Complete**\n\nAll " + total + " tests passed.\n\nUAT Report: [View](https://mosic.pro/app/page/" + UAT_PAGE_ID + ")"
+    content: "<p><strong>UAT Complete</strong></p><p>All " + total + " tests passed.</p><p>UAT Report: <a href=\"https://mosic.pro/app/page/" + UAT_PAGE_ID + "\">View</a></p>"
   })
 ELSE:
   mosic_update_document("MTask List", PHASE_ID, {
@@ -303,11 +304,12 @@ ELSE:
   })
 
   # Add issues comment
+  # IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace_id: WORKSPACE_ID,
     reference_doctype: "MTask List",
     reference_name: PHASE_ID,
-    content: "⚠️ **UAT Found Issues**\n\n" + failed + "/" + total + " tests failed.\n\nRun `/gsd:execute-phase " + PHASE_IDENTIFIER + " --gaps-only` after fix plans are ready.\n\nUAT Report: [View](https://mosic.pro/app/page/" + UAT_PAGE_ID + ")"
+    content: "<p><strong>UAT Found Issues</strong></p><p>" + failed + "/" + total + " tests failed.</p><p>Run <code>/gsd:execute-phase " + PHASE_IDENTIFIER + " --gaps-only</code> after fix plans are ready.</p><p>UAT Report: <a href=\"https://mosic.pro/app/page/" + UAT_PAGE_ID + "\">View</a></p>"
   })
 ```
 

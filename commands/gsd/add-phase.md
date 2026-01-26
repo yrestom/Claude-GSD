@@ -131,11 +131,14 @@ ELSE:
 Create MTask List in Mosic:
 
 ```
+# IMPORTANT: MTask List descriptions must use HTML format
 task_list = mosic_create_document("MTask List", {
   workspace: workspace_id,
   project: project_id,
   title: "Phase " + PHASE + ": " + phase_description,
-  description: "**Goal:** [To be planned]\n\n**Status:** Not planned yet\n\nRun `/gsd:plan-phase " + PHASE + "` to create execution plans.",
+  description: "<p><strong>Goal:</strong> [To be planned]</p>" +
+    "<p><strong>Status:</strong> Not planned yet</p>" +
+    "<p>Run <code>/gsd:plan-phase " + PHASE + "</code> to create execution plans.</p>",
   icon: "lucide:layers",
   color: "slate",
   status: "Backlog",
