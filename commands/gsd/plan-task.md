@@ -1,7 +1,7 @@
 ---
 name: gsd:plan-task
 description: Create execution plan with subtasks for a task in the current phase
-argument-hint: "[task-identifier] [--skip-verify]"
+argument-hint: "[task-identifier] [--quick | --skip-verify]"
 allowed-tools:
   - Read
   - Write
@@ -39,6 +39,7 @@ Create an execution plan for a specific task, decomposing it into subtasks with 
 Task identifier: $ARGUMENTS (e.g., "AUTH-5" or task UUID)
 
 **Flags:**
+- `--quick` - Quick planning mode: 1-3 simple subtasks, no checker, direct to execution
 - `--skip-verify` - Skip planner -> checker verification loop
 </context>
 
@@ -73,7 +74,10 @@ Model lookup:
 ```
 # Extract task identifier and flags
 task_identifier = extract_identifier($ARGUMENTS)
-skip_verify = $ARGUMENTS contains "--skip-verify"
+quick_mode = $ARGUMENTS contains "--quick"
+skip_verify = $ARGUMENTS contains "--skip-verify" or quick_mode
+
+# Quick mode implies skip-verify (no checker needed for simple tasks)
 
 # Load task from Mosic
 # Try by identifier first, fall back to active task
@@ -274,17 +278,20 @@ ELSE:
 Display:
 ```
 -------------------------------------------
- GSD > SPAWNING PLANNER
+ GSD > SPAWNING PLANNER {quick_mode ? "(QUICK)" : ""}
 -------------------------------------------
 
 Analyzing task and creating subtasks...
 ```
 
 ```
+# Determine planning mode based on flags
+planning_mode = quick_mode ? "task-quick" : "task-planning"
+
 planner_prompt = """
 <planning_context>
 
-**Mode:** task-planning
+**Mode:** """ + planning_mode + """
 **Task ID:** """ + TASK_ID + """
 **Task Identifier:** """ + TASK_IDENTIFIER + """
 **Task Title:** """ + TASK_TITLE + """
@@ -314,11 +321,19 @@ planner_prompt = """
 </planning_context>
 
 <constraints>
+""" + (quick_mode ? """
+**QUICK MODE - Simplified planning:**
+- Create 1-3 subtasks MAXIMUM (keep it simple)
+- Each subtask should take 5-15 minutes to execute
+- Focus on core actions, skip elaborate verification
+- Get to execution quickly
+""" : """
 - Create 1-5 subtasks maximum (task-level scope, not phase-level)
 - Each subtask should take 15-60 minutes to execute
 - Subtasks must be specific and actionable
 - Include verification criteria for each subtask
 - Use must-haves for goal-backward verification
+""") + """
 </constraints>
 
 <downstream_consumer>
