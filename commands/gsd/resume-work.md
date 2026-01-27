@@ -135,8 +135,8 @@ IF config_task_id:
 # Get recent comments on project entities to understand what was happening
 recent_project_comments = mosic_list_documents("M Comment", {
   filters: [
-    ["reference_doctype", "=", "MProject"],
-    ["reference_name", "=", project_id]
+    ["ref_doc", "=", "MProject"],
+    ["ref_name", "=", project_id]
   ],
   order_by: "creation desc",
   limit: 5
@@ -147,8 +147,8 @@ recent_task_comments = []
 IF mosic_current_task:
   recent_task_comments = mosic_list_documents("M Comment", {
     filters: [
-      ["reference_doctype", "=", "MTask"],
-      ["reference_name", "=", mosic_current_task.name]
+      ["ref_doc", "=", "MTask"],
+      ["ref_name", "=", mosic_current_task.name]
     ],
     order_by: "creation desc",
     limit: 10
@@ -418,8 +418,8 @@ IF mosic_current_task:
   # Load task comments (progress notes, checkpoints)
   task_context.comments = mosic_list_documents("M Comment", {
     filters: [
-      ["reference_doctype", "=", "MTask"],
-      ["reference_name", "=", mosic_current_task.name]
+      ["ref_doc", "=", "MTask"],
+      ["ref_name", "=", mosic_current_task.name]
     ],
     order_by: "creation desc",
     limit: 10
@@ -517,8 +517,8 @@ IF phase_context:
     # If task has been in progress for a while with no recent comments
     task_comments = mosic_list_documents("M Comment", {
       filters: [
-        ["reference_doctype", "=", "MTask"],
-        ["reference_name", "=", task.name]
+        ["ref_doc", "=", "MTask"],
+        ["ref_name", "=", task.name]
       ],
       order_by: "creation desc",
       limit: 1
@@ -836,8 +836,8 @@ write config.json
 # IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace: workspace_id,
-  reference_doctype: "MProject",
-  reference_name: project_id,
+  ref_doc: "MProject",
+  ref_name: project_id,
   content: "<p><strong>Session Resumed</strong></p>" +
     "<p><strong>Phase:</strong> " + (mosic_current_phase?.title or "None") + "</p>" +
     "<p><strong>Task:</strong> " + (mosic_current_task?.identifier or "None") + "</p>" +

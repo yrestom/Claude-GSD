@@ -146,8 +146,8 @@ if (config_task_id && current_task) {
 // Get recent comments on project to understand what was happening
 recent_project_comments = mosic_list_documents("M Comment", {
   filters: [
-    ["reference_doctype", "=", "MProject"],
-    ["reference_name", "=", project_id]
+    ["ref_doc", "=", "MProject"],
+    ["ref_name", "=", project_id]
   ],
   order_by: "creation desc",
   limit: 5
@@ -158,8 +158,8 @@ recent_task_comments = []
 if (current_task) {
   recent_task_comments = mosic_list_documents("M Comment", {
     filters: [
-      ["reference_doctype", "=", "MTask"],
-      ["reference_name", "=", current_task.name]
+      ["ref_doc", "=", "MTask"],
+      ["ref_name", "=", current_task.name]
     ],
     order_by: "creation desc",
     limit: 10
@@ -379,8 +379,8 @@ if (current_task) {
   // Load task comments (progress notes, checkpoints)
   task_context.comments = mosic_list_documents("M Comment", {
     filters: [
-      ["reference_doctype", "=", "MTask"],
-      ["reference_name", "=", current_task.name]
+      ["ref_doc", "=", "MTask"],
+      ["ref_name", "=", current_task.name]
     ],
     order_by: "creation desc",
     limit: 10
@@ -439,8 +439,8 @@ if (phase_context) {
   for (task of phase_context.in_progress_tasks) {
     task_comments = mosic_list_documents("M Comment", {
       filters: [
-        ["reference_doctype", "=", "MTask"],
-        ["reference_name", "=", task.name]
+        ["ref_doc", "=", "MTask"],
+        ["ref_name", "=", task.name]
       ],
       order_by: "creation desc",
       limit: 1
@@ -720,8 +720,8 @@ write config.json
 // IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace: workspace_id,
-  reference_doctype: "MProject",
-  reference_name: project_id,
+  ref_doc: "MProject",
+  ref_name: project_id,
   content: "<p><strong>Session Resumed</strong></p>" +
     "<p><strong>Phase:</strong> " + (current_phase?.title || "None") + "</p>" +
     "<p><strong>Task:</strong> " + (current_task?.identifier || "None") + "</p>" +

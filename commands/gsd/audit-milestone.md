@@ -210,8 +210,8 @@ FOR each phase in verification_results:
   # IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace_id: WORKSPACE_ID,
-    reference_doctype: "MTask List",
-    reference_name: task_list_id,
+    ref_doc: "MTask List",
+    ref_name: task_list_id,
     content: "<p><strong>Audit Status:</strong> " + phase.status + "</p>" +
       (phase.critical_gaps.length > 0 ? "<p><strong>Gaps:</strong></p><ul>" + phase.critical_gaps.map(g => "<li>" + g + "</li>").join("") + "</ul>" : "<p>No gaps</p>") +
       (phase.tech_debt.length > 0 ? "<p><strong>Tech Debt:</strong></p><ul>" + phase.tech_debt.map(t => "<li>" + t + "</li>").join("") + "</ul>" : "<p>No tech debt</p>")

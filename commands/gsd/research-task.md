@@ -318,8 +318,8 @@ IF researcher_output contains "## RESEARCH COMPLETE":
   # Add research comment to task
   mosic_create_document("M Comment", {
     workspace: workspace_id,
-    reference_doctype: "MTask",
-    reference_name: TASK_ID,
+    ref_doc: "MTask",
+    ref_name: TASK_ID,
     content: "<p><strong>Research Complete</strong></p>" +
       "<p>Confidence: " + confidence + "</p>" +
       "<p><a href=\"https://mosic.pro/app/page/" + RESEARCH_PAGE_ID + "\">View Research</a></p>"

@@ -234,8 +234,8 @@ FOR each plan in wave:
   # Add execution started comment
   mosic_create_document("M Comment", {
     workspace: workspace_id,
-    reference_doctype: "MTask",
-    reference_name: plan.task.name,
+    ref_doc: "MTask",
+    ref_name: plan.task.name,
     content: "Execution started"
   })
 ```
@@ -350,8 +350,8 @@ FOR each completed_plan:
   # IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace: workspace_id,
-    reference_doctype: "MTask",
-    reference_name: plan.task.name,
+    ref_doc: "MTask",
+    ref_name: plan.task.name,
     content: "<p><strong>Completed</strong></p>" +
       "<p><strong>Commits:</strong></p>" +
       "<ul>" + executor_summary.commits.map(c => "<li><code>" + c.hash + "</code>: " + c.message + "</li>").join("") + "</ul>"

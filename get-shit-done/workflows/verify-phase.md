@@ -418,8 +418,8 @@ if (status === "passed") {
   // IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace_id: workspace_id,
-    reference_doctype: "MTask List",
-    reference_name: phase_task_list.name,
+    ref_doc: "MTask List",
+    ref_name: phase_task_list.name,
     content: "<p><strong>Phase Verification Passed</strong></p>" +
       "<p>All must-haves verified. Goal achieved.</p>" +
       "<p><a href=\"page/" + verification_page.name + "\">Verification Report</a></p>"

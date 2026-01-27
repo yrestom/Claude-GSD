@@ -132,8 +132,8 @@ mosic_update_document("MTask List", current_phase_list.name, {
 // IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
-  reference_doctype: "MTask List",
-  reference_name: current_phase_list.name,
+  ref_doc: "MTask List",
+  ref_name: current_phase_list.name,
   content: "<p><strong>Phase Complete</strong></p>" +
     "<p>All " + completed_tasks + " tasks finished.</p>" +
     "<p>Transitioning to next phase.</p>"
@@ -184,8 +184,8 @@ if (!MILESTONE_COMPLETE) {
   // IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace_id: workspace_id,
-    reference_doctype: "MTask List",
-    reference_name: next_phase_list.name,
+    ref_doc: "MTask List",
+    ref_name: next_phase_list.name,
     content: "<p><strong>Phase Started</strong></p>" +
       "<p>Transitioned from Phase " + extract_phase_number(current_phase_list) + ".</p>" +
       "<p>Ready for planning.</p>"
@@ -242,8 +242,8 @@ if (requirements_page && has_requirement_changes) {
   // IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace_id: workspace_id,
-    reference_doctype: "M Page",
-    reference_name: requirements_page.name,
+    ref_doc: "M Page",
+    ref_name: requirements_page.name,
     content: "<p><strong>Requirements Evolved</strong></p>" +
       "<p>After Phase " + extract_phase_number(current_phase_list) + ":</p>" +
       "<ul>" +
@@ -279,8 +279,8 @@ if (roadmap_page) {
 // IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
-  reference_doctype: "MProject",
-  reference_name: project_id,
+  ref_doc: "MProject",
+  ref_name: project_id,
   content: "<p><strong>Phase Transition</strong></p>" +
     "<ul>" +
     "<li>Completed: Phase " + extract_phase_number(current_phase_list) + " (" + current_phase.title + ")</li>" +

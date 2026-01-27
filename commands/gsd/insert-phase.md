@@ -251,8 +251,8 @@ IF NEXT_PHASE_ID:
 # IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: WORKSPACE_ID,
-  reference_doctype: "MProject",
-  reference_name: PROJECT_ID,
+  ref_doc: "MProject",
+  ref_name: PROJECT_ID,
   content: "<p><strong>Phase Inserted</strong></p>" +
     "<p><strong>" + NEW_IDENTIFIER + ":</strong> " + DESCRIPTION + "</p>" +
     "<p>Inserted after " + AFTER_IDENTIFIER + " for urgent work.</p>" +

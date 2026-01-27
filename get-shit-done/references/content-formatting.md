@@ -254,8 +254,8 @@ M Comment content uses HTML format for rich text display.
 ```javascript
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
-  reference_doctype: "MTask",
-  reference_name: task_id,
+  ref_doc: "MTask",
+  ref_name: task_id,
   content: "<p><strong>Status Update</strong></p><p>Task is now in progress.</p>"
 })
 ```
@@ -264,8 +264,8 @@ mosic_create_document("M Comment", {
 ```javascript
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
-  reference_doctype: "MTask",
-  reference_name: task_id,
+  ref_doc: "MTask",
+  ref_name: task_id,
   content: "<p><strong>Completed</strong></p>" +
     "<p>Commit: <code>" + commit_hash + "</code></p>" +
     "<p><a href=\"https://mosic.pro/app/page/" + summary_page_id + "\">View Summary</a></p>"
@@ -276,8 +276,8 @@ mosic_create_document("M Comment", {
 ```javascript
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
-  reference_doctype: "MTask",
-  reference_name: task_id,
+  ref_doc: "MTask",
+  ref_name: task_id,
   content: "<p><strong>Task Complete</strong></p>" +
     "<ul>" +
     "<li>Duration: " + duration + "</li>" +
@@ -292,8 +292,8 @@ mosic_create_document("M Comment", {
 ```javascript
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
-  reference_doctype: "M Page",
-  reference_name: uat_page_id,
+  ref_doc: "M Page",
+  ref_name: uat_page_id,
   content: "<p><strong>UAT Complete</strong></p>" +
     "<ul>" +
     "<li>Passed: " + passed_count + "</li>" +

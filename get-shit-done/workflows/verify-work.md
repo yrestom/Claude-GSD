@@ -312,8 +312,8 @@ mosic_update_content_blocks(uat_page.name, {
 // IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
-  reference_doctype: "M Page",
-  reference_name: uat_page.name,
+  ref_doc: "M Page",
+  ref_name: uat_page.name,
   content: "<p><strong>UAT Complete</strong></p>" +
     "<ul>" +
     "<li>Passed: " + passed_count + "</li>" +

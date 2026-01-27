@@ -318,8 +318,8 @@ For complex handoffs, create a comment on the current task:
 // Add handoff context as task comment
 await mosic_create_document("M Comment", {
   comment_type: "Comment",
-  reference_doctype: "MTask",
-  reference_name: config.session.current_task_id,
+  ref_doc: "MTask",
+  ref_name: config.session.current_task_id,
   content: `**Session Handoff**
 
 **Status:** ${currentStatus}

@@ -219,8 +219,8 @@ mosic_update_document("MTask", TASK_ID, {
 # Add execution started comment
 mosic_create_document("M Comment", {
   workspace: workspace_id,
-  reference_doctype: "MTask",
-  reference_name: TASK_ID,
+  ref_doc: "MTask",
+  ref_name: TASK_ID,
   content: "<p><strong>Execution Started</strong></p>" +
     "<p>Subtasks: " + incomplete_subtasks.length + "</p>"
 })
@@ -235,7 +235,7 @@ executor_prompt = """
 <objective>
 Execute task """ + TASK_IDENTIFIER + """: """ + TASK_TITLE + """
 
-Implement all subtasks with atomic commits. Create summary when complete.
+Implement all subtasks and then ask for user permission to create commits. Create summary when complete.
 </objective>
 
 <execution_context>
@@ -274,11 +274,13 @@ After each subtask completes:
 2. Commit with format: `{type}({TASK_IDENTIFIER}): {subtask-name}`
 3. Types: feat, fix, test, refactor, perf, chore
 4. Record commit hash for summary
+5. Always ask for user permission before you commit
 
 **Never use:**
 - `git add .`
 - `git add -A`
 - `git add src/` or any broad directory
+- Never auto commit the changes
 
 **Always stage files individually.**
 </commit_rules>
@@ -349,8 +351,8 @@ IF executor_output contains "## EXECUTION COMPLETE":
     subtask_commit = commits.find(c => c.message.includes(subtask.title.substring(0, 20)))
     mosic_create_document("M Comment", {
       workspace: workspace_id,
-      reference_doctype: "MTask",
-      reference_name: subtask.name,
+      ref_doc: "MTask",
+      ref_name: subtask.name,
       content: "<p><strong>Completed</strong></p>" +
         (subtask_commit ? "<p>Commit: <code>" + subtask_commit.hash + "</code></p>" : "")
     })
@@ -446,8 +448,8 @@ IF executor_output contains "## EXECUTION COMPLETE":
   # Add completion comment
   mosic_create_document("M Comment", {
     workspace: workspace_id,
-    reference_doctype: "MTask",
-    reference_name: TASK_ID,
+    ref_doc: "MTask",
+    ref_name: TASK_ID,
     content: "<p><strong>Execution Complete</strong></p>" +
       "<p>Subtasks: " + subtasks.results.length + "</p>" +
       "<p>Commits: " + commits.length + "</p>" +

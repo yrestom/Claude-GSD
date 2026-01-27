@@ -421,8 +421,8 @@ mosic_update_document("MTask List", phase_task_list.name, {
 // IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
-  reference_doctype: "MTask List",
-  reference_name: phase_task_list.name,
+  ref_doc: "MTask List",
+  ref_name: phase_task_list.name,
   content: "<p><strong>Context Gathered</strong></p>" +
     "<p>Implementation decisions documented via <code>/gsd:discuss-phase</code>.</p>" +
     "<p><strong>Areas Discussed:</strong></p>" +

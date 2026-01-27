@@ -395,8 +395,8 @@ mosic_complete_task(TASK_ID)
 # IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: WORKSPACE_ID,
-  reference_doctype: "MTask",
-  reference_name: TASK_ID,
+  ref_doc: "MTask",
+  ref_name: TASK_ID,
   content: "<p><strong>Completed</strong></p>" +
     "<p>Commit: <code>" + commit_hash + "</code></p>" +
     "<p><a href=\"https://mosic.pro/app/page/" + SUMMARY_PAGE_ID + "\">View Summary</a></p>"

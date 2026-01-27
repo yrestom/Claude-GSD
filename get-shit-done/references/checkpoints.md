@@ -444,8 +444,8 @@ await mosic_update_document("MTask", task_id, {
 // Add verification record as comment
 await mosic_create_document("M Comment", {
   comment_type: "Comment",
-  reference_doctype: "MTask",
-  reference_name: task_id,
+  ref_doc: "MTask",
+  ref_name: task_id,
   content: `**Checkpoint Verified**
 - Type: human-verify
 - Result: Approved
@@ -513,8 +513,8 @@ await mosic_add_tag_to_document("M Page", decisionPage.name, "decision");
 // Log authentication completion as comment
 await mosic_create_document("M Comment", {
   comment_type: "Comment",
-  reference_doctype: "MTask",
-  reference_name: task_id,
+  ref_doc: "MTask",
+  ref_name: task_id,
   content: `**Auth Gate Cleared**
 - Service: ${service_name}
 - Completed at: ${timestamp}

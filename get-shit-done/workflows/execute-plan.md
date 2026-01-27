@@ -464,8 +464,8 @@ mosic_update_document("MTask", task_id, {
 // IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
-  reference_doctype: "MTask",
-  reference_name: task_id,
+  ref_doc: "MTask",
+  ref_name: task_id,
   content: "<p><strong>Task Complete</strong></p>" +
     "<ul>" +
     "<li>Duration: " + DURATION + "</li>" +

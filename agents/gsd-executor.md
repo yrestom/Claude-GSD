@@ -513,8 +513,8 @@ mosic_complete_task(plan_task_id, { done: true })
 # Add completion comment
 mosic_create_document("M Comment", {
   comment_type: "Comment",
-  reference_doctype: "MTask",
-  reference_name: plan_task_id,
+  ref_doc: "MTask",
+  ref_name: plan_task_id,
   content: "Plan executed successfully. Summary: [summary_page_id]"
 })
 ```
@@ -549,8 +549,8 @@ progress_pct = (completed / total * 100).toFixed(0)
 # Add progress comment to project
 mosic_create_document("M Comment", {
   comment_type: "Comment",
-  reference_doctype: "MProject",
-  reference_name: project_id,
+  ref_doc: "MProject",
+  ref_name: project_id,
   content: "Progress: {progress_pct}% ({completed}/{total} plans complete)"
 })
 ```

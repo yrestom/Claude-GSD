@@ -411,8 +411,8 @@ IF planner_output contains "## PLANNING COMPLETE":
   # Add planning comment
   mosic_create_document("M Comment", {
     workspace: workspace_id,
-    reference_doctype: "MTask",
-    reference_name: TASK_ID,
+    ref_doc: "MTask",
+    ref_name: TASK_ID,
     content: "<p><strong>Planning Complete</strong></p>" +
       "<p>Subtasks: " + subtask_count + "</p>" +
       "<p><a href=\"https://mosic.pro/app/page/" + PLAN_PAGE_ID + "\">View Plan</a></p>"

@@ -122,8 +122,8 @@ Start with: [specific first action when resuming]
 # Add handoff as comment on task
 mosic_create_document("M Comment", {
   workspace_id: WORKSPACE_ID,
-  reference_doctype: "MTask",
-  reference_name: CURRENT_TASK_ID,
+  ref_doc: "MTask",
+  ref_name: CURRENT_TASK_ID,
   content: handoff_content
 })
 ```

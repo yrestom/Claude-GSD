@@ -294,8 +294,8 @@ IF failed == 0:
   # IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace_id: WORKSPACE_ID,
-    reference_doctype: "MTask List",
-    reference_name: PHASE_ID,
+    ref_doc: "MTask List",
+    ref_name: PHASE_ID,
     content: "<p><strong>UAT Complete</strong></p><p>All " + total + " tests passed.</p><p>UAT Report: <a href=\"https://mosic.pro/app/page/" + UAT_PAGE_ID + "\">View</a></p>"
   })
 ELSE:
@@ -307,8 +307,8 @@ ELSE:
   # IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace_id: WORKSPACE_ID,
-    reference_doctype: "MTask List",
-    reference_name: PHASE_ID,
+    ref_doc: "MTask List",
+    ref_name: PHASE_ID,
     content: "<p><strong>UAT Found Issues</strong></p><p>" + failed + "/" + total + " tests failed.</p><p>Run <code>/gsd:execute-phase " + PHASE_IDENTIFIER + " --gaps-only</code> after fix plans are ready.</p><p>UAT Report: <a href=\"https://mosic.pro/app/page/" + UAT_PAGE_ID + "\">View</a></p>"
   })
 ```

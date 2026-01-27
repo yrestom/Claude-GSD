@@ -296,8 +296,8 @@ mosic_update_document("MProject", project_id, {
 // IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
-  reference_doctype: "MProject",
-  reference_name: project_id,
+  ref_doc: "MProject",
+  ref_name: project_id,
   content: "<p><strong>Milestone " + VERSION + " Complete</strong></p>" +
     "<p><strong>Delivered:</strong> " + MILESTONE_DESCRIPTION + "</p>" +
     "<p><strong>Stats:</strong></p>" +

@@ -374,8 +374,8 @@ mosic_batch_add_tags_to_document("M Page", phase_summary_page.name, [
 // IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
-  reference_doctype: "MTask List",
-  reference_name: phase_task_list.name,
+  ref_doc: "MTask List",
+  ref_name: phase_task_list.name,
   content: "<p><strong>Phase Execution Complete</strong></p>" +
     "<ul>" +
     "<li>Waves: " + wave_count + "</li>" +

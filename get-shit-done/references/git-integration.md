@@ -67,8 +67,8 @@ await mosic_update_document("MProject", project_id, {
 // Add commit reference as comment
 await mosic_create_document("M Comment", {
   comment_type: "Comment",
-  reference_doctype: "MProject",
-  reference_name: project_id,
+  ref_doc: "MProject",
+  ref_name: project_id,
   content: `Project initialized\nCommit: ${commitHash}`
 });
 ```
@@ -140,8 +140,8 @@ await mosic_complete_task(task_id);
 // Add commit reference as comment
 await mosic_create_document("M Comment", {
   comment_type: "Comment",
-  reference_doctype: "MTask",
-  reference_name: task_id,
+  ref_doc: "MTask",
+  ref_name: task_id,
   content: `**Task Completed**
 Commit: ${commitHash}
 Type: ${commitType}
@@ -223,8 +223,8 @@ Handoffs don't require git commits. State is preserved in Mosic.
 // Add handoff context as task comment
 await mosic_create_document("M Comment", {
   comment_type: "Comment",
-  reference_doctype: "MTask",
-  reference_name: task_id,
+  ref_doc: "MTask",
+  ref_name: task_id,
   content: `**Session Handoff**
 Status: ${currentStatus}
 Progress: Task ${currentTask}/${totalTasks}
@@ -369,8 +369,8 @@ if (commitType === 'task') {
   // Add commit as comment
   await mosic_create_document("M Comment", {
     comment_type: "Comment",
-    reference_doctype: "MTask",
-    reference_name: task_id,
+    ref_doc: "MTask",
+    ref_name: task_id,
     content: `**Committed:** ${commitHash}\n${commitMessage}`
   });
 }

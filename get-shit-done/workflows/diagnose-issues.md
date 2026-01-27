@@ -289,8 +289,8 @@ for (diagnosed_gap of diagnosed_gaps) {
     // IMPORTANT: Comments must use HTML format
     mosic_create_document("M Comment", {
       workspace_id: workspace_id,
-      reference_doctype: "MTask",
-      reference_name: issue_task_id,
+      ref_doc: "MTask",
+      ref_name: issue_task_id,
       content: "<p><strong>Root Cause Diagnosed</strong></p>" +
         "<p>" + diagnosed_gap.root_cause + "</p>" +
         "<p><a href=\"page/" + diagnosed_gap.debug_page_id + "\">Debug Session</a></p>"
@@ -342,8 +342,8 @@ mosic_update_content_blocks(uat_page.name, {
 // IMPORTANT: Comments must use HTML format
 mosic_create_document("M Comment", {
   workspace_id: workspace_id,
-  reference_doctype: "M Page",
-  reference_name: uat_page.name,
+  ref_doc: "M Page",
+  ref_name: uat_page.name,
   content: "<p><strong>Diagnosis Complete</strong></p>" +
     "<p>" + diagnosed_count + " gaps diagnosed.</p>" +
     "<p>" + inconclusive_count + " gaps need manual review.</p>" +

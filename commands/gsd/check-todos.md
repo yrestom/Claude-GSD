@@ -210,8 +210,8 @@ mosic_update_document("MTask", selected_task_id, {
 # Add progress comment
 mosic_create_document("M Comment", {
   workspace_id: WORKSPACE_ID,
-  reference_doctype: "MTask",
-  reference_name: selected_task_id,
+  ref_doc: "MTask",
+  ref_name: selected_task_id,
   content: "Work started via /gsd:check-todos"
 })
 ```
@@ -236,8 +236,8 @@ mosic_update_document("MTask", selected_task_id, {
 # Add comment noting phase assignment
 mosic_create_document("M Comment", {
   workspace_id: WORKSPACE_ID,
-  reference_doctype: "MTask",
-  reference_name: selected_task_id,
+  ref_doc: "MTask",
+  ref_name: selected_task_id,
   content: "Assigned to Phase [N] planning"
 })
 ```
