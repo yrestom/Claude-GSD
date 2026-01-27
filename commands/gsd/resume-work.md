@@ -158,36 +158,89 @@ IF mosic_current_task:
 inferred_workflow = "unknown"
 workflow_confidence = "low"
 
-# Check comment patterns
-all_recent_comments = [...recent_project_comments, ...recent_task_comments]
-FOR each comment in all_recent_comments:
-  content = comment.content.toLowerCase()
+# PRIORITY 1: Check for task workflow state first (mid-task discovery)
+# This is checked first because it's stored in config and is most reliable
+IF config.mosic.session?.task_workflow_level:
+  task_workflow_level = config.mosic.session.task_workflow_level
+  active_task_id = config.mosic.session.active_task
 
-  IF content contains "execution started" or content contains "executing":
-    inferred_workflow = "executing"
-    workflow_confidence = "high"
-    BREAK
-  ELIF content contains "planning" or content contains "plan created":
-    inferred_workflow = "planning"
-    workflow_confidence = "high"
-    BREAK
-  ELIF content contains "research" or content contains "investigating":
-    inferred_workflow = "researching"
-    workflow_confidence = "medium"
-    BREAK
-  ELIF content contains "verification" or content contains "verifying":
-    inferred_workflow = "verifying"
-    workflow_confidence = "high"
-    BREAK
-  ELIF content contains "checkpoint" and content contains "awaiting":
-    inferred_workflow = "checkpoint_pending"
-    workflow_confidence = "high"
-    BREAK
-  ELIF content contains "session resumed":
-    inferred_workflow = "resumed_previously"
-    workflow_confidence = "low"  # Need to dig deeper
+  IF active_task_id:
+    active_task = mosic_get_task(active_task_id, { description_format: "plain" })
 
-# If still unknown, infer from task/phase state
+    IF active_task and not active_task.done:
+      # Task workflow is active
+      inferred_workflow = "task_workflow_" + task_workflow_level
+      workflow_confidence = "high"
+
+      # Check task state to determine where in workflow
+      task_pages = mosic_get_entity_pages("MTask", active_task_id)
+      task_plan_page = task_pages.find(p => p.title.includes("Plan"))
+      task_research_page = task_pages.find(p => p.title.includes("Research"))
+      task_context_page = task_pages.find(p => p.title.includes("Context"))
+
+      task_subtasks = mosic_search_tasks({
+        workspace_id: workspace_id,
+        filters: { parent_task: active_task_id }
+      })
+
+      IF task_subtasks.results.length > 0:
+        # Has subtasks - either planned or executing
+        incomplete_subtasks = task_subtasks.results.filter(t => not t.done)
+        IF incomplete_subtasks.length > 0:
+          inferred_workflow = "task_executing"
+        ELSE:
+          inferred_workflow = "task_needs_verification"
+      ELIF task_plan_page:
+        inferred_workflow = "task_ready_to_execute"
+      ELIF task_research_page:
+        inferred_workflow = "task_needs_planning"
+      ELIF task_context_page:
+        inferred_workflow = "task_needs_research"
+      ELSE:
+        # Just created, workflow level determines next step
+        IF task_workflow_level == "quick":
+          inferred_workflow = "task_quick_pending"
+        ELIF task_workflow_level == "full":
+          inferred_workflow = "task_needs_discussion"
+        ELSE:
+          inferred_workflow = "task_needs_planning"
+
+    ELIF active_task and active_task.done:
+      # Task completed but workflow state not cleared
+      inferred_workflow = "task_complete"
+      workflow_confidence = "medium"
+
+# PRIORITY 2: Check comment patterns for workflow hints
+IF inferred_workflow == "unknown":
+  all_recent_comments = [...recent_project_comments, ...recent_task_comments]
+  FOR each comment in all_recent_comments:
+    content = comment.content.toLowerCase()
+
+    IF content contains "execution started" or content contains "executing":
+      inferred_workflow = "executing"
+      workflow_confidence = "high"
+      BREAK
+    ELIF content contains "planning" or content contains "plan created":
+      inferred_workflow = "planning"
+      workflow_confidence = "high"
+      BREAK
+    ELIF content contains "research" or content contains "investigating":
+      inferred_workflow = "researching"
+      workflow_confidence = "medium"
+      BREAK
+    ELIF content contains "verification" or content contains "verifying":
+      inferred_workflow = "verifying"
+      workflow_confidence = "high"
+      BREAK
+    ELIF content contains "checkpoint" and content contains "awaiting":
+      inferred_workflow = "checkpoint_pending"
+      workflow_confidence = "high"
+      BREAK
+    ELIF content contains "session resumed":
+      inferred_workflow = "resumed_previously"
+      workflow_confidence = "low"  # Need to dig deeper
+
+# PRIORITY 3: If still unknown, infer from task/phase state
 IF inferred_workflow == "unknown" or workflow_confidence == "low":
   IF mosic_current_phase:
     phase = mosic_get_task_list(mosic_current_phase.name, { include_tasks: true })
@@ -568,6 +621,7 @@ next_command = null
 action_context = ""
 
 # Priority order:
+# 0. Task workflow in progress → continue task workflow
 # 1. Checkpoint pending → respond to checkpoint
 # 2. Blockers → resolve blockers
 # 3. Task in progress → continue task
@@ -576,7 +630,59 @@ action_context = ""
 # 6. Phase needs discussion → discuss phase
 # 7. All phases complete → audit milestone
 
-IF checkpoint_pending:
+# Handle task workflow states first (highest priority)
+IF inferred_workflow.startsWith("task_"):
+  active_task_id = config.mosic.session?.active_task
+  active_task = mosic_get_task(active_task_id, { description_format: "plain" })
+  task_identifier = active_task?.identifier or "task"
+
+  IF inferred_workflow == "task_executing":
+    next_action = "Continue executing " + task_identifier
+    action_context = "Task has subtasks in progress."
+    next_command = "/gsd:execute-task " + task_identifier
+
+  ELIF inferred_workflow == "task_ready_to_execute":
+    next_action = "Execute task " + task_identifier
+    action_context = "Task is planned. Ready to execute subtasks."
+    next_command = "/gsd:execute-task " + task_identifier
+
+  ELIF inferred_workflow == "task_needs_planning":
+    next_action = "Plan task " + task_identifier
+    action_context = "Task has research. Create execution plan."
+    next_command = "/gsd:plan-task " + task_identifier
+
+  ELIF inferred_workflow == "task_needs_research":
+    next_action = "Research task " + task_identifier
+    action_context = "Task has context. Research implementation approach."
+    next_command = "/gsd:research-task " + task_identifier
+
+  ELIF inferred_workflow == "task_needs_discussion":
+    next_action = "Discuss task " + task_identifier
+    action_context = "Full workflow task. Gather context first."
+    next_command = "/gsd:discuss-task " + task_identifier
+
+  ELIF inferred_workflow == "task_quick_pending":
+    next_action = "Execute quick task " + task_identifier
+    action_context = "Quick workflow task ready to execute."
+    next_command = "/gsd:execute-task " + task_identifier
+
+  ELIF inferred_workflow == "task_needs_verification":
+    next_action = "Verify task " + task_identifier
+    action_context = "All subtasks complete. Verify task achieved goal."
+    next_command = "/gsd:verify-task " + task_identifier
+
+  ELIF inferred_workflow == "task_complete":
+    next_action = "Task complete - continue phase"
+    action_context = "Task " + task_identifier + " completed. Resume phase work."
+    phase_num = extract_phase_number(mosic_current_phase)
+    next_command = "/gsd:execute-phase " + phase_num
+
+    # Clear stale task workflow state
+    config.mosic.session.active_task = null
+    config.mosic.session.task_workflow_level = null
+    config.mosic.session.paused_for_task = false
+
+ELIF checkpoint_pending:
   next_action = "Respond to checkpoint"
   action_context = "Task " + checkpoint_pending.task + " paused at checkpoint. Review and respond."
   # No specific command - just continue conversation

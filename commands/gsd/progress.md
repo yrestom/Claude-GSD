@@ -254,6 +254,60 @@ progress_bar = "█".repeat(filled) + "░".repeat(10 - filled)
 # Count phases
 total_phases = phase_stats.length
 completed_phases = phase_stats.filter(p => p.done).length
+
+# Check for active task workflow (needed for both report and routing)
+task_workflow_active = false
+task_workflow_level = null
+task_workflow_status = null
+task_identifier = null
+task_title = null
+next_task_command = null
+task_pages_summary = ""
+
+IF config.mosic.session?.task_workflow_level:
+  active_task_id = config.mosic.session.active_task
+
+  IF active_task_id:
+    active_task = mosic_get_task(active_task_id, { description_format: "plain" })
+
+    IF active_task and not active_task.done:
+      task_workflow_active = true
+      task_workflow_level = config.mosic.session.task_workflow_level
+      task_identifier = active_task.identifier
+      task_title = active_task.title
+
+      # Determine task workflow status
+      task_pages = mosic_get_entity_pages("MTask", active_task_id)
+      task_subtasks = mosic_search_tasks({
+        workspace_id: workspace_id,
+        filters: { parent_task: active_task_id }
+      })
+
+      IF task_subtasks.results.length > 0:
+        incomplete = task_subtasks.results.filter(t => not t.done).length
+        IF incomplete > 0:
+          task_workflow_status = "executing"
+          next_task_command = "execute-task"
+        ELSE:
+          task_workflow_status = "needs verification"
+          next_task_command = "verify-task"
+      ELIF task_pages.find(p => p.title.includes("Plan")):
+        task_workflow_status = "planned"
+        next_task_command = "execute-task"
+      ELIF task_pages.find(p => p.title.includes("Research")):
+        task_workflow_status = "researched"
+        next_task_command = "plan-task"
+      ELIF task_pages.find(p => p.title.includes("Context")):
+        task_workflow_status = "discussed"
+        next_task_command = "research-task"
+      ELSE:
+        task_workflow_status = "created"
+        IF task_workflow_level == "full":
+          next_task_command = "discuss-task"
+        ELSE:
+          next_task_command = "plan-task"
+
+      task_pages_summary = task_pages.map(p => p.title.split(" ").pop()).join(", ") or "None"
 ```
 </step>
 
@@ -281,6 +335,17 @@ completed_phases = phase_stats.filter(p => p.done).length
 - [X] tasks completed
 - [Y] tasks in progress
 - [Z] tasks remaining
+
+[IF task_workflow_active:]
+## Active Task Workflow
+
+**{task_identifier}:** {task_title}
+- Workflow: {task_workflow_level}
+- Status: {task_workflow_status}
+- Pages: {task_pages_summary}
+
+`/gsd:{next_task_command} {task_identifier}`
+[END IF]
 
 [IF blocked_count > 0:]
 ## Blocked Tasks
@@ -327,10 +392,15 @@ IF uat_page:
   has_uat_gaps = uat_content.includes("status: diagnosed") || uat_content.includes("gaps:")
 ```
 
+NOTE: Task workflow detection was already done in calculate_progress step.
+Variables available: task_workflow_active, task_workflow_level, task_workflow_status,
+task_identifier, task_title, next_task_command, task_pages_summary
+
 ### Step 3: Route Based on State
 
 | Condition | Meaning | Route |
 |-----------|---------|-------|
+| `task_workflow_active` | Task workflow in progress | **Route T** (task workflow) |
 | `has_uat_gaps` | UAT gaps need fix plans | **Route E** |
 | `has_in_progress` | Work in progress | **Route A-1** (continue execution) |
 | `has_unexecuted_tasks && !has_in_progress` | Pending tasks exist | **Route A-2** (start execution) |
@@ -338,6 +408,33 @@ IF uat_page:
 | `phase_complete && more_phases` | Phase done, more remain | **Route C** |
 | `phase_complete && !more_phases` | All phases done | **Route D** |
 | `!current_phase` | Between milestones | **Route F** |
+
+---
+
+**Route T: Task workflow in progress**
+
+```
+---
+
+## ▶ Continue Task Workflow
+
+**{task_identifier}:** {task_title}
+
+Workflow: {task_workflow_level}
+Status: {task_workflow_status}
+
+`/gsd:{next_task_command} {task_identifier}`
+
+<sub>`/clear` first → fresh context window</sub>
+
+---
+
+**Also available:**
+- `/gsd:task` - add another task
+- `/gsd:execute-phase` - return to phase work
+
+---
+```
 
 ---
 
