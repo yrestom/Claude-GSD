@@ -1,0 +1,577 @@
+---
+name: gsd:plan-task
+description: Create execution plan with subtasks for a task in the current phase
+argument-hint: "[task-identifier] [--skip-verify]"
+allowed-tools:
+  - Read
+  - Write
+  - Bash
+  - Glob
+  - Grep
+  - Task
+  - WebFetch
+  - AskUserQuestion
+  - ToolSearch
+  - mcp__mosic_pro__*
+  - mcp__context7__*
+---
+
+<objective>
+Create an execution plan for a specific task, decomposing it into subtasks with acceptance criteria.
+
+**Key differences from plan-phase:**
+- Creates subtasks under parent task (using `parent_task` field)
+- Creates single Plan M Page linked to task
+- Uses task checklist for acceptance criteria
+- 1-5 subtasks max (smaller scope than phase plans)
+- Inherits phase context (research, decisions) if available
+
+**Spawns:** gsd-planner in task-mode
+**Output:** Subtasks + Plan Page linked to task
+</objective>
+
+<execution_context>
+@~/.claude/get-shit-done/references/ui-brand.md
+@~/.claude/get-shit-done/references/content-formatting.md
+</execution_context>
+
+<context>
+Task identifier: $ARGUMENTS (e.g., "AUTH-5" or task UUID)
+
+**Flags:**
+- `--skip-verify` - Skip planner -> checker verification loop
+</context>
+
+<process>
+
+## 1. Load Config and Validate
+
+```bash
+CONFIG=$(cat config.json 2>/dev/null)
+```
+
+If missing: Error - run `/gsd:new-project` first.
+
+```
+workspace_id = config.mosic.workspace_id
+project_id = config.mosic.project_id
+```
+
+**Resolve model profile:**
+```
+model_profile = config.model_profile or "balanced"
+
+Model lookup:
+| Agent | quality | balanced | budget |
+|-------|---------|----------|--------|
+| gsd-planner | opus | opus | sonnet |
+| gsd-plan-checker | sonnet | sonnet | haiku |
+```
+
+## 2. Parse Arguments and Load Task
+
+```
+# Extract task identifier and flags
+task_identifier = extract_identifier($ARGUMENTS)
+skip_verify = $ARGUMENTS contains "--skip-verify"
+
+# Load task from Mosic
+# Try by identifier first, fall back to active task
+IF task_identifier:
+  task = mosic_get_task(task_identifier, {
+    workspace_id: workspace_id,
+    description_format: "markdown"
+  })
+ELSE:
+  # Use active task from config
+  task_id = config.mosic.session?.active_task
+  IF not task_id:
+    ERROR: "No task identifier provided and no active task. Provide task ID or run /gsd:task first."
+  task = mosic_get_task(task_id, { description_format: "markdown" })
+
+TASK_ID = task.name
+TASK_IDENTIFIER = task.identifier
+TASK_TITLE = task.title
+```
+
+Display:
+```
+-------------------------------------------
+ GSD > PLANNING TASK
+-------------------------------------------
+
+{TASK_IDENTIFIER}: {TASK_TITLE}
+```
+
+## 3. Load Task Pages and Check Existing Plan
+
+```
+# Get existing pages linked to task
+task_pages = mosic_get_entity_pages("MTask", TASK_ID, {
+  include_subtree: false
+})
+
+# Check for existing plan page
+existing_plan_page = task_pages.find(p =>
+  p.title.includes("Plan") or p.page_type == "Spec"
+)
+
+# Check for existing subtasks
+task_with_children = mosic_search_tasks({
+  workspace_id: workspace_id,
+  filters: { parent_task: TASK_ID }
+})
+
+existing_subtasks = task_with_children.results or []
+
+IF existing_plan_page or existing_subtasks.length > 0:
+  Display:
+  """
+  Found existing planning artifacts:
+  - Plan page: {existing_plan_page ? "Yes" : "No"}
+  - Subtasks: {existing_subtasks.length}
+  """
+
+  AskUserQuestion({
+    questions: [{
+      question: "How should we proceed?",
+      header: "Existing Plan",
+      options: [
+        { label: "Continue (Recommended)", description: "Add to existing plan" },
+        { label: "Replan", description: "Archive existing and create new" },
+        { label: "View existing", description: "Show current plan details" }
+      ],
+      multiSelect: false
+    }]
+  })
+
+  IF user_selection == "Replan":
+    # Archive existing subtasks
+    FOR each subtask in existing_subtasks:
+      mosic_update_document("MTask", subtask.name, {
+        is_archived: true
+      })
+    # Mark plan page as outdated
+    IF existing_plan_page:
+      mosic_update_document("M Page", existing_plan_page.name, {
+        status: "Archived"
+      })
+    existing_plan_page = null
+
+  ELIF user_selection == "View existing":
+    IF existing_plan_page:
+      plan_content = mosic_get_page(existing_plan_page.name, {
+        content_format: "markdown"
+      })
+      Display: plan_content.content
+    Display: "Subtasks: " + existing_subtasks.map(s => s.identifier + ": " + s.title).join("\n")
+    EXIT
+```
+
+## 4. Load Phase Context
+
+```
+# Get parent task list (phase)
+phase_id = task.task_list
+phase = mosic_get_task_list(phase_id, { include_tasks: false })
+
+# Get phase pages for context
+phase_pages = mosic_get_entity_pages("MTask List", phase_id, {
+  include_subtree: false
+})
+
+# Load available context
+research_page = phase_pages.find(p => p.title.includes("Research"))
+context_page = phase_pages.find(p => p.title.includes("Context") or p.title.includes("Decisions"))
+
+research_content = ""
+IF research_page:
+  research_content = mosic_get_page(research_page.name, {
+    content_format: "markdown"
+  }).content
+
+context_content = ""
+IF context_page:
+  context_content = mosic_get_page(context_page.name, {
+    content_format: "markdown"
+  }).content
+
+# Load task-specific context page if exists
+task_context_page = task_pages.find(p => p.title.includes("Context"))
+task_research_page = task_pages.find(p => p.title.includes("Research"))
+
+task_context_content = ""
+IF task_context_page:
+  task_context_content = mosic_get_page(task_context_page.name, {
+    content_format: "markdown"
+  }).content
+
+task_research_content = ""
+IF task_research_page:
+  task_research_content = mosic_get_page(task_research_page.name, {
+    content_format: "markdown"
+  }).content
+
+# Load requirements
+requirements_content = ""
+IF config.mosic.pages.requirements:
+  requirements_content = mosic_get_page(config.mosic.pages.requirements, {
+    content_format: "markdown"
+  }).content
+```
+
+Display:
+```
+Context loaded:
+- Phase research: {research_page ? "Yes" : "No"}
+- Phase context: {context_page ? "Yes" : "No"}
+- Task context: {task_context_page ? "Yes" : "No"}
+- Task research: {task_research_page ? "Yes" : "No"}
+```
+
+## 5. Create or Update Plan Page
+
+```
+IF existing_plan_page and user_selection == "Continue":
+  PLAN_PAGE_ID = existing_plan_page.name
+  Display: "Updating existing plan page"
+ELSE:
+  # Create new plan page
+  plan_page = mosic_create_entity_page("MTask", TASK_ID, {
+    workspace_id: workspace_id,
+    title: TASK_IDENTIFIER + " Execution Plan",
+    page_type: "Spec",
+    icon: "lucide:file-code",
+    status: "Draft",
+    content: {
+      blocks: [
+        {
+          type: "header",
+          data: { text: "Task Plan", level: 1 }
+        },
+        {
+          type: "paragraph",
+          data: { text: "Planning in progress..." }
+        }
+      ]
+    },
+    relation_type: "Related"
+  })
+
+  PLAN_PAGE_ID = plan_page.name
+
+  # Tag the plan page
+  mosic_batch_add_tags_to_document("M Page", PLAN_PAGE_ID, [
+    config.mosic.tags.gsd_managed,
+    config.mosic.tags.plan
+  ])
+
+  Display: "Created plan page: https://mosic.pro/app/page/" + PLAN_PAGE_ID
+```
+
+## 6. Spawn gsd-planner Agent
+
+Display:
+```
+-------------------------------------------
+ GSD > SPAWNING PLANNER
+-------------------------------------------
+
+Analyzing task and creating subtasks...
+```
+
+```
+planner_prompt = """
+<planning_context>
+
+**Mode:** task-planning
+**Task ID:** """ + TASK_ID + """
+**Task Identifier:** """ + TASK_IDENTIFIER + """
+**Task Title:** """ + TASK_TITLE + """
+**Task Description:**
+""" + task.description + """
+
+**Plan Page ID:** """ + PLAN_PAGE_ID + """
+**Workspace ID:** """ + workspace_id + """
+
+**Phase:** """ + phase.title + """
+
+**Phase Research (if available):**
+""" + (research_content or "No phase research available.") + """
+
+**Phase Context & Decisions (if available):**
+""" + (context_content or "No phase context available.") + """
+
+**Task-Specific Context (if available):**
+""" + (task_context_content or "No task-specific context.") + """
+
+**Task-Specific Research (if available):**
+""" + (task_research_content or "No task-specific research.") + """
+
+**Requirements (if available):**
+""" + (requirements_content or "No requirements loaded.") + """
+
+</planning_context>
+
+<constraints>
+- Create 1-5 subtasks maximum (task-level scope, not phase-level)
+- Each subtask should take 15-60 minutes to execute
+- Subtasks must be specific and actionable
+- Include verification criteria for each subtask
+- Use must-haves for goal-backward verification
+</constraints>
+
+<downstream_consumer>
+Output consumed by /gsd:execute-task
+Subtasks must include:
+- Clear objective
+- Files to modify/create
+- Specific actions
+- Verification criteria
+- Done criteria
+</downstream_consumer>
+
+<output_format>
+1. Update plan page """ + PLAN_PAGE_ID + """ with:
+   - Objective
+   - Must-haves (observable truths)
+   - Subtasks with details
+   - Success criteria
+
+2. Create MTask subtasks with:
+   - parent_task: """ + TASK_ID + """
+   - workspace: """ + workspace_id + """
+   - task_list: """ + phase_id + """
+   - title: descriptive subtask name
+   - description: Editor.js format with action/verify/done
+
+3. Create checklist items on parent task for acceptance criteria
+
+Return structured result with:
+## PLANNING COMPLETE
+
+**Subtasks Created:** N
+**Pages Updated:** plan page ID
+
+### Subtasks
+| # | Title | ID |
+|---|-------|-----|
+| 1 | ... | ... |
+
+### Next Steps
+/gsd:execute-task """ + TASK_IDENTIFIER + """
+</output_format>
+"""
+
+Task(
+  prompt="First, read ~/.claude/agents/gsd-planner.md for your role.\n\n" + planner_prompt,
+  subagent_type="general-purpose",
+  model="{planner_model}",
+  description="Plan task: " + TASK_TITLE.substring(0, 30)
+)
+```
+
+## 7. Handle Planner Return
+
+```
+# Parse planner output for ## PLANNING COMPLETE
+IF planner_output contains "## PLANNING COMPLETE":
+  # Extract subtask count
+  subtask_count = extract_number(planner_output, "Subtasks Created:")
+
+  # Verify subtasks were created
+  created_subtasks = mosic_search_tasks({
+    workspace_id: workspace_id,
+    filters: { parent_task: TASK_ID }
+  })
+
+  IF created_subtasks.results.length == 0:
+    Display: "Warning: No subtasks found. Planner may have failed to create them."
+
+  # Update task status
+  mosic_update_document("MTask", TASK_ID, {
+    status: "In Progress"
+  })
+
+  # Add planning comment
+  mosic_create_document("M Comment", {
+    workspace: workspace_id,
+    reference_doctype: "MTask",
+    reference_name: TASK_ID,
+    content: "<p><strong>Planning Complete</strong></p>" +
+      "<p>Subtasks: " + subtask_count + "</p>" +
+      "<p><a href=\"https://mosic.pro/app/page/" + PLAN_PAGE_ID + "\">View Plan</a></p>"
+  })
+
+ELSE:
+  ERROR: "Planner did not return structured completion. Check output."
+```
+
+## 8. Verification Loop (unless --skip-verify)
+
+```
+workflow_plan_check = config.workflow?.plan_check ?? true
+
+IF workflow_plan_check and not skip_verify:
+  Display:
+  """
+  -------------------------------------------
+   GSD > VERIFYING PLAN
+  -------------------------------------------
+
+  Checking plan quality...
+  """
+
+  # Load plan page content
+  plan_content = mosic_get_page(PLAN_PAGE_ID, {
+    content_format: "markdown"
+  }).content
+
+  # Load subtasks
+  subtasks = mosic_search_tasks({
+    workspace_id: workspace_id,
+    filters: { parent_task: TASK_ID }
+  })
+
+  subtask_details = ""
+  FOR each subtask in subtasks.results:
+    st = mosic_get_task(subtask.name, { description_format: "markdown" })
+    subtask_details += "\n\n### " + st.identifier + ": " + st.title + "\n" + st.description
+
+  checker_prompt = """
+<verification_context>
+
+**Task:** """ + TASK_IDENTIFIER + """ - """ + TASK_TITLE + """
+
+**Plan Page Content:**
+""" + plan_content + """
+
+**Subtasks:**
+""" + subtask_details + """
+
+</verification_context>
+
+<checklist>
+- [ ] Each subtask has clear, specific actions
+- [ ] Each subtask has verification criteria
+- [ ] Each subtask has done criteria
+- [ ] Subtasks are appropriately sized (15-60 min each)
+- [ ] Must-haves are observable and testable
+- [ ] No missing dependencies between subtasks
+</checklist>
+
+<expected_output>
+Return one of:
+- ## VERIFICATION PASSED - all checks pass
+- ## ISSUES FOUND - structured issue list with specific fixes needed
+</expected_output>
+"""
+
+  Task(
+    prompt=checker_prompt,
+    subagent_type="gsd-plan-checker",
+    model="{checker_model}",
+    description="Verify task plan: " + TASK_IDENTIFIER
+  )
+
+  IF checker_output contains "## ISSUES FOUND":
+    Display: "Plan issues found. Revising..."
+    # Could spawn revision here, but for simplicity, present issues to user
+    Display: checker_output
+    EXIT with "Run /gsd:plan-task " + TASK_IDENTIFIER + " to revise"
+```
+
+## 9. Update Config
+
+```
+config.mosic.pages["task-" + TASK_IDENTIFIER + "-plan"] = PLAN_PAGE_ID
+config.mosic.session.active_task = TASK_ID
+config.mosic.session.last_action = "plan-task"
+config.mosic.session.last_updated = new Date().toISOString()
+
+write config.json
+```
+
+## 10. Present Results
+
+```
+# Get final subtask list
+final_subtasks = mosic_search_tasks({
+  workspace_id: workspace_id,
+  filters: { parent_task: TASK_ID }
+})
+
+Display:
+"""
+-------------------------------------------
+ GSD > TASK PLANNED
+-------------------------------------------
+
+**{TASK_IDENTIFIER}:** {TASK_TITLE}
+
+{final_subtasks.results.length} subtask(s) created
+
+| # | Subtask | Status |
+|---|---------|--------|
+""" + final_subtasks.results.map((s, i) =>
+  "| " + (i+1) + " | " + s.identifier + ": " + s.title.substring(0, 40) + " | " + s.status + " |"
+).join("\n") + """
+
+Plan: https://mosic.pro/app/page/{PLAN_PAGE_ID}
+Task: https://mosic.pro/app/MTask/{TASK_ID}
+
+---
+
+## Next Up
+
+**Execute Task** - implement all subtasks
+
+`/gsd:execute-task {TASK_IDENTIFIER}`
+
+<sub>`/clear` first -> fresh context window</sub>
+
+---
+
+**Also available:**
+- View plan page in Mosic
+- `/gsd:task` - add another task first
+
+---
+"""
+```
+
+</process>
+
+<error_handling>
+```
+IF mosic operation fails during subtask creation:
+  Display: "Mosic operation failed: {error}"
+
+  # Store partial state
+  config.mosic.pending_sync = config.mosic.pending_sync or []
+  config.mosic.pending_sync.push({
+    type: "task_plan",
+    task_id: TASK_ID,
+    plan_page_id: PLAN_PAGE_ID,
+    error: error_message,
+    timestamp: new Date().toISOString()
+  })
+
+  write config.json
+
+  Display: "Partial state saved. Check /gsd:progress for sync status."
+```
+</error_handling>
+
+<success_criteria>
+- [ ] Task loaded from Mosic (by identifier or active task)
+- [ ] Phase context loaded (research, decisions)
+- [ ] Plan page created/updated linked to task
+- [ ] gsd-planner spawned with full context
+- [ ] Subtasks created with parent_task field
+- [ ] Checklist items added for acceptance criteria
+- [ ] Plan page tagged (gsd-managed, plan)
+- [ ] Verification passed (unless skipped)
+- [ ] config.json updated with page ID
+- [ ] User sees Mosic URLs and next steps
+</success_criteria>
