@@ -39,6 +39,8 @@
       "active_project": null,
       "active_phase": null,
       "active_task": null,
+      "task_workflow_level": null,
+      "paused_for_task": false,
       "last_action": null,
       "last_updated": null
     },
@@ -58,7 +60,13 @@
       "uat": "uat",
       "quick": "quick",
       "fix": "fix",
-      "codebase": "codebase"
+      "codebase": "codebase",
+      "task_workflow": "task-workflow",
+      "task_quick": "task-quick",
+      "task_standard": "task-standard",
+      "task_full": "task-full",
+      "task_context": "task-context",
+      "task_research": "task-research"
     },
     "page_types": {
       "overview": "Document",
