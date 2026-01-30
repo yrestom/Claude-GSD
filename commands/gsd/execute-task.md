@@ -15,6 +15,19 @@ allowed-tools:
   - mcp__mosic_pro__*
 ---
 
+<critical_requirements>
+**LOAD MOSIC TOOLS FIRST:**
+Before using ANY Mosic MCP tool, you MUST call:
+```
+ToolSearch("mosic task page entity create document complete update comment relation batch")
+```
+
+**SUBTASK EXECUTION:**
+- Subtasks (1-5) share context and are executed by a single agent
+- This is by design: subtasks are small (15-60 min each) and cohesive
+- If many independent subtasks exist, consider splitting into separate tasks at planning stage
+</critical_requirements>
+
 <objective>
 Execute a planned task by implementing all subtasks with atomic commits.
 
@@ -39,8 +52,16 @@ Task identifier: $ARGUMENTS (e.g., "AUTH-5" or task UUID)
 
 <process>
 
-## 0. Load Config and Resolve Model Profile
+## 0. Load Mosic Tools and Config
 
+**CRITICAL FIRST STEP - Load Mosic MCP tools:**
+```
+ToolSearch("mosic task page entity create document complete update comment relation batch")
+```
+
+Verify tools are available before proceeding.
+
+**Load config:**
 ```bash
 CONFIG=$(cat config.json 2>/dev/null)
 ```

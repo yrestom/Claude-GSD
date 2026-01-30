@@ -10,11 +10,24 @@ allowed-tools:
   - Grep
   - Bash
   - Task
-  - TodoWrite
   - AskUserQuestion
   - ToolSearch
   - mcp__mosic_pro__*
 ---
+
+<critical_requirements>
+**LOAD MOSIC TOOLS FIRST:**
+Before using ANY Mosic MCP tool, you MUST call:
+```
+ToolSearch("mosic task list page entity create document complete update")
+```
+
+**TRUE PARALLEL EXECUTION:**
+To spawn agents in parallel within a wave, you MUST make all Task() calls in a SINGLE response message. A FOR loop does NOT create parallel execution - it creates sequential execution.
+
+**CORRECT (parallel):** Single message with multiple Task tool calls
+**WRONG (sequential):** FOR loop calling Task() one at a time
+</critical_requirements>
 
 <objective>
 Execute all plan tasks in a phase using wave-based parallel execution.
@@ -38,8 +51,16 @@ Phase: $ARGUMENTS
 
 <process>
 
-## 0. Load Config and Resolve Model Profile
+## 0. Load Mosic Tools and Config
 
+**CRITICAL FIRST STEP - Load Mosic MCP tools:**
+```
+ToolSearch("mosic task list page entity create document complete update comment relation batch")
+```
+
+Verify tools are available before proceeding.
+
+**Load config:**
 ```bash
 CONFIG=$(cat config.json 2>/dev/null)
 ```
@@ -240,10 +261,14 @@ FOR each plan in wave:
   })
 ```
 
-### 4.2 Spawn Executors (Parallel)
+### 4.2 Spawn Executors (TRUE Parallel)
+
+**CRITICAL: True parallel execution requires ALL Task() calls in ONE response.**
+
+A FOR loop does NOT create parallel execution. You must make all Task tool calls simultaneously in a single message.
 
 ```
-# Build executor prompts with inlined content including phase context
+# Step 1: Build prompts for all plans in wave
 executor_prompts = []
 
 FOR each plan in wave:
@@ -281,17 +306,43 @@ Commit each subtask atomically. Create summary page. Update task status.
 - [ ] Task marked complete in Mosic
 </success_criteria>
 """
-  executor_prompts.push(prompt)
-
-# Spawn all plans in wave in parallel using Task tool
-FOR each prompt in executor_prompts:
-  Task(
-    prompt="First, read ~/.claude/agents/gsd-executor.md for your role.\n\n" + prompt,
-    subagent_type="general-purpose",
-    model="{executor_model}",
-    description="Execute Plan " + plan.number
-  )
+  executor_prompts.push({
+    prompt: "First, read ~/.claude/agents/gsd-executor.md for your role.\n\n" + prompt,
+    plan: plan
+  })
 ```
+
+**Step 2: Spawn ALL agents in wave in a SINGLE response (TRUE parallel)**
+
+```
+# CORRECT PATTERN: Multiple Task calls in ONE message
+# This spawns all agents simultaneously, not sequentially
+
+# If wave has 2 plans:
+Task(
+  prompt=executor_prompts[0].prompt,
+  subagent_type="general-purpose",
+  model="{executor_model}",
+  description="Execute Plan " + executor_prompts[0].plan.number
+)
+Task(
+  prompt=executor_prompts[1].prompt,
+  subagent_type="general-purpose",
+  model="{executor_model}",
+  description="Execute Plan " + executor_prompts[1].plan.number
+)
+
+# If wave has 3 plans, add a third Task() call, etc.
+# ALL Task() calls must be in the SAME response message
+```
+
+**Why this matters:**
+- FOR loop = sequential (one agent finishes, then next starts)
+- Multiple Task() in single response = parallel (all agents start simultaneously)
+
+**If a wave has only ONE plan:** Execute with single Task() call (no parallelism needed).
+
+**If a wave has 2+ plans:** Make all Task() calls in the same response to execute in parallel.
 
 ### 4.3 Handle Executor Results
 

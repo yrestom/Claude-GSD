@@ -11,6 +11,22 @@ Execute all tasks in a phase using wave-based parallel execution. Orchestrator s
 - No `.planning/` directory operations
 </mosic_only>
 
+<critical_requirements>
+**LOAD MOSIC TOOLS FIRST:**
+Before using ANY Mosic MCP tool, call ToolSearch:
+```
+ToolSearch("mosic task list page entity create document complete update")
+```
+
+**TRUE PARALLEL EXECUTION:**
+To spawn agents in parallel within a wave, you MUST make all Task() calls in a SINGLE response message.
+
+- **CORRECT (parallel):** Single message with multiple Task tool calls
+- **WRONG (sequential):** FOR loop calling Task() one at a time
+
+A FOR loop creates sequential execution, not parallel!
+</critical_requirements>
+
 <core_principle>
 The orchestrator's job is coordination, not execution. Each subagent loads the full execute-plan context itself. Orchestrator discovers tasks, analyzes dependencies, groups into waves, spawns agents, handles checkpoints, collects results.
 </core_principle>
@@ -122,7 +138,11 @@ for (wave_num in waves) {
 </step>
 
 <step name="execute_waves">
-Execute each wave in sequence. Autonomous tasks within a wave run in parallel.
+Execute each wave in sequence. Autonomous tasks within a wave run in TRUE parallel.
+
+**CRITICAL: True parallel execution requires ALL Task() calls in ONE response message.**
+
+A FOR loop does NOT create parallel execution - you must make multiple Task() calls simultaneously.
 
 **For each wave:**
 
@@ -130,11 +150,12 @@ Execute each wave in sequence. Autonomous tasks within a wave run in parallel.
 
    Read each task's description. Extract what's being built and why it matters.
 
-2. **Spawn all autonomous agents in wave simultaneously:**
+2. **Build prompts for all tasks in wave:**
 
    ```javascript
+   // Step 1: Build all prompts FIRST
+   prompts = []
    for (task of waves[wave_num]) {
-     // Get task plan page if exists
      task_pages = mosic_get_entity_pages("MTask", task.name)
      plan_page = task_pages.find(p => p.title.includes("Plan"))
 
@@ -142,65 +163,65 @@ Execute each wave in sequence. Autonomous tasks within a wave run in parallel.
        mosic_get_page(plan_page.name, { content_format: "markdown" }) :
        task.description
 
-     // Spawn executor agent
-     Task(
-       prompt = `
+     prompts.push({
+       task: task,
+       content: `
        <objective>
        Execute task ${task.identifier}: ${task.title}
-
-       Commit each subtask atomically. Create summary page. Update task status.
        </objective>
 
        <execution_context>
        @~/.claude/get-shit-done/workflows/execute-plan.md
-       @~/.claude/get-shit-done/templates/summary.md
        </execution_context>
 
        <context>
        Task: ${task.title}
        Description: ${task.description}
-
-       Plan (if exists):
-       ${plan_content}
-
-       Config:
-       workspace_id: ${workspace_id}
-       task_id: ${task.name}
+       Plan: ${plan_content}
+       Config: workspace_id=${workspace_id}, task_id=${task.name}
        </context>
-
-       <success_criteria>
-       - [ ] All subtasks executed
-       - [ ] Each subtask committed individually
-       - [ ] Summary page created in Mosic linked to task
-       - [ ] Task marked complete in Mosic
-       </success_criteria>
-       `,
-       subagent_type = "gsd-executor",
-       model = executor_model
-     )
+       `
+     })
    }
    ```
 
-3. **Wait for all agents in wave to complete:**
+3. **Spawn ALL agents in wave in a SINGLE response (TRUE parallel):**
 
-   Task tool blocks until each agent finishes. All parallel agents return together.
+   **WRONG (sequential):**
+   ```javascript
+   for (p of prompts) { Task(...) }  // This is SEQUENTIAL, not parallel!
+   ```
 
-4. **Report completion and what was built:**
+   **CORRECT (parallel):**
+   ```javascript
+   // Make ALL Task calls in ONE response message
+   // If wave has 2 tasks:
+   Task(prompt=prompts[0].content, subagent_type="gsd-executor", ...)
+   Task(prompt=prompts[1].content, subagent_type="gsd-executor", ...)
+   // Both execute simultaneously
+   ```
+
+   **If wave has only ONE task:** Single Task() call.
+   **If wave has 2+ tasks:** Multiple Task() calls in same response = parallel.
+
+4. **Wait for all agents to complete:**
+
+   Task tool blocks until agents finish. Parallel agents return together.
+
+5. **Report completion and what was built:**
 
    For each completed agent:
    - Verify task marked complete in Mosic
    - Read summary page to extract what was built
    - Note any issues or deviations
 
-5. **Handle failures:**
+6. **Handle failures:**
 
    If any agent in wave fails:
    - Report which task failed and why
    - Ask user: "Continue with remaining waves?" or "Stop execution?"
-   - If continue: proceed to next wave
-   - If stop: exit with partial completion report
 
-6. **Proceed to next wave**
+7. **Proceed to next wave**
 
 </step>
 

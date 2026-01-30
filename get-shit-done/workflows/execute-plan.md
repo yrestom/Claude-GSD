@@ -11,6 +11,16 @@ Execute a task and create the outcome summary page in Mosic.
 - No `.planning/` directory operations
 </mosic_only>
 
+<critical_requirements>
+**LOAD MOSIC TOOLS FIRST:**
+Before using ANY Mosic MCP tool, call ToolSearch:
+```
+ToolSearch("mosic task page entity create document complete update comment")
+```
+
+Verify tools are available before proceeding. If ToolSearch fails, report error.
+</critical_requirements>
+
 <process>
 
 <step name="load_mosic_context" priority="first">
