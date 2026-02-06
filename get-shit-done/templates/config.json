@@ -9,10 +9,11 @@
   "parallelization": {
     "enabled": true,
     "plan_level": true,
-    "task_level": false,
+    "task_level": true,
     "skip_checkpoints": true,
     "max_concurrent_agents": 3,
-    "min_plans_for_parallel": 2
+    "min_plans_for_parallel": 2,
+    "min_subtasks_for_parallel": 3
   },
   "gates": {
     "confirm_project": true,
