@@ -22,11 +22,15 @@ Before using ANY Mosic MCP tool, you MUST call:
 ToolSearch("mosic task list page entity create document complete update")
 ```
 
-**TRUE PARALLEL EXECUTION:**
-To spawn agents in parallel within a wave, you MUST make all Task() calls in a SINGLE response message. A FOR loop does NOT create parallel execution - it creates sequential execution.
+**RESPECT PARALLELIZATION CONFIG:**
+Check `config.parallelization` before spawning agents. Parallel execution is conditional:
 
-**CORRECT (parallel):** Single message with multiple Task tool calls
-**WRONG (sequential):** FOR loop calling Task() one at a time
+- **If `PARALLEL_ENABLED=true` AND `PARALLEL_PLAN_LEVEL=true`:** Spawn agents in parallel (multiple Task() calls in a SINGLE response). Cap at `MAX_CONCURRENT` agents.
+- **If `PARALLEL_ENABLED=false` OR `PARALLEL_PLAN_LEVEL=false`:** Spawn agents sequentially (one at a time, wait for completion before next). This prevents concurrent file modifications, test conflicts, and build race conditions.
+- **If wave has fewer plans than `MIN_PLANS_FOR_PARALLEL`:** Execute sequentially regardless of config (overhead of parallel coordination isn't worth it for 1 plan).
+
+**TRUE PARALLEL EXECUTION (when enabled):**
+To spawn agents in parallel within a wave, you MUST make all Task() calls in a SINGLE response message. A FOR loop does NOT create parallel execution - it creates sequential execution.
 </critical_requirements>
 
 <objective>
@@ -71,6 +75,12 @@ If missing: Error - run `/gsd:new-project` first.
 workspace_id = config.mosic.workspace_id
 project_id = config.mosic.project_id
 model_profile = config.model_profile or "balanced"
+
+# Load parallelization config (defaults if not set)
+PARALLEL_ENABLED = config.parallelization?.enabled ?? true
+PARALLEL_PLAN_LEVEL = config.parallelization?.plan_level ?? true
+MAX_CONCURRENT = config.parallelization?.max_concurrent_agents ?? 3
+MIN_PLANS_FOR_PARALLEL = config.parallelization?.min_plans_for_parallel ?? 2
 
 Model lookup:
 | Agent | quality | balanced | budget |
@@ -261,11 +271,7 @@ FOR each plan in wave:
   })
 ```
 
-### 4.2 Spawn Executors (TRUE Parallel)
-
-**CRITICAL: True parallel execution requires ALL Task() calls in ONE response.**
-
-A FOR loop does NOT create parallel execution. You must make all Task tool calls simultaneously in a single message.
+### 4.2 Spawn Executors
 
 ```
 # Step 1: Build prompts for all plans in wave
@@ -312,37 +318,63 @@ Commit each subtask atomically. Create summary page. Update task status.
   })
 ```
 
-**Step 2: Spawn ALL agents in wave in a SINGLE response (TRUE parallel)**
+**Step 2: Determine execution mode and spawn agents**
+
+```
+# Decide: parallel or sequential?
+use_parallel = PARALLEL_ENABLED
+  AND PARALLEL_PLAN_LEVEL
+  AND executor_prompts.length >= MIN_PLANS_FOR_PARALLEL
+```
+
+**If `use_parallel=true`: Spawn agents in parallel (multiple Task() calls in ONE response)**
 
 ```
 # CORRECT PATTERN: Multiple Task calls in ONE message
 # This spawns all agents simultaneously, not sequentially
 
-# If wave has 2 plans:
-Task(
-  prompt=executor_prompts[0].prompt,
-  subagent_type="general-purpose",
-  model="{executor_model}",
-  description="Execute Plan " + executor_prompts[0].plan.number
-)
-Task(
-  prompt=executor_prompts[1].prompt,
-  subagent_type="general-purpose",
-  model="{executor_model}",
-  description="Execute Plan " + executor_prompts[1].plan.number
-)
+# Cap at MAX_CONCURRENT agents per batch
+batches = chunk(executor_prompts, MAX_CONCURRENT)
 
-# If wave has 3 plans, add a third Task() call, etc.
-# ALL Task() calls must be in the SAME response message
+FOR each batch in batches:
+  # Make ALL Task calls in batch in ONE response message
+  # If batch has 2 plans:
+  Task(
+    prompt=batch[0].prompt,
+    subagent_type="general-purpose",
+    model="{executor_model}",
+    description="Execute Plan " + batch[0].plan.number
+  )
+  Task(
+    prompt=batch[1].prompt,
+    subagent_type="general-purpose",
+    model="{executor_model}",
+    description="Execute Plan " + batch[1].plan.number
+  )
+  # ALL Task() calls must be in the SAME response message
+
+  # Wait for batch to complete before starting next batch
 ```
 
-**Why this matters:**
+**Why parallel requires single response:**
 - FOR loop = sequential (one agent finishes, then next starts)
 - Multiple Task() in single response = parallel (all agents start simultaneously)
 
-**If a wave has only ONE plan:** Execute with single Task() call (no parallelism needed).
+**If `use_parallel=false`: Spawn agents sequentially (one at a time)**
 
-**If a wave has 2+ plans:** Make all Task() calls in the same response to execute in parallel.
+```
+# Sequential execution: each plan completes before the next starts
+# This prevents concurrent file modifications and build conflicts
+
+FOR each executor_prompt in executor_prompts:
+  Task(
+    prompt=executor_prompt.prompt,
+    subagent_type="general-purpose",
+    model="{executor_model}",
+    description="Execute Plan " + executor_prompt.plan.number
+  )
+  # Wait for completion, handle result, then continue to next
+```
 
 ### 4.3 Handle Executor Results
 
@@ -756,6 +788,7 @@ IF mosic operation fails:
 </error_handling>
 
 <success_criteria>
+- [ ] Parallelization config loaded and respected
 - [ ] All incomplete plans in phase executed
 - [ ] Each plan task marked complete in Mosic
 - [ ] Checklist items updated based on summaries

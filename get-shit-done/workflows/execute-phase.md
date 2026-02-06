@@ -18,13 +18,15 @@ Before using ANY Mosic MCP tool, call ToolSearch:
 ToolSearch("mosic task list page entity create document complete update")
 ```
 
-**TRUE PARALLEL EXECUTION:**
-To spawn agents in parallel within a wave, you MUST make all Task() calls in a SINGLE response message.
+**RESPECT PARALLELIZATION CONFIG:**
+Check `config.parallelization` before spawning agents. Parallel execution is conditional:
 
-- **CORRECT (parallel):** Single message with multiple Task tool calls
-- **WRONG (sequential):** FOR loop calling Task() one at a time
+- **If parallel enabled:** Spawn agents in parallel (multiple Task() calls in ONE response). Cap at `max_concurrent_agents`.
+- **If parallel disabled:** Spawn agents sequentially (one at a time). Prevents concurrent file modifications, test conflicts, and build race conditions.
+- **If wave has fewer plans than `min_plans_for_parallel`:** Execute sequentially (overhead not worth it).
 
-A FOR loop creates sequential execution, not parallel!
+**TRUE PARALLEL EXECUTION (when enabled):**
+To spawn agents in parallel within a wave, you MUST make all Task() calls in a SINGLE response message. A FOR loop does NOT create parallel execution.
 </critical_requirements>
 
 <core_principle>
@@ -45,6 +47,12 @@ Read config.json for Mosic IDs:
 - pages (page IDs)
 - tags (tag IDs)
 - model_profile (default: balanced)
+- parallelization.enabled (default: true)
+- parallelization.plan_level (default: true)
+- parallelization.max_concurrent_agents (default: 3)
+- parallelization.min_plans_for_parallel (default: 2)
+
+Store parallelization config for use in wave execution step.
 ```
 
 ```javascript
@@ -138,11 +146,9 @@ for (wave_num in waves) {
 </step>
 
 <step name="execute_waves">
-Execute each wave in sequence. Autonomous tasks within a wave run in TRUE parallel.
+Execute each wave in sequence. Autonomous tasks within a wave run in parallel **only if parallelization is enabled in config**.
 
-**CRITICAL: True parallel execution requires ALL Task() calls in ONE response message.**
-
-A FOR loop does NOT create parallel execution - you must make multiple Task() calls simultaneously.
+**If parallelization disabled:** Execute tasks within each wave sequentially (one at a time). This prevents side effects from concurrent operations like tests, linting, and code generation.
 
 **For each wave:**
 
@@ -185,24 +191,42 @@ A FOR loop does NOT create parallel execution - you must make multiple Task() ca
    }
    ```
 
-3. **Spawn ALL agents in wave in a SINGLE response (TRUE parallel):**
+3. **Determine execution mode and spawn agents:**
 
-   **WRONG (sequential):**
    ```javascript
-   for (p of prompts) { Task(...) }  // This is SEQUENTIAL, not parallel!
+   use_parallel = config.parallelization.enabled
+     && config.parallelization.plan_level
+     && prompts.length >= config.parallelization.min_plans_for_parallel
    ```
 
-   **CORRECT (parallel):**
+   **If `use_parallel=true`: Spawn agents in parallel (multiple Task() calls in ONE response)**
+
    ```javascript
-   // Make ALL Task calls in ONE response message
-   // If wave has 2 tasks:
-   Task(prompt=prompts[0].content, subagent_type="gsd-executor", ...)
-   Task(prompt=prompts[1].content, subagent_type="gsd-executor", ...)
-   // Both execute simultaneously
+   // Cap at max_concurrent_agents per batch
+   batches = chunk(prompts, config.parallelization.max_concurrent_agents)
+
+   for (batch of batches) {
+     // Make ALL Task calls in batch in ONE response message
+     Task(prompt=batch[0].content, subagent_type="gsd-executor", ...)
+     Task(prompt=batch[1].content, subagent_type="gsd-executor", ...)
+     // Both execute simultaneously
+     // Wait for batch to complete before starting next batch
+   }
    ```
 
-   **If wave has only ONE task:** Single Task() call.
-   **If wave has 2+ tasks:** Multiple Task() calls in same response = parallel.
+   **If `use_parallel=false`: Spawn agents sequentially**
+
+   ```javascript
+   // One at a time — prevents concurrent file modifications and build conflicts
+   for (p of prompts) {
+     Task(prompt=p.content, subagent_type="gsd-executor", ...)
+     // Wait for completion, handle result, then next
+   }
+   ```
+
+   **Why parallel requires single response:**
+   - FOR loop = sequential (one finishes, then next starts)
+   - Multiple Task() in one response = parallel (all start simultaneously)
 
 4. **Wait for all agents to complete:**
 
@@ -507,8 +531,9 @@ If phase execution was interrupted (context limit, user exit, error):
 
 <success_criteria>
 - [ ] Mosic context loaded (project, phase task list, tasks, pages)
+- [ ] Parallelization config loaded and respected
 - [ ] Incomplete tasks identified and grouped by wave
-- [ ] Each wave executed with parallel agents where possible
+- [ ] Each wave executed respecting parallelization config (parallel or sequential)
 - [ ] Checkpoints handled with user interaction
 - [ ] Phase goal verified (not just tasks completed)
 - [ ] Phase task list marked complete
