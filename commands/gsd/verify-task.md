@@ -151,10 +151,60 @@ Artifacts found:
 - Previous UAT: {existing_uat_page ? "Yes" : "No"}
 ```
 
-## 4. Extract Verification Criteria
+## 4. Load Context Page Decisions
+
+```
+# Load task context page (from discuss-task)
+task_context_page = task_pages.find(p => p.title.includes("Context") or p.title.includes("Decisions"))
+
+task_context_content = ""
+locked_decisions = []
+deferred_ideas = []
+
+IF task_context_page:
+  task_context_content = mosic_get_page(task_context_page.name, {
+    content_format: "markdown"
+  }).content
+
+  # Extract locked decisions
+  locked_decisions = extract_list_items(task_context_content, "Decisions")
+  deferred_ideas = extract_list_items(task_context_content, "Deferred Ideas")
+
+# Load phase pages for inherited context
+phase_id = task.task_list
+phase_pages = mosic_get_entity_pages("MTask List", phase_id, {
+  include_subtree: false
+})
+
+# Also check phase context for inherited locked decisions
+phase_context_page = phase_pages.find(p => p.title.includes("Context"))
+IF phase_context_page:
+  phase_context_content = mosic_get_page(phase_context_page.name, {
+    content_format: "markdown"
+  }).content
+  phase_locked = extract_list_items(phase_context_content, "Implementation Decisions")
+  locked_decisions = locked_decisions.concat(phase_locked)
+```
+
+Display:
+```
+Context fidelity check:
+- Locked decisions: {locked_decisions.length}
+- Deferred ideas: {deferred_ideas.length}
+```
+
+## 5. Extract Verification Criteria
 
 ```
 verification_criteria = []
+
+# From locked decisions (context fidelity - highest priority)
+FOR each decision in locked_decisions:
+  verification_criteria.push({
+    source: "locked_decision",
+    criterion: decision,
+    type: "context_fidelity"
+  })
 
 # From plan page - extract must-haves
 IF plan_content:
@@ -204,7 +254,7 @@ Verification Criteria ({verification_criteria.length}):
 ).join("\n")}
 ```
 
-## 5. Guide User Through Verification
+## 6. Guide User Through Verification
 
 ```
 Display:
@@ -230,7 +280,10 @@ FOR each criterion in verification_criteria:
   """
 
   # Suggest verification steps based on criterion type
-  IF criterion.type == "observable_truth":
+  IF criterion.type == "context_fidelity":
+    Display: "**LOCKED DECISION** - This was explicitly decided by the user during discussion. It MUST be implemented as specified."
+
+  ELIF criterion.type == "observable_truth":
     Display: "This should be observable in the running application."
 
   ELIF criterion.type == "acceptance_criterion":
@@ -278,7 +331,7 @@ FOR each criterion in verification_criteria:
   verification_results.push(result)
 ```
 
-## 6. Summarize Results
+## 7. Summarize Results
 
 ```
 passed = verification_results.filter(r => r.status == "Pass")
@@ -318,7 +371,7 @@ Results:
 """
 ```
 
-## 7. Create UAT Page in Mosic
+## 8. Create UAT Page in Mosic
 
 ```
 # Build UAT content
@@ -386,7 +439,7 @@ mosic_batch_add_tags_to_document("M Page", UAT_PAGE_ID, [
 Display: "UAT page: https://mosic.pro/app/page/" + UAT_PAGE_ID
 ```
 
-## 8. Create Fix Subtasks (if issues found)
+## 9. Create Fix Subtasks (if issues found)
 
 ```
 IF failed.length > 0 or partial.length > 0:
@@ -456,7 +509,7 @@ IF failed.length > 0 or partial.length > 0:
     """
 ```
 
-## 9. Update Config
+## 10. Update Config
 
 ```
 config.mosic.pages["task-" + TASK_IDENTIFIER + "-uat"] = UAT_PAGE_ID
@@ -466,7 +519,7 @@ config.mosic.session.last_updated = new Date().toISOString()
 write config.json
 ```
 
-## 10. Present Results and Next Steps
+## 11. Present Results and Next Steps
 
 ```
 IF overall_status == "passed":
@@ -552,8 +605,9 @@ ELSE:
 
 <success_criteria>
 - [ ] Task loaded from Mosic
+- [ ] Context page loaded and locked decisions extracted (context fidelity)
 - [ ] Plan, summary, subtasks, checklists loaded
-- [ ] Verification criteria extracted from all sources
+- [ ] Verification criteria extracted from all sources (including locked decisions)
 - [ ] User guided through each criterion
 - [ ] Results captured with notes for failures
 - [ ] UAT page created/updated in Mosic

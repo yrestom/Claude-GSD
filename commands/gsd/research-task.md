@@ -249,6 +249,9 @@ Answer: "What do I need to know to PLAN this task well?"
 - Target 10-15 minute research cycle
 - Be prescriptive: "Use X" not "Consider X or Y"
 - Verify claims with Context7 or official docs
+- CRITICAL: User Constraints section MUST be FIRST in research output
+- Copy locked decisions from task context AND phase context VERBATIM
+- Do NOT research or include anything from Deferred Ideas
 </constraints>
 
 <output>
@@ -259,6 +262,16 @@ Update research page """ + RESEARCH_PAGE_ID + """ with:
 **Task:** """ + TASK_TITLE + """
 **Researched:** {date}
 **Confidence:** HIGH/MEDIUM/LOW
+
+## User Constraints
+### Locked Decisions
+[Copy from task context AND phase context verbatim - NON-NEGOTIABLE]
+### Claude's Discretion
+[Areas where planner can choose]
+### Deferred Ideas (OUT OF SCOPE)
+[Do NOT plan these]
+
+If no context: "No user constraints — all decisions at Claude's discretion"
 
 ## Summary
 {2-3 sentence summary of key findings}

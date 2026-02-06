@@ -473,6 +473,9 @@ IF workflow_plan_check and not skip_verify:
 - [ ] Subtasks are appropriately sized (15-60 min each)
 - [ ] Must-haves are observable and testable
 - [ ] No missing dependencies between subtasks
+- [ ] Every locked decision from context has a corresponding subtask action
+- [ ] No subtask implements or prepares for a deferred idea
+- [ ] Discretion areas are handled with reasonable defaults
 </checklist>
 
 <expected_output>
@@ -581,6 +584,7 @@ IF mosic operation fails during subtask creation:
 <success_criteria>
 - [ ] Task loaded from Mosic (by identifier or active task)
 - [ ] Phase context loaded (research, decisions)
+- [ ] Context fidelity enforced (locked decisions mapped, deferred ideas excluded)
 - [ ] Plan page created/updated linked to task
 - [ ] gsd-planner spawned with full context
 - [ ] Subtasks created with parent_task field
