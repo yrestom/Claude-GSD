@@ -254,7 +254,176 @@ Verification Criteria ({verification_criteria.length}):
 ).join("\n")}
 ```
 
-## 6. Guide User Through Verification
+## 6. Automated Code Review
+
+Before user verification, perform automated analysis of actual code changes.
+
+### 6a. Identify and Gather Changes
+
+```
+# Find commits related to this task
+task_commits = run_bash("git log --all --oneline --grep='" + TASK_IDENTIFIER + "'")
+
+# Check summary page for commit references if none found by identifier
+IF task_commits is empty AND summary_content:
+  commit_refs = extract_commit_hashes(summary_content)
+  IF commit_refs.length > 0:
+    task_commits = commit_refs
+
+# Gather the diff
+IF task_commits found:
+  changed_files = run_bash("git diff --name-only " + oldest_commit + "^.." + newest_commit)
+  full_diff = run_bash("git diff " + oldest_commit + "^.." + newest_commit)
+ELSE:
+  # Fallback: recent changes on current branch
+  changed_files = run_bash("git diff --name-only HEAD~5")
+  full_diff = run_bash("git diff HEAD~5")
+  Display: "No task-specific commits found. Reviewing recent changes."
+
+# Read full content of each changed file for surrounding context
+FOR each file in changed_files:
+  Read(file)
+
+Display:
+"""
+Files changed: {changed_files.length}
+Commits found: {task_commits.length}
+"""
+```
+
+### 6b. Requirements Traceability
+
+Map each verification criterion from Step 5 to actual code changes.
+
+```
+traceability = []
+
+FOR each criterion in verification_criteria:
+  # Search changed files and diff for evidence of implementation
+  evidence = []
+  FOR each file in changed_files:
+    matches = search_diff_and_file(criterion.criterion, file, full_diff)
+    IF matches:
+      evidence.push(file + ":" + match_lines)
+
+  status = "NOT MET"
+  IF evidence.length > 0:
+    status = "MET"
+  ELIF criterion.type == "subtask_completion" AND criterion.done:
+    status = "MET (subtask marked done)"
+
+  traceability.push({
+    criterion: criterion,
+    status: status,
+    evidence: evidence
+  })
+
+# Flag files changed but not traced to any criterion
+unrequested = changed_files.filter(f =>
+  !traceability.any(t => t.evidence.any(e => e.startsWith(f)))
+)
+```
+
+### 6c. Code Quality Analysis
+
+For each changed file, analyze the diff and full content for issues.
+
+```
+auto_findings = []
+
+FOR each file in changed_files:
+  # CORRECTNESS
+  # - Logic errors, off-by-one, null/undefined handling
+  # - Error paths handled appropriately
+  # - Return types and function signatures correct
+  # - Database operations atomic where needed
+  # - External boundaries validated (user input, API responses)
+
+  # SECURITY
+  # - No SQL injection (parameterized queries)
+  # - No XSS (escaped user content in templates)
+  # - No command injection (sanitized shell input)
+  # - Permission checks present on endpoints
+  # - No secrets/credentials in code or logs
+
+  # OVER-ENGINEERING
+  # - Abstractions used only once
+  # - Config/options for hypothetical future needs (YAGNI)
+  # - Helper functions wrapping 3 or fewer lines
+  # - Extra error handling for impossible scenarios
+
+  # STUB DETECTION (per verification-patterns.md)
+  # - TODO/FIXME/PLACEHOLDER in new code
+  # - Empty function bodies (return null, pass, ...)
+  # - Console.log-only handlers
+  # - Hardcoded values where dynamic expected
+
+  # Each finding: { severity: "Critical"|"Warning"|"Note", file, line, issue, fix }
+```
+
+### 6d. Present Review and Augment Criteria
+
+```
+met = traceability.filter(t => t.status.startsWith("MET")).length
+total = traceability.length
+critical = auto_findings.filter(f => f.severity == "Critical").length
+warnings = auto_findings.filter(f => f.severity == "Warning").length
+
+verdict = "PASS"
+IF critical > 0: verdict = "CRITICAL ISSUES"
+ELIF warnings > 0: verdict = "NEEDS ATTENTION"
+ELIF met < total: verdict = "GAPS FOUND"
+
+Display:
+"""
+-------------------------------------------
+ CODE REVIEW: {TASK_IDENTIFIER}
+-------------------------------------------
+
+Verdict: {verdict}
+
+### Requirements Traceability
+
+| # | Criterion | Status | Evidence |
+|---|-----------|--------|----------|
+{traceability.map((t, i) =>
+  "| " + (i+1) + " | " + t.criterion.criterion.substring(0,60) + " | " +
+  t.status + " | " + (t.evidence.join(", ") or "-") + " |"
+).join("\n")}
+
+Score: {met}/{total} requirements traced to code
+
+{IF auto_findings.length > 0:}
+### Findings
+
+{auto_findings.map(f =>
+  "**" + f.severity + "** `" + f.file + ":" + f.line + "`\n" +
+  f.issue + "\n*Suggested fix:* " + f.fix
+).join("\n\n")}
+{ENDIF}
+
+{IF unrequested.length > 0:}
+### Scope Check
+
+Files changed but not traced to any requirement:
+{unrequested.map(f => "- " + f).join("\n")}
+{ENDIF}
+
+---
+Proceeding to manual verification...
+"""
+
+# Append Critical/Warning findings as additional verification criteria
+FOR each finding in auto_findings.filter(f => f.severity in ["Critical", "Warning"]):
+  verification_criteria.push({
+    source: "code_review",
+    criterion: "[" + finding.severity + "] " + finding.issue + " (" + finding.file + ":" + finding.line + ")",
+    type: "code_review_finding",
+    auto_severity: finding.severity
+  })
+```
+
+## 7. Guide User Through Verification
 
 ```
 Display:
@@ -295,6 +464,9 @@ FOR each criterion in verification_criteria:
     ELSE:
       Display: "WARNING: Subtask not marked complete."
 
+  ELIF criterion.type == "code_review_finding":
+    Display: "**AUTO-DETECTED** — Found by automated code review. Confirm if this is a real issue."
+
   AskUserQuestion({
     questions: [{
       question: "Does this criterion pass?",
@@ -331,7 +503,7 @@ FOR each criterion in verification_criteria:
   verification_results.push(result)
 ```
 
-## 7. Summarize Results
+## 8. Summarize Results
 
 ```
 passed = verification_results.filter(r => r.status == "Pass")
@@ -371,7 +543,7 @@ Results:
 """
 ```
 
-## 8. Create UAT Page in Mosic
+## 9. Create UAT Page in Mosic
 
 ```
 # Build UAT content
@@ -439,7 +611,7 @@ mosic_batch_add_tags_to_document("M Page", UAT_PAGE_ID, [
 Display: "UAT page: https://mosic.pro/app/page/" + UAT_PAGE_ID
 ```
 
-## 9. Create Fix Subtasks (if issues found)
+## 10. Create Fix Subtasks (if issues found)
 
 ```
 IF failed.length > 0 or partial.length > 0:
@@ -509,7 +681,7 @@ IF failed.length > 0 or partial.length > 0:
     """
 ```
 
-## 10. Update Config
+## 11. Update Config
 
 ```
 config.mosic.pages["task-" + TASK_IDENTIFIER + "-uat"] = UAT_PAGE_ID
@@ -519,7 +691,7 @@ config.mosic.session.last_updated = new Date().toISOString()
 write config.json
 ```
 
-## 11. Present Results and Next Steps
+## 12. Present Results and Next Steps
 
 ```
 IF overall_status == "passed":
@@ -608,7 +780,11 @@ ELSE:
 - [ ] Context page loaded and locked decisions extracted (context fidelity)
 - [ ] Plan, summary, subtasks, checklists loaded
 - [ ] Verification criteria extracted from all sources (including locked decisions)
-- [ ] User guided through each criterion
+- [ ] Git commits identified and code changes gathered
+- [ ] Requirements traced to code with file:line evidence (traceability table)
+- [ ] Correctness, security, over-engineering, and stub checks run
+- [ ] Auto-review findings presented before manual verification
+- [ ] User guided through each criterion (including auto-detected findings)
 - [ ] Results captured with notes for failures
 - [ ] UAT page created/updated in Mosic
 - [ ] Fix subtasks created if issues found

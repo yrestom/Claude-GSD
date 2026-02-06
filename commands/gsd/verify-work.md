@@ -162,7 +162,159 @@ FOR each task in completed_tasks:
 DISPLAY: "Found " + test_items.length + " testable items from " + completed_tasks.length + " completed tasks"
 ```
 
-## Step 3: Create UAT Page in Mosic
+## Step 3: Automated Code Review
+
+Before manual testing, analyze the code changes across all completed tasks.
+
+### 3a. Gather Phase Changes
+
+```
+# Collect commits for all completed tasks
+all_commits = []
+
+FOR each task in completed_tasks:
+  task_commits = run_bash("git log --all --oneline --grep='" + task.identifier + "'")
+  IF task_commits:
+    all_commits.push(...task_commits)
+
+# Deduplicate and sort commits
+all_commits = deduplicate(all_commits)
+
+# If no task-specific commits, fall back to branch diff
+IF all_commits.length == 0:
+  all_commits = run_bash("git log --oneline -20")
+  Display: "No task-specific commits found. Reviewing recent changes."
+
+# Get consolidated diff
+IF all_commits has identifiable range:
+  changed_files = run_bash("git diff --name-only " + oldest + "^.." + newest)
+  full_diff = run_bash("git diff " + oldest + "^.." + newest)
+ELSE:
+  changed_files = run_bash("git diff --name-only HEAD~10")
+  full_diff = run_bash("git diff HEAD~10")
+
+# Read changed files for context
+FOR each file in changed_files:
+  Read(file)
+
+Display: "Reviewing {changed_files.length} files across {all_commits.length} commits"
+```
+
+### 3b. Per-Task Requirements Traceability
+
+```
+task_traceability = []
+
+FOR each task in completed_tasks:
+  # Get task's plan page for requirements
+  pages = mosic_get_entity_pages("MTask", task.name, { include_subtree: false })
+  plan_page = pages.find(p => p.title.includes("Plan") or p.page_type == "Spec")
+
+  task_requirements = []
+  IF plan_page:
+    plan_content = mosic_get_page(plan_page.name, { content_format: "markdown" }).content
+    must_haves = extract_section(plan_content, "## Must-Haves")
+    IF must_haves:
+      task_requirements = extract_list_items(must_haves, "Observable Truths")
+
+  # Fall back to task title/checklist if no plan
+  IF task_requirements.length == 0:
+    task_requirements = [task.title + " works as expected"]
+    IF task.checklists:
+      task_requirements.push(...task.checklists.map(c => c.title))
+
+  # Map requirements to code
+  FOR each req in task_requirements:
+    evidence = search_changed_files(req, changed_files, full_diff)
+    task_traceability.push({
+      task_id: task.name,
+      task_title: task.title,
+      requirement: req,
+      status: evidence.length > 0 ? "MET" : "NOT MET",
+      evidence: evidence
+    })
+```
+
+### 3c. Code Quality Analysis
+
+```
+auto_findings = []
+
+FOR each file in changed_files:
+  # CORRECTNESS: logic errors, null handling, error paths, atomicity
+  # SECURITY: injection, XSS, permission checks, credentials in code
+  # OVER-ENGINEERING: YAGNI, single-use abstractions, trivial helpers
+  # STUB DETECTION: TODO/FIXME, empty bodies, hardcoded values
+
+  # Each finding: { severity: "Critical"|"Warning"|"Note", file, line, issue, fix, related_task }
+```
+
+### 3d. Present Phase Code Review
+
+```
+met = task_traceability.filter(t => t.status == "MET").length
+total = task_traceability.length
+critical = auto_findings.filter(f => f.severity == "Critical").length
+
+verdict = "PASS"
+IF critical > 0: verdict = "CRITICAL ISSUES"
+ELIF auto_findings.length > 0: verdict = "NEEDS ATTENTION"
+ELIF met < total: verdict = "GAPS FOUND"
+
+Display:
+"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ CODE REVIEW: {PHASE_IDENTIFIER}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Verdict: {verdict}
+Files changed: {changed_files.length}
+Commits: {all_commits.length}
+
+### Requirements Traceability
+
+| Task | Requirement | Status | Evidence |
+|------|-------------|--------|----------|
+{task_traceability.map(t =>
+  "| " + t.task_title.substring(0,30) + " | " + t.requirement.substring(0,40) + " | " +
+  t.status + " | " + (t.evidence.join(", ") or "-") + " |"
+).join("\n")}
+
+Score: {met}/{total} requirements traced to code
+
+{IF auto_findings.length > 0:}
+### Findings
+
+{auto_findings.map(f =>
+  "**" + f.severity + "** `" + f.file + ":" + f.line + "`\n" +
+  f.issue + "\n*Suggested fix:* " + f.fix
+).join("\n\n")}
+{ENDIF}
+
+---
+Proceeding to manual testing...
+"""
+
+# Enrich test_items with auto-review data
+FOR each test_item in test_items:
+  related_trace = task_traceability.filter(t => t.task_id == test_item.task_id)
+  test_item.auto_traceability = related_trace
+  related_findings = auto_findings.filter(f => f.related_task == test_item.task_id)
+  test_item.auto_findings = related_findings
+
+# Add Critical/Warning findings as additional test items
+FOR each finding in auto_findings.filter(f => f.severity in ["Critical", "Warning"]):
+  test_items.push({
+    task_id: finding.related_task,
+    task_title: "Code Review Finding",
+    test: "[" + finding.severity + "] " + finding.issue,
+    expected: finding.fix,
+    source_page: null,
+    auto_detected: true
+  })
+```
+
+## Step 4: Create UAT Page in Mosic
 
 ```
 # Create UAT page linked to phase
@@ -207,7 +359,7 @@ mosic_batch_add_tags_to_document("M Page", UAT_PAGE_ID, [
 DISPLAY: "Created UAT page: https://mosic.pro/app/page/" + UAT_PAGE_ID
 ```
 
-## Step 4: Run Tests One at a Time
+## Step 5: Run Tests One at a Time
 
 ```
 results = []
@@ -215,6 +367,24 @@ current_test = 0
 
 FOR each test_item in test_items:
   current_test++
+
+  # Show auto-review context if available
+  auto_context = ""
+
+  IF test_item.auto_traceability:
+    unmet = test_item.auto_traceability.filter(t => t.status == "NOT MET")
+    IF unmet.length > 0:
+      auto_context += "\n  **Code Review:** Some requirements not traced to code:\n"
+      FOR each u in unmet:
+        auto_context += "    - " + u.requirement + "\n"
+
+  IF test_item.auto_findings AND test_item.auto_findings.length > 0:
+    auto_context += "\n  **Code Review Findings:**\n"
+    FOR each f in test_item.auto_findings:
+      auto_context += "    - [" + f.severity + "] " + f.issue + " (" + f.file + ":" + f.line + ")\n"
+
+  IF test_item.auto_detected:
+    auto_context += "\n  **AUTO-DETECTED** — Found by automated code review.\n"
 
   DISPLAY:
   """
@@ -225,7 +395,7 @@ FOR each test_item in test_items:
 
   **Expected Behavior:**
   {test_item.expected}
-
+  {auto_context}
   ───────────────────────────────────────────────────────────────
 
   Does this work as expected?
@@ -258,7 +428,7 @@ FOR each test_item in test_items:
     update_uat_page(UAT_PAGE_ID, results)
 ```
 
-## Step 5: Finalize UAT Results in Mosic
+## Step 6: Finalize UAT Results in Mosic
 
 ```
 passed = results.filter(r => r.status == "passed").length
@@ -313,7 +483,7 @@ ELSE:
   })
 ```
 
-## Step 6: Create Issue Tasks for Failed Tests
+## Step 7: Create Issue Tasks for Failed Tests
 
 ```
 IF failed > 0:
@@ -371,7 +541,7 @@ IF failed > 0:
   DISPLAY: "Created " + issue_tasks.length + " fix tasks in Mosic"
 ```
 
-## Step 7: Diagnose Issues and Create Fix Plans (if needed)
+## Step 8: Diagnose Issues and Create Fix Plans (if needed)
 
 ```
 IF failed > 0:
@@ -426,7 +596,7 @@ IF failed > 0:
   )
 ```
 
-## Step 8: Update config.json
+## Step 9: Update config.json
 
 ```
 # Update config with UAT page reference
@@ -443,7 +613,7 @@ write config.json
 - Don't use AskUserQuestion for test responses - plain text conversation
 - Don't ask severity - infer from description
 - Don't present full checklist upfront - one test at a time
-- Don't run automated tests - this is manual user validation
+- Don't run automated test suites - but DO run code review before manual testing
 - Don't fix issues during testing - log as gaps, diagnose after all tests complete
 - Don't create local markdown files - all documentation lives in Mosic
 </anti_patterns>
@@ -521,8 +691,12 @@ Mosic: https://mosic.pro/app/page/{UAT_PAGE_ID}
 <success_criteria>
 - [ ] Phase resolved from Mosic (by identifier or UUID)
 - [ ] Testable items extracted from completed tasks and summary pages
+- [ ] Phase commits gathered across all completed tasks
+- [ ] Per-task requirements traced to code changes (traceability table)
+- [ ] Code quality analysis run (correctness, security, over-engineering, stubs)
+- [ ] Auto-review findings presented before manual testing
 - [ ] UAT page created in Mosic linked to phase
-- [ ] Tests presented one at a time with expected behavior
+- [ ] Tests presented one at a time with auto-review context and expected behavior
 - [ ] Plain text responses (no structured forms)
 - [ ] Severity inferred, never asked
 - [ ] UAT page updated with results
