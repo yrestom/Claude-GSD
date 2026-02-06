@@ -425,8 +425,38 @@ When spawned by `/gsd:plan-task` (your prompt will have `**Mode:** task-planning
 ToolSearch("mosic task create document entity page tag relation")
 ```
 
-### Step 2: Update Plan Page
-The orchestrator provides `PLAN_PAGE_ID`. Update it with plan details:
+### Step 2: Analyze Dependencies and Assign Waves
+
+Before creating subtasks, analyze which ones can run in parallel:
+
+```
+FOR each subtask identified:
+  Record:
+  - files: exact file paths created or modified
+  - needs: what must exist before this subtask runs (outputs of other subtasks)
+  - creates: what this subtask produces (files, exports, APIs)
+  - has_checkpoint: does this subtask require user interaction?
+
+# Build dependency graph
+FOR each pair of subtasks (A, B):
+  A depends on B IF:
+  - A.needs includes something B.creates
+  - A.files overlaps with B.files (SAME file = must be sequential)
+  - A explicitly references B's output
+
+# Assign waves (same algorithm as phase-level planning)
+Wave 1: Subtasks with no dependencies (can run in parallel)
+Wave 2: Subtasks depending only on Wave 1 outputs
+Wave 3: Subtasks depending on Wave 2 outputs
+...
+
+# File-overlap safety: If two subtasks modify the SAME file,
+# they MUST be in different waves (sequential execution).
+# This prevents git conflicts and merge issues.
+```
+
+### Step 3: Update Plan Page
+The orchestrator provides `PLAN_PAGE_ID`. Update it with plan details including wave structure:
 ```
 mosic_update_document("M Page", PLAN_PAGE_ID, {
   content: {
@@ -435,6 +465,14 @@ mosic_update_document("M Page", PLAN_PAGE_ID, {
       { type: "paragraph", data: { text: "**Objective:** {objective}" } },
       { type: "header", data: { text: "Must-Haves", level: 2 } },
       { type: "list", data: { style: "unordered", items: must_haves } },
+      { type: "header", data: { text: "Wave Structure", level: 2 } },
+      { type: "table", data: {
+        content: [
+          ["Wave", "Subtasks", "Parallel"],
+          ["1", "Subtask 1, Subtask 2", "Yes"],
+          ["2", "Subtask 3", "No (depends on Wave 1)"]
+        ]
+      }},
       { type: "header", data: { text: "Subtasks", level: 2 } },
       { type: "list", data: { style: "ordered", items: subtask_summaries } },
       { type: "header", data: { text: "Success Criteria", level: 2 } },
@@ -445,8 +483,8 @@ mosic_update_document("M Page", PLAN_PAGE_ID, {
 })
 ```
 
-### Step 3: Create Subtasks
-For each subtask identified (1-5 max):
+### Step 4: Create Subtasks
+For each subtask identified (1-5 max), include wave metadata:
 ```
 subtask = mosic_create_document("MTask", {
   workspace: workspace_id,
@@ -456,6 +494,10 @@ subtask = mosic_create_document("MTask", {
   description: {
     blocks: [
       { type: "paragraph", data: { text: "{what to do}" } },
+      { type: "header", data: { text: "Metadata", level: 2 } },
+      { type: "paragraph", data: {
+        text: "**Wave:** {wave_number}\n**Depends On:** {comma-separated subtask titles or 'None'}\n**Type:** {auto|checkpoint:*}"
+      }},
       { type: "header", data: { text: "Files", level: 2 } },
       { type: "list", data: { style: "unordered", items: file_paths } },
       { type: "header", data: { text: "Action", level: 2 } },
@@ -471,7 +513,14 @@ subtask = mosic_create_document("MTask", {
 })
 ```
 
-### Step 4: Create Checklist Items on Parent Task
+**Wave metadata rules:**
+- **Wave number** is REQUIRED on every subtask (minimum: 1)
+- Subtasks in the same wave MUST NOT share files
+- Checkpoint subtasks should be in their own wave (they block parallel execution)
+- If ALL subtasks are sequential, assign Wave 1, 2, 3... (one per wave)
+- If ALL subtasks are independent, assign all to Wave 1
+
+### Step 5: Create Checklist Items on Parent Task
 ```
 FOR each acceptance_criterion:
   mosic_create_document("MTask CheckList", {
@@ -482,17 +531,26 @@ FOR each acceptance_criterion:
   })
 ```
 
-### Step 5: Return Structured Completion
+### Step 6: Return Structured Completion
 ```markdown
 ## PLANNING COMPLETE
 
 **Subtasks Created:** N
+**Waves:** W
 **Pages Updated:** {PLAN_PAGE_ID}
 
+### Wave Structure
+| Wave | Subtasks | Parallel |
+|------|----------|----------|
+| 1 | Subtask 1, Subtask 2 | Yes |
+| 2 | Subtask 3 | No |
+
 ### Subtasks
-| # | Title | ID |
-|---|-------|-----|
-| 1 | {name} | {subtask_id} |
+| # | Title | Wave | ID |
+|---|-------|------|----|
+| 1 | {name} | 1 | {subtask_id} |
+| 2 | {name} | 1 | {subtask_id} |
+| 3 | {name} | 2 | {subtask_id} |
 
 ### Next Steps
 /gsd:execute-task {TASK_IDENTIFIER}
