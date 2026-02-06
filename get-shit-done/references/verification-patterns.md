@@ -1,20 +1,303 @@
 # Verification Patterns
 
-How to verify different types of artifacts are real implementations, not stubs or placeholders. Verification results are stored in Mosic M Pages.
+How to verify that code changes fulfill requirements and are real implementations, not stubs or placeholders. Covers two complementary dimensions: **requirements verification** (does the code do what was asked?) and **artifact verification** (is each artifact real and working?). Verification results are stored in Mosic M Pages.
 
 <core_principle>
-**Existence does not equal Implementation**
 
-A file existing does not mean the feature works. Verification must check:
+## Two Dimensions of Verification
+
+### Dimension 1: Requirements Verification
+Does the code fulfill what was asked? Checks:
+1. **Traced** - Each requirement maps to specific code with `file:line` evidence
+2. **Correct** - Implementation logic is sound (no bugs, race conditions, null cases)
+3. **Secure** - No injection, XSS, permission bypasses, or data leaks
+4. **Minimal** - No over-engineering, scope creep, or gold-plating
+
+### Dimension 2: Artifact Verification
+Is each artifact real and working? Checks:
 1. **Exists** - File is present at expected path
 2. **Substantive** - Content is real implementation, not placeholder
 3. **Wired** - Connected to the rest of the system
 4. **Functional** - Actually works when invoked
 
-Levels 1-3 can be checked programmatically. Level 4 often requires human verification.
+Dimension 1 is fully automatable. Dimension 2 levels 1-3 can be automated; level 4 often requires human verification.
+
+### Verification Order
+Automated code review (Dimension 1) executes **before** human testing begins. The automated phase catches issues Claude can detect programmatically: requirement gaps, correctness problems, security vulnerabilities, stubs, and over-engineering. Human verification then addresses what automation cannot: user experience, visual correctness, and business logic validation.
 
 **Mosic integration:** Verification results are stored as M Pages linked to tasks or phases.
 </core_principle>
+
+<requirements_traceability>
+
+## Requirements Traceability
+
+Map every requirement to specific code evidence. If a requirement can't be traced to code, it's either unimplemented or the implementation doesn't match the ask.
+
+### Requirements Sources (Priority Order)
+
+1. **User's explicit request** — The original prompt and any follow-up clarifications (highest priority)
+2. **Conversation history** — Decisions made during discussion ("use X approach", "don't do Y")
+3. **Prior session context** — claude-mem observations from previous sessions (fallback if current conversation lacks context)
+4. **Git context** — Commit messages describing what was implemented and why
+5. **Related documentation** — Spec files, design docs, or requirements docs referenced by any source above
+
+### Requirements Categories
+
+Categorize each extracted requirement:
+
+| Category | Meaning | Example |
+|----------|---------|---------|
+| `[Functional]` | What it should DO | "Add user authentication endpoint" |
+| `[Behavioral]` | HOW it should behave | "Return 401 for invalid tokens" |
+| `[Constraint]` | What the user restricted | "Keep it simple, follow existing patterns" |
+| `[Implicit]` | Inherent to the change type | "Fix must not regress existing behavior" |
+
+### Traceability Table Format
+
+For each requirement, trace to specific code:
+
+```
+| # | Requirement | Status | Evidence (file:line) |
+|---|-------------|--------|----------------------|
+| 1 | [Functional] Add REST API for data access | MET | src/api/routes.py:42-68 |
+| 2 | [Behavioral] Return 404 for missing records | NOT MET | No error handling in handler |
+| 3 | [Constraint] Follow existing patterns | MET | Uses same service pattern as auth module |
+| 4 | [Implicit] No regression to existing endpoints | MET | Existing tests still pass |
+```
+
+### Status Definitions
+
+| Status | Meaning | Action |
+|--------|---------|--------|
+| **MET** | Code clearly and correctly implements this requirement | None |
+| **PARTIALLY MET** | Some aspects implemented but gaps remain | Specify what's missing |
+| **NOT MET** | Requirement is not addressed in the changes | Flag as requirement gap |
+| **OVER-IMPLEMENTED** | Code goes beyond what was asked | Flag as scope creep |
+
+### Traceability Score
+
+Report: `X of Y requirements fully MET`
+
+A passing score requires ALL requirements at MET status. Any NOT MET or PARTIALLY MET items must be resolved before verification can pass.
+
+</requirements_traceability>
+
+<code_quality_analysis>
+
+## Code Quality Analysis
+
+Automated checks to run against changed files before human verification.
+
+### Correctness Patterns
+
+For each changed file, check:
+
+**Logic errors:**
+- Off-by-one errors in loops and array access
+- Incorrect boolean logic (AND/OR confusion, negation errors)
+- Missing or wrong return values
+- Integer overflow or type coercion issues
+
+**Null/undefined handling:**
+- Unguarded property access on potentially null values
+- Missing null checks after database lookups or API calls
+- Optional chaining where error handling is actually needed
+
+**Race conditions:**
+- Shared state modified without synchronization
+- Async operations that depend on order but aren't awaited
+- Time-of-check to time-of-use (TOCTOU) vulnerabilities
+
+**Error paths:**
+- Try/catch blocks that swallow errors silently
+- Error responses with wrong status codes
+- Missing cleanup in error paths (open handles, temp files)
+- Error messages that leak internal details
+
+**Boundary validation:**
+- User input not validated before use
+- API responses assumed to have expected shape
+- File paths not sanitized
+- Numeric inputs not range-checked
+
+### Security Patterns
+
+**Injection vulnerabilities:**
+```
+# SQL injection - string concatenation in queries
+grep -E "\".*\+.*\"|f\".*\{.*\}.*SELECT|f\".*\{.*\}.*WHERE" "$file"
+
+# Command injection - unsanitized input in shell commands
+grep -E "subprocess|os\.system|exec\(|eval\(" "$file"
+
+# XSS - unescaped user content in HTML output
+grep -E "innerHTML|dangerouslySetInnerHTML|v-html" "$file"
+```
+
+**Authentication/Authorization:**
+- API endpoints missing auth checks
+- Permission checks that can be bypassed
+- Privilege escalation through parameter manipulation
+- Missing ownership validation (user A accessing user B's data)
+
+**Data exposure:**
+- Secrets, credentials, or API keys in code
+- Sensitive data in logs or error messages
+- Internal IDs or paths exposed to clients
+- Missing data filtering (returning full objects when subset needed)
+
+### Over-Engineering Patterns
+
+Flag ANY of these — simplicity is non-negotiable:
+
+**Abstraction red flags:**
+```
+# Single-use abstractions
+- Helper function wrapping 3 or fewer lines
+- Factory/builder pattern for one type
+- Interface with single implementation
+- Generic where a concrete type works
+```
+
+**YAGNI signals:**
+```
+- Config/options for hypothetical future needs
+- Feature flags that aren't toggled anywhere
+- Backwards-compat shims for new code
+- Plugin architecture with one plugin
+- "Extensible" patterns with one extension point
+```
+
+**Complexity signals:**
+```
+- Comments/docstrings added to unchanged code
+- Type complexity beyond what the code requires
+- Extra error handling for impossible scenarios
+- Defensive copying where ownership is clear
+- Wrapper types that add no behavior
+```
+
+**Rule of thumb:** Three similar lines of code is better than a premature abstraction. If an abstraction isn't used at least twice right now, inline it.
+
+</code_quality_analysis>
+
+<scope_creep_detection>
+
+## Scope Creep Detection
+
+After building the traceability table, identify changes that don't map to any requirement.
+
+### Detection Method
+
+1. List all files modified in the changeset (from `git diff --name-only`)
+2. For each file, check if any requirement in the traceability table references it
+3. Files with no requirement mapping are **unrequested changes**
+
+### Classification
+
+| Type | Meaning | Action |
+|------|---------|--------|
+| **Necessary supporting change** | Infrastructure required by a requirement (e.g., migration for a new model) | Note but accept |
+| **Incidental improvement** | Cleanup or refactor of code touched by a requirement | Accept if minor, flag if substantial |
+| **Unrequested feature** | New functionality not traced to any requirement | Flag — should be removed or approved separately |
+| **Drive-by fix** | Bug fix in unrelated code | Flag — should be a separate commit/task |
+
+### What to Report
+
+```
+## Scope Check
+- Files changed: 12
+- Files traced to requirements: 9
+- Unrequested changes: 3
+  - src/utils/helpers.ts — New utility function (not used by any requirement)
+  - src/config.ts — Added unused config option
+  - README.md — Documentation update (not requested)
+```
+
+</scope_creep_detection>
+
+<review_output_format>
+
+## Review Output Format
+
+Standard format for presenting automated code review results.
+
+### Verdict Levels
+
+| Verdict | Meaning | Criteria |
+|---------|---------|----------|
+| **PASS** | Code is ready for human verification | All requirements MET + no Critical findings |
+| **NEEDS ATTENTION** | Minor issues found | All requirements MET but Warning-level findings exist |
+| **CRITICAL ISSUES** | Must fix before proceeding | Any NOT MET requirement OR any Critical finding |
+| **GAPS FOUND** | Requirements not traceable to code | Any requirement without file:line evidence |
+
+### Findings Format
+
+For each issue found, report:
+
+```
+- **Severity**: Critical | Warning | Suggestion
+- **File:Line**: exact location (e.g., src/api/handler.py:42)
+- **Issue**: what's wrong (specific, not vague)
+- **Fix**: concrete suggestion
+```
+
+### Findings Grouping
+
+Present findings in this order:
+1. **Requirements Gaps** — NOT MET or PARTIALLY MET requirements
+2. **Correctness** — Logic errors, null handling, race conditions
+3. **Security** — Injection, permissions, data exposure
+4. **Over-Engineering** — YAGNI violations, unnecessary complexity
+5. **Scope Creep** — Unrequested changes
+6. **Pre-existing Issues** — Found in unchanged code (see below)
+
+### Severity Definitions
+
+| Severity | Meaning | Effect on Verification |
+|----------|---------|----------------------|
+| **Critical** | Will cause failures, security vulnerability, or requirement not met | Added as verification criterion — user must confirm |
+| **Warning** | Should be fixed but won't block functionality | Added as verification criterion — user decides |
+| **Suggestion** | Could be improved but acceptable as-is | Noted in report only |
+
+### Pre-existing Issues
+
+Issues found in code that was **not changed** by this implementation get their own section, clearly separated from implementation findings. These are not blockers for verification but are worth surfacing.
+
+**Format:**
+```
+## Pre-existing Issues (not from this implementation)
+
+These issues were found in surrounding code during review. They were NOT introduced
+by the current changes but may be worth addressing separately.
+
+- **File:Line**: src/auth/middleware.py:23
+  **Issue**: SQL query uses string concatenation instead of parameterized query
+  **Risk**: Potential SQL injection if user input reaches this path
+  **Suggestion**: Refactor to use parameterized queries
+
+- **File:Line**: src/api/handler.py:87
+  **Issue**: Catch-all exception handler swallows errors silently
+  **Risk**: Bugs in this path would be invisible
+  **Suggestion**: Log the exception or re-raise after handling
+```
+
+**Rules for pre-existing issues:**
+- Only surface Security (Critical/Warning) and Correctness (Critical) findings — skip minor issues
+- Never block verification for pre-existing issues
+- Present them as informational — the user decides whether to address them now or later
+- If a pre-existing issue interacts with the new code (e.g., new code calls a function with a bug), escalate it to the main findings as a Warning
+
+### What NOT to Flag
+
+Do not flag:
+- Style preferences or formatting (linter's job)
+- Pre-existing minor issues (low-severity issues in unchanged code — only surface Critical/Warning pre-existing issues)
+- Subjective suggestions ("I would have done it differently")
+- Nitpicks that don't affect correctness or security
+
+</review_output_format>
 
 <stub_detection>
 
