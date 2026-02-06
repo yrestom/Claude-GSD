@@ -42,11 +42,14 @@ Your research M Page is consumed by `gsd-planner` which uses specific sections:
 
 | Section | How Planner Uses It |
 |---------|---------------------|
+| `## User Constraints` | **FIRST THING PLANNER READS.** Locked decisions are non-negotiable. Deferred ideas are forbidden. Discretion areas allow planner judgment. |
 | `## Standard Stack` | Plans use these libraries, not alternatives |
 | `## Architecture Patterns` | Task structure follows these patterns |
 | `## Don't Hand-Roll` | Tasks NEVER build custom solutions for listed problems |
 | `## Common Pitfalls` | Verification steps check for these |
 | `## Code Examples` | Task actions reference these patterns |
+
+**CRITICAL: User Constraints must be the FIRST content section in your research page.** Copy locked decisions from CONTEXT page verbatim. The planner may skim — if constraints aren't at the top, they'll be missed.
 
 **Be prescriptive, not exploratory.** "Use X" not "Consider X or Y." Your research becomes instructions.
 </downstream_consumer>
@@ -295,6 +298,27 @@ Create M Page in Mosic with this content:
 **Domain:** {primary technology/problem domain}
 **Confidence:** {HIGH/MEDIUM/LOW}
 
+## User Constraints (from Context Page)
+
+**CRITICAL:** If a Context page exists from /gsd:discuss-phase, copy locked decisions here verbatim. These MUST be honored by the planner.
+
+### Locked Decisions
+[Copy from Context page `## Implementation Decisions` section - these are NON-NEGOTIABLE]
+- {Decision 1}
+- {Decision 2}
+
+### Claude's Discretion
+[Copy from Context page - areas where researcher/planner can choose]
+- {Area 1}
+- {Area 2}
+
+### Deferred Ideas (OUT OF SCOPE)
+[Copy from Context page `## Deferred Ideas` - do NOT research or plan these]
+- {Deferred 1}
+- {Deferred 2}
+
+**If no Context page exists:** "No user constraints — all decisions at Claude's discretion"
+
 ## Summary
 
 {2-3 paragraph executive summary}
@@ -453,9 +477,11 @@ context_page = phase_pages.find(p => p.title.includes("Context"))
 
 | Section | How It Constrains Research |
 |---------|---------------------------|
-| **Decisions** | Locked choices - research THESE deeply, don't explore alternatives |
+| **Implementation Decisions** | Locked choices - research THESE deeply, don't explore alternatives |
 | **Claude's Discretion** | Your freedom areas - research options, make recommendations |
 | **Deferred Ideas** | Out of scope - ignore completely |
+
+**MANDATORY:** Copy all three categories into your research output's `## User Constraints` section VERBATIM. This is the first section the planner reads. If you paraphrase or omit a locked decision, the planner may contradict it.
 
 ## Step 2: Identify Research Domains
 
@@ -619,6 +645,7 @@ Research is complete when:
 - [ ] config.json read for Mosic IDs
 - [ ] Phase task list loaded from Mosic
 - [ ] CONTEXT page checked and constraints applied
+- [ ] User Constraints section is FIRST in research output (copied verbatim from Context page)
 - [ ] Phase domain understood
 - [ ] Standard stack identified with versions
 - [ ] Architecture patterns documented

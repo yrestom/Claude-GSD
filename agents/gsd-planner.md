@@ -164,6 +164,52 @@ FOR each completed_task:
 ```
 </mosic_context_loading>
 
+<context_fidelity>
+
+## Honor User Decisions from Context Page
+
+**FIRST:** Before creating ANY tasks, parse and honor user decisions from the Context page (locked decisions are NON-NEGOTIABLE).
+
+When research or context pages are loaded, extract three categories:
+
+### 1. Locked Decisions (Non-Negotiable)
+These come from `## Implementation Decisions` or `## User Constraints → Locked Decisions` in the Context/Research pages.
+
+**Every locked decision MUST have a corresponding task or task action that implements it.**
+
+Examples of locked decisions:
+- "Card-based layout, not timeline" → Task MUST use cards, MUST NOT use timeline
+- "Retry 3 times on network failure" → Task MUST implement exactly 3 retries
+- "JSON for programmatic use, table for humans" → Task MUST support both formats
+
+### 2. Deferred Ideas (Forbidden)
+These come from `## Deferred Ideas` in the Context/Research pages.
+
+**No task may implement, partially implement, or "prepare for" a deferred idea.**
+
+If you find yourself writing "this will also support X later" where X is deferred — stop. Remove it. Deferred means deferred.
+
+### 3. Discretion Areas (Your Judgment)
+These come from `## Claude's Discretion` in the Context/Research pages.
+
+**Make reasonable choices within discretion areas.** You don't need to ask the user. Use your judgment based on research findings, standard patterns, and project context.
+
+## Self-Check Before Creating Plans
+
+Before writing any MTask or M Page, verify:
+
+- [ ] Every locked decision has at least one task that implements it
+- [ ] No task references or implements a deferred idea
+- [ ] Discretion areas are handled with reasonable defaults
+- [ ] No task contradicts a locked decision (even partially)
+
+**Conflict resolution:** If a locked decision conflicts with research findings (e.g., user locked a library but research says it's deprecated):
+1. Implement the locked decision as specified
+2. Add a comment on the plan task noting the concern
+3. Do NOT override the user's choice — they can update via `/gsd:discuss-phase`
+
+</context_fidelity>
+
 <discovery_levels>
 
 ## Mandatory Discovery Protocol
@@ -720,6 +766,16 @@ Load phase-specific pages:
 - Discovery page (from mandatory discovery)
 </step>
 
+<step name="enforce_context_fidelity">
+Parse context and research pages for user decisions:
+1. Extract locked decisions → these become plan constraints
+2. Extract deferred ideas → these become plan prohibitions
+3. Extract discretion areas → these inform your choices
+
+**VERIFY:** Every locked decision maps to at least one planned task action.
+**VERIFY:** No planned task references a deferred idea.
+</step>
+
 <step name="break_into_tasks">
 Decompose phase into tasks. Think dependencies first.
 </step>
@@ -839,6 +895,7 @@ Execute: `/gsd:execute-phase {phase}`
 Phase planning complete when:
 
 - [ ] Mosic context loaded (project, phase, pages)
+- [ ] Context fidelity enforced (locked decisions mapped, deferred ideas excluded)
 - [ ] Mandatory discovery completed
 - [ ] Dependency graph built
 - [ ] Tasks grouped into plans by wave

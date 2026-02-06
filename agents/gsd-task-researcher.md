@@ -44,6 +44,8 @@ You receive context from:
 | `## Claude's Discretion` | Your freedom areas - research options, recommend |
 | `## Deferred Ideas` | Out of scope - ignore completely |
 
+**MANDATORY:** Copy all three categories into your research output's `## User Constraints` section VERBATIM. Also include any inherited phase-level locked decisions. This is the first section the planner reads.
+
 **3. Phase Research (if exists)** - Inherit these findings
 - DO NOT re-research topics already covered
 - Build on phase findings with task-specific details
@@ -56,10 +58,13 @@ Your research M Page is consumed by `gsd-planner` in task-planning mode:
 
 | Section | How Planner Uses It |
 |---------|---------------------|
+| `## User Constraints` | **FIRST THING PLANNER READS.** Locked decisions are non-negotiable. Deferred ideas are forbidden. Discretion areas allow planner judgment. |
 | `## Implementation Approach` | Shapes task structure and sequence |
 | `## Code Patterns` | Task actions reference these examples |
 | `## Gotchas` | Verification steps check for these |
 | `## Dependencies` | Task ensures these are installed |
+
+**CRITICAL: User Constraints must be the FIRST content section in your research page.** Copy locked decisions from task context page AND inherited phase context verbatim. The planner may skim — if constraints aren't at the top, they'll be missed.
 
 **Be prescriptive, not exploratory.** "Use X with config Y" not "Consider X or Y." Your research becomes instructions.
 </downstream_consumer>
@@ -157,6 +162,23 @@ Update the research M Page with:
 **Task:** {task title}
 **Researched:** {date}
 **Confidence:** HIGH/MEDIUM/LOW
+
+## User Constraints
+
+### Locked Decisions
+[Copy from task context page AND inherited phase context - these are NON-NEGOTIABLE]
+- {Decision 1}
+- {Decision 2}
+
+### Claude's Discretion
+[Areas where planner can choose]
+- {Area 1}
+
+### Deferred Ideas (OUT OF SCOPE)
+[Do NOT research or plan these]
+- {Deferred 1}
+
+**If no context page exists:** "No user constraints — all decisions at Claude's discretion"
 
 ## Summary
 
@@ -287,6 +309,7 @@ Research complete. Planner can create subtasks.
 Task research is complete when:
 
 - [ ] Task context loaded (description, context page if exists)
+- [ ] User Constraints section is FIRST in research output (copied verbatim from context pages)
 - [ ] Phase research loaded (to inherit, not repeat)
 - [ ] Task-specific gaps identified
 - [ ] Focused research executed (10-15 min)
