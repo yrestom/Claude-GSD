@@ -327,30 +327,51 @@ planner_prompt = """
 - Each subtask should take 5-15 minutes to execute
 - Focus on core actions, skip elaborate verification
 - Get to execution quickly
+- Assign wave numbers (all Wave 1 if independent, sequential otherwise)
 """ : """
 - Create 1-5 subtasks maximum (task-level scope, not phase-level)
 - Each subtask should take 15-60 minutes to execute
 - Subtasks must be specific and actionable
 - Include verification criteria for each subtask
 - Use must-haves for goal-backward verification
+- **WAVE ASSIGNMENT REQUIRED:** Analyze subtask dependencies and assign wave numbers
+  - Wave 1: Subtasks with no dependencies (can run in parallel)
+  - Wave 2+: Subtasks depending on earlier wave outputs
+  - Subtasks touching the SAME files MUST be in different waves
+  - Include wave number in subtask Metadata section
 """) + """
 </constraints>
 
 <downstream_consumer>
-Output consumed by /gsd:execute-task
+Output consumed by /gsd:execute-task (supports parallel wave execution)
 Subtasks must include:
 - Clear objective
-- Files to modify/create
+- **Metadata section** with wave number, dependencies, and type
+- Files to modify/create (used for file-overlap safety checks)
 - Specific actions
 - Verification criteria
 - Done criteria
+
+**Wave metadata format in subtask description:**
+```
+## Metadata
+**Wave:** {number}
+**Depends On:** {subtask titles or "None"}
+**Type:** auto
+```
+
+execute-task uses wave metadata to:
+- Group subtasks into parallel execution waves
+- Detect file overlaps and prevent conflicts
+- Orchestrate commits in correct order
 </downstream_consumer>
 
 <output_format>
 1. Update plan page """ + PLAN_PAGE_ID + """ with:
    - Objective
    - Must-haves (observable truths)
-   - Subtasks with details
+   - Wave structure table
+   - Subtasks with details (including Metadata section)
    - Success criteria
 
 2. Create MTask subtasks with:
@@ -358,7 +379,7 @@ Subtasks must include:
    - workspace: """ + workspace_id + """
    - task_list: """ + phase_id + """
    - title: descriptive subtask name
-   - description: Editor.js format with action/verify/done
+   - description: Editor.js format with Metadata/Files/Action/Verify/Done sections
 
 3. Create checklist items on parent task for acceptance criteria
 
@@ -366,12 +387,21 @@ Return structured result with:
 ## PLANNING COMPLETE
 
 **Subtasks Created:** N
+**Waves:** W
 **Pages Updated:** plan page ID
 
+### Wave Structure
+| Wave | Subtasks | Parallel |
+|------|----------|----------|
+| 1 | Subtask 1, Subtask 2 | Yes |
+| 2 | Subtask 3 | No |
+
 ### Subtasks
-| # | Title | ID |
-|---|-------|-----|
-| 1 | ... | ... |
+| # | Title | Wave | ID |
+|---|-------|------|----|
+| 1 | ... | 1 | ... |
+| 2 | ... | 1 | ... |
+| 3 | ... | 2 | ... |
 
 ### Next Steps
 /gsd:execute-task """ + TASK_IDENTIFIER + """

@@ -1,5 +1,9 @@
 <purpose>
 Execute a task and create the outcome summary page in Mosic.
+
+**Supports two execution modes:**
+- **Normal mode** (default): Execute all subtasks of a task, commit each, create summary
+- **Subtask mode** (`**Execution Mode:** subtask`): Execute ONE specific subtask, defer commits to orchestrator. Used when `/gsd:execute-task` runs subtasks in parallel waves.
 </purpose>
 
 <mosic_only>
@@ -193,12 +197,35 @@ This IS the execution instructions. Follow it exactly.
 3. **Task context** (`task_context_content`): Task-specific notes if any.
 </step>
 
+<step name="detect_execution_mode">
+**Check if running in subtask mode:**
+
+```javascript
+// Subtask mode is indicated by the orchestrator prompt
+subtask_mode = prompt.includes("**Execution Mode:** subtask")
+commit_deferred = prompt.includes("**Commit Mode:** deferred")
+
+if (subtask_mode) {
+  // Execute ONLY the single specified subtask
+  // DO NOT commit — record modified files for orchestrator
+  // DO NOT create summary page
+  // DO NOT mark tasks complete
+  // Return structured SUBTASK COMPLETE/FAILED result
+}
+```
+
+</step>
+
 <step name="execute">
-Execute each subtask in the plan. **Deviations are normal** - handle them automatically using embedded rules.
+Execute subtask(s) in the plan. **Deviations are normal** - handle them automatically using embedded rules.
+
+**If subtask mode:** Execute ONLY the single specified subtask, then skip to returning results. Do NOT iterate over other subtasks.
+
+**If normal mode:** Execute all subtasks sequentially as below.
 
 1. Read the @context files listed in the plan
 
-2. For each subtask:
+2. For each subtask (or the single subtask in subtask mode):
 
    **If `type="auto"`:**
 
@@ -212,9 +239,11 @@ Execute each subtask in the plan. **Deviations are normal** - handle them automa
    - Continue implementing, applying rules as needed
    - Run the verification
    - Confirm done criteria met
-   - **Commit the subtask** (see `<task_commit>` below)
-   - Track subtask completion and commit hash for summary
-   - Continue to next subtask
+   - **If normal mode:** Commit the subtask (see `<task_commit>` below)
+   - **If subtask mode:** Record modified files via `git status --short` (NO commit)
+   - Track subtask completion for summary/return
+   - **If normal mode:** Continue to next subtask
+   - **If subtask mode:** Skip to structured return
 
    **If `type="checkpoint:*"`:**
 
@@ -224,9 +253,9 @@ Execute each subtask in the plan. **Deviations are normal** - handle them automa
    - Verify if possible
    - Only after user confirmation: continue to next subtask
 
-3. Run overall verification checks from verification section
-4. Confirm all success criteria met
-5. Document all deviations in summary
+3. **If normal mode:** Run overall verification checks from verification section
+4. **If normal mode:** Confirm all success criteria met
+5. Document all deviations in summary/return
 </step>
 
 <authentication_gates>
@@ -270,7 +299,9 @@ See ~/.claude/get-shit-done/references/deviation-rules.md for full details.
 <task_commit>
 ## Task Commit Protocol
 
-After each subtask completes (verification passed, done criteria met), commit immediately:
+**If subtask mode:** Skip this entire protocol. Instead, run `git status --short` to record modified files and include them in your SUBTASK COMPLETE return. The orchestrator handles all git operations.
+
+**If normal mode:** After each subtask completes (verification passed, done criteria met), commit immediately:
 
 **1. Identify modified files:**
 ```bash
@@ -352,7 +383,55 @@ DURATION_MIN=$(( DURATION_SEC / 60 ))
 
 </step>
 
+<step name="subtask_mode_return">
+**If in subtask mode, return structured result and STOP here. Skip all remaining steps.**
+
+```markdown
+## SUBTASK COMPLETE
+
+**Subtask:** {subtask.identifier} - {subtask.title}
+**Status:** passed | failed | partial
+**Duration:** {time}
+
+### Files Modified
+{Run `git status --short` and list modified files}
+- path/to/file1.ts
+- path/to/file2.ts
+
+### Verification Results
+{What was verified and how}
+
+### Deviations
+{Any deviations from plan, or "None"}
+
+### Issues
+{Any issues encountered, or "None"}
+```
+
+**If subtask failed:**
+```markdown
+## SUBTASK FAILED
+
+**Subtask:** {subtask.identifier} - {subtask.title}
+**Status:** failed
+**Reason:** {why it failed}
+
+### Partial Work
+- {what was completed}
+
+### Files Modified (may need rollback)
+- path/to/file.ts
+
+### Recommendation
+{retry | skip | abort_wave}
+```
+
+**CRITICAL: After returning, DO NOT execute create_summary_page, mark_task_complete, update_config, or offer_next steps.**
+</step>
+
 <step name="create_summary_page">
+**Normal mode only. Skip this step in subtask mode.**
+
 **Create summary page in Mosic linked to task:**
 
 ```javascript
@@ -431,6 +510,8 @@ mosic_batch_add_tags_to_document("M Page", summary_page.name, [
 </step>
 
 <step name="mark_task_complete">
+**Normal mode only. Skip this step in subtask mode.**
+
 **Mark task complete in Mosic:**
 
 ```javascript
@@ -489,6 +570,8 @@ mosic_create_document("M Comment", {
 </step>
 
 <step name="update_config">
+**Normal mode only. Skip this step in subtask mode.**
+
 **Update config.json with summary page ID:**
 
 ```javascript
@@ -525,6 +608,8 @@ Summary: https://mosic.pro/app/page/[summary_page.name]
 </process>
 
 <success_criteria>
+
+**Normal mode:**
 - [ ] Mosic context loaded (task, plan page, context)
 - [ ] All subtasks executed
 - [ ] All verifications pass
@@ -533,4 +618,14 @@ Summary: https://mosic.pro/app/page/[summary_page.name]
 - [ ] Completion comment added to task
 - [ ] config.json updated with page ID
 - [ ] User knows next step
+
+**Subtask mode:**
+- [ ] Mosic context loaded (task, plan page, context)
+- [ ] Single specified subtask executed
+- [ ] Subtask verification passes
+- [ ] Modified files recorded (no git add/commit)
+- [ ] Structured SUBTASK COMPLETE or SUBTASK FAILED returned to orchestrator
+- [ ] No summary page created (orchestrator handles)
+- [ ] No task marked complete (orchestrator handles)
+
 </success_criteria>
