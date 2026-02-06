@@ -20,6 +20,27 @@ Content structure for comprehensive ecosystem research documentation in Mosic.
 **Domain:** [primary technology/problem domain]
 **Confidence:** [HIGH/MEDIUM/LOW]
 
+## User Constraints (from Context Page)
+
+**CRITICAL:** If a Context page exists from /gsd:discuss-phase, copy locked decisions here verbatim. These MUST be honored by the planner.
+
+### Locked Decisions
+[Copy from Context page `## Implementation Decisions` section - these are NON-NEGOTIABLE]
+- [Decision 1]
+- [Decision 2]
+
+### Claude's Discretion
+[Copy from Context page - areas where researcher/planner can choose]
+- [Area 1]
+- [Area 2]
+
+### Deferred Ideas (OUT OF SCOPE)
+[Copy from Context page `## Deferred Ideas` - do NOT research or plan these]
+- [Deferred 1]
+- [Deferred 2]
+
+**If no Context page exists:** "No user constraints — all decisions at Claude's discretion"
+
 ## Summary
 
 [2-3 paragraph executive summary]
@@ -214,6 +235,12 @@ Things that couldn't be fully resolved:
 - Before planning phases in niche/complex domains
 - When Claude's training data is likely stale or sparse
 - When "how do experts do this" matters more than "which library"
+
+**User constraints (FIRST section):**
+- Copy verbatim from Context page — do not paraphrase
+- Locked decisions are non-negotiable for the planner
+- Deferred ideas must NOT appear in research findings
+- If no Context page exists, state "No user constraints"
 
 **Content quality:**
 - Standard stack: Specific versions, not just names
