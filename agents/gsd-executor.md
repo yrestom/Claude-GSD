@@ -679,12 +679,14 @@ summary_page = mosic_create_entity_page("MTask", plan_task_id, {
   relation_type: "Related"
 })
 
-# Tag the summary
+# Tag the summary (structural + topic tags)
+phase_topic_titles = config.mosic.tags.phase_topic_tags["phase-{N}"] or []
+phase_topic_ids = [config.mosic.tags.topic_tags[t] for t in phase_topic_titles if t in config.mosic.tags.topic_tags]
 mosic_batch_add_tags_to_document("M Page", summary_page.name, [
   tag_ids["gsd-managed"],
   tag_ids["summary"],
   tag_ids["phase-{N}"]
-])
+] + phase_topic_ids)
 ```
 
 **Summary content structure:**

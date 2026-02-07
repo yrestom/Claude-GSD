@@ -29,7 +29,9 @@ Configuration options for Mosic MCP integration. GSD operates Mosic-first with n
     "uat": null,
     "quick": null,
     "fix": null,
-    "phase_tags": {}
+    "phase_tags": {},
+    "topic_tags": {},
+    "phase_topic_tags": {}
   },
   "page_types": {
     "overview": "Document",
@@ -364,6 +366,65 @@ if (existingTags.length > 0) {
 ```
 
 </tag_infrastructure>
+
+<topic_tags>
+
+## Topic Tags
+
+Topic tags describe *what an entity is about*, not its workflow stage. They enable cross-entity search by subject matter.
+
+**Convention:**
+- Lowercase, hyphenated: `user-auth`, `email`, `real-time`
+- Minimum 3 characters
+- 2-4 tags per entity
+- Specific over generic: `oauth` > `authentication` > `security`
+- Color: `#14B8A6` (teal) — visually distinct from structural tags
+
+**Derivation Points:**
+- **Phase research** (primary): Derived from Domain field, Standard Stack, phase title. Stored in `topic_tags` and `phase_topic_tags`.
+- **Project research**: Derived from Recommended Stack table.
+- **Quick/debug tasks**: Derived from task title/description.
+
+**Propagation Rules:**
+- Phase topic tags propagate to all downstream entities: plan tasks, plan pages, summary pages, verification pages.
+- Downstream agents load tags from `config.mosic.tags.phase_topic_tags["phase-{N}"]` and resolve IDs from `config.mosic.tags.topic_tags`.
+- No re-derivation needed — tags flow through config.
+
+**Config Schema:**
+```javascript
+"topic_tags": {
+  "email": "uuid-1",        // tag title → tag UUID
+  "notifications": "uuid-2"
+},
+"phase_topic_tags": {
+  "phase-01": ["email", "notifications"],  // phase → tag titles
+  "phase-02": ["react", "authentication"]
+}
+```
+
+**Idempotent Creation:**
+```javascript
+// Same pattern as structural tags: search → create if missing → cache
+existing = mosic_search_tags({ workspace_id, query: tag_title })
+if (exact_match):
+  tag_id = existing.name
+else:
+  tag = mosic_create_document("M Tag", {
+    workspace_id, title: tag_title,
+    color: "#14B8A6",
+    description: "Topic: " + tag_title
+  })
+  tag_id = tag.name
+config.mosic.tags.topic_tags[tag_title] = tag_id
+```
+
+**Tags to Avoid (already covered by structural tags):**
+- `frontend`, `backend`, `research`, `plan`, `fix`, `quick`
+
+**Tags to Avoid (too generic):**
+- `code`, `feature`, `implementation`, `system`, `module`, `update`
+
+</topic_tags>
 
 <initialization>
 

@@ -317,6 +317,30 @@ mosic_update_document("M Page", research_page_id, {
 Use Editor.js format for content.
 </step>
 
+<step name="apply_topic_tags">
+Apply topic tags to the research page:
+
+```
+# 1. Load phase topic tags from config
+phase_key = "phase-{N}"  # from task's phase context
+phase_topic_titles = config.mosic.tags.phase_topic_tags[phase_key] or []
+phase_topic_ids = [config.mosic.tags.topic_tags[t] for t in phase_topic_titles]
+
+# 2. Optionally derive 1-2 task-specific tags if the task introduces
+#    a clearly distinct subtopic not covered by phase tags
+#    (e.g., phase is "Email System" but task is about "IMAP parsing" → add "imap")
+#    Use same search-then-create pattern as phase researcher:
+#    - mosic_search_tags → exact match → use existing OR create new
+#    - Color: #14B8A6, Description: "Topic: {tag_title}"
+#    - Store in config.mosic.tags.topic_tags[tag_title] = tag_id
+
+# 3. Apply all topic tags to research page
+all_topic_ids = phase_topic_ids + any_task_specific_ids
+IF all_topic_ids:
+  mosic_batch_add_tags_to_document("M Page", research_page_id, all_topic_ids)
+```
+</step>
+
 <step name="return_result">
 Return structured result:
 
@@ -354,6 +378,8 @@ Task research is complete when:
 - [ ] Gotchas identified
 - [ ] Dependencies listed
 - [ ] Research page updated in Mosic
+- [ ] Phase topic tags applied to research page
+- [ ] Task-specific topic tags derived if applicable
 - [ ] Structured return provided to orchestrator
 
 Research quality indicators:

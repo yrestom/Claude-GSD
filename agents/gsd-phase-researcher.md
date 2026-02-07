@@ -621,12 +621,60 @@ research_page = mosic_create_entity_page("MTask List", phase_task_list_id, {
   relation_type: "Related"
 })
 
-# Tag the page
+# Tag the page (structural tags first, topic tags added in Step 5b)
 mosic_batch_add_tags_to_document("M Page", research_page.name, [
   tag_ids["gsd-managed"],
   tag_ids["research"],
   tag_ids["phase-{N}"]
 ])
+```
+
+## Step 5b: Derive and Apply Topic Tags
+
+After creating the research page, derive 2-4 topic tags that describe what this phase is *about*:
+
+```
+# 1. Analyze your research output for topic signals
+#    - Domain field (e.g., "Email Notifications" → email, notifications)
+#    - Standard Stack libraries (e.g., "React Query" → react-query)
+#    - Phase title keywords
+#    Pick 2-4 tags that answer: "If someone searched this tag, should this entity show up?"
+
+# 2. Tag quality rules:
+#    - Lowercase, hyphenated: "user-auth" not "User Auth"
+#    - Minimum 3 characters
+#    - Specific > generic: "oauth" > "authentication" > "security"
+#    - Skip terms already covered by structural tags: frontend, backend, research, plan, fix, quick
+#    - Skip generic terms: code, feature, implementation, system, module, update
+#    - Include key technologies from Standard Stack: react, jwt, websocket, etc.
+
+# 3. For each derived tag, search-then-create (idempotent):
+derived_topic_tags = ["{tag_1}", "{tag_2}", ...]  # 2-4 tags
+topic_tag_ids = []
+
+FOR each tag_title in derived_topic_tags:
+  existing = mosic_search_tags({ workspace_id, query: tag_title })
+  exact_match = existing.find(t => t.title == tag_title)
+
+  IF exact_match:
+    tag_id = exact_match.name
+  ELSE:
+    new_tag = mosic_create_document("M Tag", {
+      workspace_id: workspace_id,
+      title: tag_title,
+      color: "#14B8A6",
+      description: "Topic: " + tag_title
+    })
+    tag_id = new_tag.name
+
+  topic_tag_ids.push(tag_id)
+  config.mosic.tags.topic_tags[tag_title] = tag_id
+
+# 4. Store phase-to-topic mapping
+config.mosic.tags.phase_topic_tags["phase-{N}"] = derived_topic_tags
+
+# 5. Apply topic tags to research page
+mosic_batch_add_tags_to_document("M Page", research_page.name, topic_tag_ids)
 ```
 
 ## Step 6: Update config.json
@@ -747,6 +795,8 @@ Research is complete when:
 - [ ] Research M Page created in Mosic
 - [ ] Page linked to phase task list
 - [ ] Page tagged appropriately
+- [ ] 2-4 topic tags derived and applied to research page
+- [ ] Topic tags stored in config.mosic.tags.topic_tags and phase_topic_tags
 - [ ] config.json updated with page ID
 - [ ] Structured return provided to orchestrator
 

@@ -199,11 +199,29 @@ debug_task = mosic_create_document("MTask", {
 
 DEBUG_TASK_ID = debug_task.name
 
-# Tag the task
-mosic_batch_add_tags_to_document("MTask", DEBUG_TASK_ID, [
-  config.mosic.tags.gsd_managed,
-  config.mosic.tags.fix
-])
+# Tag the task (structural tags)
+task_tags = [config.mosic.tags.gsd_managed, config.mosic.tags.fix]
+
+# Derive 1-2 topic tags from the error/issue description
+# Analyze $ARGUMENTS for key topics (e.g., "login form crashes" → login, forms)
+# Use lowercase, hyphenated format. Skip generic terms.
+# Search-then-create pattern:
+derived_tags = ["{topic_1}", ...]  # 1-2 tags from issue description
+FOR each tag_title in derived_tags:
+  existing = mosic_search_tags({ workspace_id: WORKSPACE_ID, query: tag_title })
+  exact_match = existing.find(t => t.title == tag_title)
+  IF exact_match:
+    tag_id = exact_match.name
+  ELSE:
+    new_tag = mosic_create_document("M Tag", {
+      workspace_id: WORKSPACE_ID, title: tag_title,
+      color: "#14B8A6", description: "Topic: " + tag_title
+    })
+    tag_id = new_tag.name
+  task_tags.push(tag_id)
+  config.mosic.tags.topic_tags[tag_title] = tag_id
+
+mosic_batch_add_tags_to_document("MTask", DEBUG_TASK_ID, task_tags)
 
 DISPLAY:
 """

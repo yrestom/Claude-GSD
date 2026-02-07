@@ -184,6 +184,31 @@ mosic_batch_add_tags_to_document("M Page", stack_page.name, [
   tag_ids["gsd-managed"],
   tag_ids["research"]
 ])
+
+# Derive topic tags from Recommended Stack table
+# Pick 2-4 key technology names (e.g., "react", "postgresql", "redis")
+# Use lowercase, hyphenated format. Skip generic terms (frontend, backend).
+# Search-then-create pattern (idempotent):
+derived_tags = ["{tech_1}", "{tech_2}", ...]  # 2-4 from stack
+topic_tag_ids = []
+
+FOR each tag_title in derived_tags:
+  existing = mosic_search_tags({ workspace_id, query: tag_title })
+  exact_match = existing.find(t => t.title == tag_title)
+  IF exact_match:
+    tag_id = exact_match.name
+  ELSE:
+    new_tag = mosic_create_document("M Tag", {
+      workspace_id, title: tag_title,
+      color: "#14B8A6",
+      description: "Topic: " + tag_title
+    })
+    tag_id = new_tag.name
+  topic_tag_ids.push(tag_id)
+  config.mosic.tags.topic_tags[tag_title] = tag_id
+
+# Apply topic tags to stack page
+mosic_batch_add_tags_to_document("M Page", stack_page.name, topic_tag_ids)
 ```
 
 **Stack Page Content:**
@@ -528,6 +553,8 @@ Research is complete when:
 - [ ] Source hierarchy followed
 - [ ] All findings have confidence levels
 - [ ] Research pages created in Mosic
+- [ ] Topic tags derived from stack research and applied to stack page
+- [ ] Topic tags stored in config.mosic.tags.topic_tags
 - [ ] Summary page includes roadmap implications
 - [ ] config.json updated with page IDs
 - [ ] Structured return provided to orchestrator

@@ -394,6 +394,11 @@ IF task.tdd == true:
     { title: "REFACTOR: Code cleaned up, tests green", done: false }
   ]
 
+# Add topic tags from phase research
+phase_topic_titles = config.mosic.tags.phase_topic_tags["phase-{N}"] or []
+phase_topic_ids = [config.mosic.tags.topic_tags[t] for t in phase_topic_titles if t in config.mosic.tags.topic_tags]
+tags = tags + phase_topic_ids
+
 mosic_batch_add_tags_to_document("MTask", plan_task.name, tags)
 ```
 
@@ -410,12 +415,9 @@ plan_page = mosic_create_entity_page("MTask", plan_task.name, {
   relation_type: "Related"
 })
 
-# Tag the page
-mosic_batch_add_tags_to_document("M Page", plan_page.name, [
-  tag_ids["gsd-managed"],
-  tag_ids["plan"],
-  tag_ids["phase-{N}"]
-])
+# Tag the page (structural + topic tags)
+page_tags = [tag_ids["gsd-managed"], tag_ids["plan"], tag_ids["phase-{N}"]] + phase_topic_ids
+mosic_batch_add_tags_to_document("M Page", plan_page.name, page_tags)
 ```
 
 ### Step 3: Create Dependencies Between Plans

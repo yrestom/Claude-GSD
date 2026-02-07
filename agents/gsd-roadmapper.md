@@ -242,11 +242,15 @@ task_list = mosic_create_document("MTask List", {
   status: "Open"
 })
 
-# Tag the task list
-mosic_batch_add_tags_to_document("MTask List", task_list.name, [
-  tag_ids["gsd-managed"],
-  phase_tag.name
-])
+# Tag the task list (structural tags)
+task_list_tags = [tag_ids["gsd-managed"], phase_tag.name]
+
+# If topic tags exist for this phase (e.g., from prior research), apply them
+phase_topic_titles = (config.mosic.tags.phase_topic_tags || {})["phase-{N}"] or []
+phase_topic_ids = [config.mosic.tags.topic_tags[t] for t in phase_topic_titles if t in (config.mosic.tags.topic_tags || {})]
+task_list_tags = task_list_tags + phase_topic_ids
+
+mosic_batch_add_tags_to_document("MTask List", task_list.name, task_list_tags)
 
 # Store in config.json
 config.mosic.task_lists["phase-{N}"] = task_list.name

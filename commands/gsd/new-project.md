@@ -317,6 +317,10 @@ FOR each required_tag:
     tag_ids[required_tag.title] = new_tag.name
 
 # Store tag IDs in config.json mosic.tags section
+
+# Initialize topic tag registries (populated during research)
+config.mosic.tags.topic_tags = {}
+config.mosic.tags.phase_topic_tags = {}
 ```
 
 ### Step 5: Create MProject
@@ -543,7 +547,9 @@ questions: [
       "uat": "[tag_id]",
       "quick": "[tag_id]",
       "fix": "[tag_id]",
-      "phase_tags": {}
+      "phase_tags": {},
+      "topic_tags": {},
+      "phase_topic_tags": {}
     },
     "last_sync": "[ISO timestamp]"
   }

@@ -68,7 +68,9 @@
       "task_standard": "task-standard",
       "task_full": "task-full",
       "task_context": "task-context",
-      "task_research": "task-research"
+      "task_research": "task-research",
+      "topic_tags": {},
+      "phase_topic_tags": {}
     },
     "page_types": {
       "overview": "Document",
