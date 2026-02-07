@@ -35,14 +35,17 @@ To spawn agents in parallel within a wave, you MUST make all Task() calls in a S
 
 **ORCHESTRATOR-MANAGED COMMITS (when parallel):**
 Parallel agents do NOT commit. They return lists of modified files. The orchestrator commits sequentially after each wave completes to prevent git conflicts.
+
+**ANTI-PATTERN — DO NOT DO THIS:**
+Never override the parallelization formula with subjective reasoning like "tight coupling", "better coherence", or "subtasks reference each other." The planner already accounted for dependencies when assigning waves. If config says parallel and the formula evaluates to true, you MUST run parallel. The ONLY exception is file-overlap detected in step 4.
 </critical_requirements>
 
 <objective>
 Execute a planned task by implementing all subtasks with atomic commits.
 
-**Supports two execution strategies:**
-- **Sequential** (default when few subtasks or parallelization disabled): Single agent executes all subtasks with per-subtask commits
-- **Parallel** (when enabled and conditions met): Independent subtasks in the same wave run in parallel via separate agents, orchestrator handles commits
+**Supports two execution strategies (determined by formula in step 5 — never by subjective judgment):**
+- **Parallel** (when config enables it AND conditions met): Independent subtasks in the same wave run in parallel via separate agents, orchestrator handles commits. This is the PREFERRED mode when the formula evaluates to true.
+- **Sequential** (when few subtasks OR parallelization disabled): Single agent executes all subtasks with per-subtask commits
 
 **Key differences from execute-phase:**
 - Executes subtasks of a single parent task (not plan tasks)
@@ -56,8 +59,8 @@ Execute a planned task by implementing all subtasks with atomic commits.
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/references/ui-brand.md
-@~/.claude/get-shit-done/workflows/execute-plan.md
+@./.claude/get-shit-done/references/ui-brand.md
+@./.claude/get-shit-done/workflows/execute-plan.md
 </execution_context>
 
 <context>
@@ -88,10 +91,20 @@ project_id = config.mosic.project_id
 model_profile = config.model_profile or "balanced"
 
 # Load parallelization config
-PARALLEL_ENABLED = config.parallelization?.enabled ?? true
-PARALLEL_TASK_LEVEL = config.parallelization?.task_level ?? true
-MAX_CONCURRENT = config.parallelization?.max_concurrent_agents ?? 3
-MIN_SUBTASKS_FOR_PARALLEL = config.parallelization?.min_subtasks_for_parallel ?? 3
+# IMPORTANT: config.parallelization can be:
+#   - boolean `true`/`false` → treat as simple on/off (all sub-fields use defaults)
+#   - object { enabled, task_level, max_concurrent_agents, ... } → read sub-fields
+# When it's a boolean `true`, ALL parallel conditions are met with defaults.
+IF typeof(config.parallelization) == "boolean":
+  PARALLEL_ENABLED = config.parallelization
+  PARALLEL_TASK_LEVEL = config.parallelization
+  MAX_CONCURRENT = 3
+  MIN_SUBTASKS_FOR_PARALLEL = 3
+ELSE:
+  PARALLEL_ENABLED = config.parallelization?.enabled ?? true
+  PARALLEL_TASK_LEVEL = config.parallelization?.task_level ?? true
+  MAX_CONCURRENT = config.parallelization?.max_concurrent_agents ?? 3
+  MIN_SUBTASKS_FOR_PARALLEL = config.parallelization?.min_subtasks_for_parallel ?? 3
 
 Model lookup:
 | Agent | quality | balanced | budget |
@@ -267,8 +280,16 @@ FOR each wave_num in waves:
 
 ## 5. Determine Execution Strategy
 
+**CRITICAL: This is a DETERMINISTIC formula. Do NOT override it with subjective reasoning.**
+The planner already considered coupling, dependencies, and complexity when designing waves.
+File-overlap safety (step 4) is the ONLY valid reason to break parallel within a wave.
+If the formula says `use_parallel = true`, you MUST use parallel wave execution (step 6b).
+
 ```
 # Determine if parallel execution is appropriate
+# IMPORTANT: When config.parallelization is a simple boolean `true`, treat as fully enabled:
+#   PARALLEL_ENABLED = true, PARALLEL_TASK_LEVEL = true
+# Only read sub-fields when config.parallelization is an object.
 use_parallel = PARALLEL_ENABLED
   AND PARALLEL_TASK_LEVEL
   AND incomplete_subtasks.length >= MIN_SUBTASKS_FOR_PARALLEL
@@ -374,7 +395,7 @@ Implement all subtasks and then ask for user permission to create commits. Creat
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/execute-plan.md
+@./.claude/get-shit-done/workflows/execute-plan.md
 </execution_context>
 
 <context>
@@ -442,7 +463,7 @@ After execution, return:
 """
 
   Task(
-    prompt="First, read ~/.claude/agents/gsd-executor.md for your role.\n\n" + executor_prompt,
+    prompt="First, read ./.claude/agents/gsd-executor.md for your role.\n\n" + executor_prompt,
     subagent_type="general-purpose",
     model="{executor_model}",
     description="Execute: " + TASK_TITLE.substring(0, 30)
@@ -477,7 +498,7 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
 **Commit Mode:** deferred
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/execute-plan.md
+@./.claude/get-shit-done/workflows/execute-plan.md
 </execution_context>
 
 <context>
@@ -540,7 +561,7 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/execute-plan.md
+@./.claude/get-shit-done/workflows/execute-plan.md
 </execution_context>
 
 <context>
@@ -570,13 +591,13 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
         # Make ALL Task() calls in ONE response message
         # Example for batch of 2:
         Task(
-          prompt="First, read ~/.claude/agents/gsd-executor.md for your role.\n\n" + batch[0].prompt,
+          prompt="First, read ./.claude/agents/gsd-executor.md for your role.\n\n" + batch[0].prompt,
           subagent_type="general-purpose",
           model="{executor_model}",
           description="Subtask: " + batch[0].st.identifier
         )
         Task(
-          prompt="First, read ~/.claude/agents/gsd-executor.md for your role.\n\n" + batch[1].prompt,
+          prompt="First, read ./.claude/agents/gsd-executor.md for your role.\n\n" + batch[1].prompt,
           subagent_type="general-purpose",
           model="{executor_model}",
           description="Subtask: " + batch[1].st.identifier
@@ -587,7 +608,7 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
     ELSE:
       # Single subtask — run it alone in normal mode
       Task(
-        prompt="First, read ~/.claude/agents/gsd-executor.md for your role.\n\n" + wave_prompts[0].prompt,
+        prompt="First, read ./.claude/agents/gsd-executor.md for your role.\n\n" + wave_prompts[0].prompt,
         subagent_type="general-purpose",
         model="{executor_model}",
         description="Subtask: " + wave_prompts[0].st.identifier
