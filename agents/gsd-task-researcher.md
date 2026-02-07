@@ -216,6 +216,16 @@ Update the research M Page with:
 
 **Usage notes:** {when/how to use this pattern}
 
+## Design System Inventory (if `<frontend_design_context>` present)
+
+*Include this section only when your prompt contains a `<frontend_design_context>` block.*
+
+**UI Framework:** {detected from package.json}
+**Component Library:** {detected from imports}
+**Styling:** {detected from config}
+**Available Components:** {list relevant to this task}
+**Existing Patterns:** {layout, form, nav patterns found}
+
 ## Gotchas
 
 ### {Gotcha 1}

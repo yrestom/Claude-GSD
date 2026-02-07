@@ -8,6 +8,8 @@ allowed-tools:
   - Bash
   - Glob
   - Grep
+  - WebSearch
+  - WebFetch
   - AskUserQuestion
   - ToolSearch
   - mcp__mosic_pro__*
@@ -125,18 +127,96 @@ IF config.mosic.pages.requirements:
   }).content
 ```
 
+## 4.5 Quick Discovery (Automated)
+
+Display:
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ GSD ► QUICK DISCOVERY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Scanning codebase and researching best practices...
+```
+
+### 4.5.1 Codebase Scan
+Scan the project codebase for context relevant to this phase:
+- Existing patterns and architecture (Glob + Grep key directories)
+- Frameworks and libraries in use (package.json, requirements.txt, Gemfile, etc.)
+- Existing components/modules related to this phase's goal
+- Code conventions and project structure
+
+### 4.5.2 Quick Web Research
+Search for best practices related to the phase goal:
+- "[phase goal keywords] best practices [current year]"
+- "[detected framework] [phase goal] patterns"
+- 2-3 targeted searches max (keep it quick, ~2-3 minutes)
+
+### 4.5.3 Present Discovery
+
+Display:
+```
+-------------------------------------------
+ Discovery Findings
+-------------------------------------------
+
+**Existing Codebase:**
+- Framework: {detected framework and version}
+- Relevant existing code: {what already exists}
+- Patterns in use: {architecture patterns found}
+
+**Best Practices Found:**
+- {Key finding 1 from web research}
+- {Key finding 2}
+
+**Technical Considerations:**
+- {What's possible given the current stack}
+- {What would require new dependencies}
+```
+
+This context informs the gray areas in step 5.
+
+### 4.5.4 Frontend Detection
+
+```
+# Detect frontend work from phase goal and requirements
+frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
+  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
+  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
+  "UX", "interface", "widget"]
+
+phase_text = (phase.title + " " + phase.description + " " + requirements_content).toLowerCase()
+is_frontend = frontend_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
+
+IF is_frontend:
+  # Load frontend design reference
+  frontend_design_ref = Read("~/.claude/get-shit-done/references/frontend-design.md")
+  # Use "For Discussers" section to generate UI-specific gray areas
+  Display: "Frontend work detected — UI-specific gray areas will be included."
+```
+
 ## 5. Analyze Phase and Generate Gray Areas
 
-**Domain-aware analysis:**
+**Discovery-informed analysis:**
+
+Using discovery findings from step 4.5 AND the phase goal, generate gray areas.
 
 Gray areas depend on what's being built. Analyze the phase goal:
-- Something users SEE -> layout, density, interactions, states
-- Something users CALL -> responses, errors, auth, versioning
-- Something users RUN -> output format, flags, modes, error handling
+- Something users SEE -> layout, density, interactions — informed by existing UI patterns found
+- Something users CALL -> responses, errors, auth — informed by existing API patterns found
+- Something users RUN -> output format, flags, modes — informed by existing CLI patterns found
 - Something users READ -> structure, tone, depth, flow
 - Something being ORGANIZED -> criteria, grouping, naming, exceptions
 
+Gray areas should reference discovery findings when relevant:
+- "Your project uses {framework}, so the key decision is..."
+- "You already have {pattern}, so the question is whether to extend it or..."
+- "Based on {best practice found}, consider..."
+
 Generate 3-4 **phase-specific** gray areas, not generic categories.
+
+**If `is_frontend` is true:** Additionally generate UI-specific gray areas from the
+frontend-design reference (layout approach, interaction patterns, state visualization,
+responsive behavior, component reuse). Present ASCII wireframe options for layout decisions.
 
 ```
 Display:
@@ -346,7 +426,8 @@ IF mosic sync fails:
 
 <success_criteria>
 - [ ] Phase loaded from Mosic
-- [ ] Gray areas identified through intelligent analysis
+- [ ] Quick discovery completed (codebase scan + web research)
+- [ ] Gray areas identified through discovery-informed analysis
 - [ ] User chose which areas to discuss
 - [ ] Each selected area explored until satisfied
 - [ ] Scope creep redirected to deferred ideas

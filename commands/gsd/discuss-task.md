@@ -8,6 +8,8 @@ allowed-tools:
   - Bash
   - Glob
   - Grep
+  - WebSearch
+  - WebFetch
   - AskUserQuestion
   - ToolSearch
   - mcp__mosic_pro__*
@@ -165,16 +167,87 @@ IF existing_context_page:
     EXIT
 ```
 
+## 4.5 Quick Discovery (Automated)
+
+Display:
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ GSD ► QUICK DISCOVERY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Scanning codebase for task-relevant context...
+```
+
+### 4.5.1 Focused Codebase Scan
+Scan the project codebase for context relevant to THIS task:
+- Files and directories related to the task description (Glob + Grep)
+- Existing implementations of similar patterns
+- Related components, APIs, or modules
+- Import patterns and dependencies
+
+### 4.5.2 Quick Web Research (1-2 searches)
+Search for best practices specific to the task:
+- "[task keywords] best practices [framework] [current year]"
+- 1-2 targeted searches max (task scope is smaller)
+
+### 4.5.3 Present Discovery
+
+Display:
+```
+-------------------------------------------
+ Discovery Findings
+-------------------------------------------
+
+**Relevant Code Found:**
+- {Existing files/patterns related to task}
+- {What already exists that this task connects to}
+
+**Best Practices:**
+- {Key finding from web research}
+
+**Considerations:**
+- {What the existing code suggests about implementation}
+```
+
+This context informs the gray areas in step 5.
+
+### 4.5.4 Frontend Detection
+
+```
+# Detect frontend work from task description
+frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
+  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
+  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
+  "UX", "interface", "widget"]
+
+task_text = (task.title + " " + task.description).toLowerCase()
+is_frontend = frontend_keywords.some(kw => task_text.includes(kw.toLowerCase()))
+
+IF is_frontend:
+  # Load frontend design reference
+  frontend_design_ref = Read("~/.claude/get-shit-done/references/frontend-design.md")
+  Display: "Frontend work detected — UI-specific gray areas will be included."
+```
+
 ## 5. Analyze Task and Generate Gray Areas
 
 ```
-# Analyze task description for gray areas
+# Use discovery findings + task description to generate gray areas
 task_desc_lower = task.description.toLowerCase()
 
-# Domain-aware analysis based on task type
+# Discovery-informed analysis based on task type and codebase findings
 gray_areas = []
 
-# Common gray areas for all tasks
+# Gray areas informed by discovery (existing patterns, best practices)
+
+# If frontend detected, add UI-specific gray areas from frontend-design reference
+IF is_frontend:
+  gray_areas.push({
+    id: "F",
+    name: "UI Design & Layout",
+    reason: "Frontend work detected — layout, interactions, and visual design need decisions"
+  })
+
 IF task_desc_lower.includes("ui") or task_desc_lower.includes("form") or task_desc_lower.includes("component"):
   gray_areas.push({
     id: "A",
@@ -454,7 +527,8 @@ These suggestions are out of scope for this task:
 <success_criteria>
 - [ ] Task loaded from Mosic
 - [ ] Phase context loaded for inherited decisions
-- [ ] Gray areas identified through intelligent analysis
+- [ ] Quick discovery completed (codebase scan + web research)
+- [ ] Gray areas identified through discovery-informed analysis
 - [ ] User chose which areas to discuss
 - [ ] Each selected area explored until satisfied
 - [ ] Scope creep redirected to deferred ideas

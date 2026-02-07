@@ -346,6 +346,50 @@ IF --gaps:
     }).content
 ```
 
+## 7.5 Extract Phase Requirements
+
+```
+# Parse traceability table from requirements page to find requirements mapped to this phase
+phase_requirements = []
+
+IF requirements_content:
+  # Look for traceability table (format: | REQ-ID | Description | Phase | Status |)
+  traceability_section = extract_section(requirements_content, "## Traceability")
+  IF NOT traceability_section:
+    traceability_section = extract_section(requirements_content, "## Requirements Traceability")
+
+  IF traceability_section:
+    FOR each row in parse_markdown_table(traceability_section):
+      IF row.phase matches current phase (PHASE or phase.title):
+        # Get full description from requirements section
+        req_description = find_requirement_description(requirements_content, row.requirement_id)
+        phase_requirements.append({
+          id: row.requirement_id,
+          description: req_description or row.description
+        })
+
+  # Fallback: Extract from phase overview's ## Requirements section
+  IF not phase_requirements:
+    phase_overview_page = phase_pages.find(p => p.title contains "Overview")
+    IF phase_overview_page:
+      overview_content = mosic_get_page(phase_overview_page.name, {
+        content_format: "markdown"
+      }).content
+      requirements_section = extract_section(overview_content, "## Requirements")
+      IF requirements_section:
+        FOR each line matching "- {REQ-ID}: {description}" or "- **{REQ-ID}**: {description}":
+          phase_requirements.append({ id: REQ-ID, description: description })
+
+# Build XML block for planner
+phase_requirements_xml = "<phase_requirements>\n"
+IF phase_requirements:
+  FOR each req in phase_requirements:
+    phase_requirements_xml += '<requirement id="' + req.id + '">' + req.description + '</requirement>\n'
+ELSE:
+  phase_requirements_xml += "No explicit requirements found for this phase. Derive from phase goal.\n"
+phase_requirements_xml += "</phase_requirements>"
+```
+
 ## 8. Spawn gsd-planner Agent
 
 Display:
@@ -401,8 +445,25 @@ planner_decisions_xml = """
 """
 ```
 
+# Frontend detection
+frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
+  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
+  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
+  "UX", "interface", "widget"]
+
+phase_text = (phase.title + " " + (phase.description or "") + " " + (requirements_content or "")).toLowerCase()
+is_frontend = frontend_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
+
+frontend_design_xml = ""
+IF is_frontend:
+  frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
+  frontend_design_xml = extract_section(frontend_design_content, "## For Planners")
+  Display: "Frontend work detected — design specification will be required in plans."
+
 ```markdown
 """ + planner_decisions_xml + """
+
+""" + phase_requirements_xml + """
 
 <planning_context>
 
@@ -435,6 +496,10 @@ Plans must include:
 - Verification criteria
 - must_haves for goal-backward verification
 </downstream_consumer>
+
+<frontend_design_context>
+""" + frontend_design_xml + """
+</frontend_design_context>
 
 <output_format>
 Return plans as structured markdown with:
@@ -613,10 +678,12 @@ FOR each plan_task in created_plan_tasks:
 **Phase:** {PHASE}
 **Phase Goal:** {phase.description}
 
+""" + phase_requirements_xml + """
+
 **Plans to verify:**
 {plans_content}
 
-**Requirements (if exists):**
+**Requirements (full page, if exists):**
 {requirements_content}
 
 </verification_context>

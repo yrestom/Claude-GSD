@@ -131,6 +131,31 @@ IF context_page:
     content_format: "markdown"
   }).content
 
+# Extract phase requirements for executor awareness
+requirements_content = ""
+IF config.mosic.pages.requirements:
+  requirements_content = mosic_get_page(config.mosic.pages.requirements, {
+    content_format: "markdown"
+  }).content
+
+phase_requirements = []
+IF requirements_content:
+  traceability_section = extract_section(requirements_content, "## Traceability")
+  IF NOT traceability_section:
+    traceability_section = extract_section(requirements_content, "## Requirements Traceability")
+  IF traceability_section:
+    FOR each row in parse_markdown_table(traceability_section):
+      IF row.phase matches current phase:
+        phase_requirements.append({ id: row.requirement_id, description: row.description })
+
+phase_requirements_xml = "<phase_requirements>\n"
+IF phase_requirements:
+  FOR each req in phase_requirements:
+    phase_requirements_xml += '<requirement id="' + req.id + '">' + req.description + '</requirement>\n'
+ELSE:
+  phase_requirements_xml += "No explicit requirements found for this phase.\n"
+phase_requirements_xml += "</phase_requirements>"
+
 # Filter to plan tasks only
 plan_tasks = phase.tasks.filter(t => t.title starts with "Plan")
 
@@ -314,12 +339,28 @@ executor_decisions_xml = """
 ```
 
 ```
+# Frontend detection for executor context
+frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
+  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
+  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
+  "UX", "interface", "widget"]
+
+phase_text = (phase.title + " " + (phase.description or "")).toLowerCase()
+is_frontend = frontend_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
+
+frontend_design_xml = ""
+IF is_frontend:
+  frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
+  frontend_design_xml = extract_section(frontend_design_content, "## For Executors")
+
 # Step 1: Build prompts for all plans in wave
 executor_prompts = []
 
 FOR each plan in wave:
   prompt = """
 """ + executor_decisions_xml + """
+
+""" + phase_requirements_xml + """
 
 <objective>
 Execute task {plan.task.identifier}: {plan.task.title}
@@ -346,6 +387,10 @@ Commit each subtask atomically. Create summary page. Update task status.
 **Phase Context & Decisions (if available):**
 {context_content or "No context page for this phase."}
 </context>
+
+<frontend_design_context>
+""" + frontend_design_xml + """
+</frontend_design_context>
 
 <success_criteria>
 - [ ] All subtasks executed

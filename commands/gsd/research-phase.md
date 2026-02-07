@@ -185,6 +185,22 @@ user_decisions_xml = """
 """
 ```
 
+# Frontend detection
+frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
+  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
+  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
+  "UX", "interface", "widget"]
+
+phase_text = (phase.title + " " + (phase.description or "") + " " + requirements_content).toLowerCase()
+is_frontend = frontend_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
+
+frontend_design_xml = ""
+IF is_frontend:
+  frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
+  # Extract "For Researchers" section
+  frontend_design_xml = extract_section(frontend_design_content, "## For Researchers")
+  Display: "Frontend work detected — design system inventory will be included in research."
+
 Research modes: ecosystem (default), feasibility, implementation, comparison.
 
 ```markdown
@@ -242,6 +258,10 @@ Before declaring complete, verify:
 - [ ] Confidence levels assigned honestly
 - [ ] Section names match what plan-phase expects
 </quality_gate>
+
+<frontend_design_context>
+""" + frontend_design_xml + """
+</frontend_design_context>
 
 <output>
 Return research findings as structured markdown. The orchestrator will create the Mosic page.

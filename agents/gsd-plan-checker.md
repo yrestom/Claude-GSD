@@ -109,10 +109,16 @@ roadmap = mosic_get_page(roadmap_page_id, {
 **Question:** Does every phase requirement have task(s) addressing it?
 
 **Process:**
-1. Extract phase goal from roadmap page in Mosic
-2. Decompose goal into requirements (what must be true)
-3. For each requirement, find covering task(s) in plan pages
-4. Flag requirements with no coverage
+1. Parse `<phase_requirements>` XML from verification context (if present)
+2. If `<phase_requirements>` contains explicit REQ-IDs:
+   a. For each requirement, find covering task(s) in plan pages
+   b. Verify task action is specific enough to satisfy the requirement
+   c. Check plan's `## Requirements Coverage` table matches actual task coverage
+   d. Flag requirements with no coverage or insufficient coverage
+3. If `<phase_requirements>` is empty or says "No explicit requirements":
+   a. Fall back to goal decomposition (extract phase goal, decompose into requirements)
+   b. For each derived requirement, find covering task(s) in plan pages
+   c. Flag requirements with no coverage
 
 **Red flags:**
 - Requirement has zero tasks addressing it

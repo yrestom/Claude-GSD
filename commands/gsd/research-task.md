@@ -278,6 +278,21 @@ user_decisions_xml = """
 """
 ```
 
+# Frontend detection
+frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
+  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
+  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
+  "UX", "interface", "widget"]
+
+task_text = (task.title + " " + (task.description or "")).toLowerCase()
+is_frontend = frontend_keywords.some(kw => task_text.includes(kw.toLowerCase()))
+
+frontend_design_xml = ""
+IF is_frontend:
+  frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
+  frontend_design_xml = extract_section(frontend_design_content, "## For Researchers")
+  Display: "Frontend work detected — design system inventory will be included in research."
+
 ```
 researcher_prompt = """
 """ + user_decisions_xml + """
@@ -304,6 +319,10 @@ Answer: "What do I need to know to PLAN this task well?"
 """ + (phase_research_content or "No phase research available. May need to research more broadly.") + """
 
 </context>
+
+<frontend_design_context>
+""" + frontend_design_xml + """
+</frontend_design_context>
 
 <constraints>
 - Focus on this SPECIFIC task, not general phase topics

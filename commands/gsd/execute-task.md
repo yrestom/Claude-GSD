@@ -398,9 +398,36 @@ executor_decisions_xml = """
 </user_decisions>
 """
 
+# Extract task-specific requirements from plan page coverage table
+task_requirements_xml = "<phase_requirements>\n"
+IF plan_content:
+  coverage_section = extract_section(plan_content, "## Requirements Coverage")
+  IF coverage_section:
+    FOR each row in parse_markdown_table(coverage_section):
+      task_requirements_xml += '<requirement id="' + row.req_id + '">' + row.description + '</requirement>\n'
+IF task_requirements_xml == "<phase_requirements>\n":
+  task_requirements_xml += "No explicit requirements extracted from plan.\n"
+task_requirements_xml += "</phase_requirements>"
+
+# Frontend detection
+frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
+  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
+  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
+  "UX", "interface", "widget"]
+
+task_text = (TASK_TITLE + " " + (task.description or "") + " " + (plan_content or "")).toLowerCase()
+is_frontend = frontend_keywords.some(kw => task_text.includes(kw.toLowerCase()))
+
+frontend_design_xml = ""
+IF is_frontend:
+  frontend_design_content = Read("./.claude/get-shit-done/references/frontend-design.md")
+  frontend_design_xml = extract_section(frontend_design_content, "## For Executors")
+
 # Shared context for all prompts (decisions XML placed BEFORE general context)
 shared_context = """
 """ + executor_decisions_xml + """
+
+""" + task_requirements_xml + """
 
 **Parent Task:** """ + TASK_IDENTIFIER + """ - """ + TASK_TITLE + """
 **Parent Task ID:** """ + TASK_ID + """
@@ -421,6 +448,9 @@ shared_context = """
 
 **Task-Specific Research (if available):**
 """ + (task_research_content or "No task-specific research.") + """
+
+**Frontend Design Context (if applicable):**
+""" + (frontend_design_xml or "Not a frontend task.") + """
 """
 
 all_commits = []        # Collected across all waves

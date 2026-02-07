@@ -629,6 +629,16 @@ The plan page content follows this structure (in markdown, converted to Editor.j
 |------|----|-----|---------|
 | {source} | {target} | {connection} | {regex} |
 
+## Requirements Coverage
+
+| REQ-ID | Description | Covered By | Status |
+|--------|-------------|------------|--------|
+| {req-id} | {description} | Task {N} | Covered |
+
+Coverage: {N}/{N} (100%)
+
+*Omit this section if no `<phase_requirements>` were provided.*
+
 ## Tasks
 
 ### Task 1: {Name}
@@ -642,6 +652,30 @@ The plan page content follows this structure (in markdown, converted to Editor.j
 
 ### Task 2: {Name}
 ...
+
+## Design Specification (if `<frontend_design_context>` present)
+
+*Include this section only when frontend work is detected.*
+
+### Component Skeleton
+```jsx
+// Simplified JSX showing component structure
+{component skeleton}
+```
+
+### Aesthetic Direction
+- **Font:** {explicit choice from project theme}
+- **Colors:** {from project design tokens}
+- **Spacing:** {compact/airy/balanced}
+- **Border radius:** {specific value}
+- **Animation:** {minimal/expressive/none}
+- **Anti-patterns:** {what to avoid}
+
+### State Specifications
+- **Loading:** {skeleton/spinner/progressive}
+- **Empty:** {illustration/message/CTA}
+- **Error:** {inline/toast/page-level}
+- **Success:** {toast/redirect/inline}
 
 ## Verification
 
@@ -663,12 +697,16 @@ The plan page content follows this structure (in markdown, converted to Editor.j
 
 ## The Process
 
+**Step 0: Load Phase Requirements**
+Parse `<phase_requirements>` XML if present. Each requirement becomes an observable truth in Step 2.
+
 **Step 1: State the Goal**
 Take the phase goal from roadmap page. This is the outcome, not the work.
 
 **Step 2: Derive Observable Truths**
 Ask: "What must be TRUE for this goal to be achieved?"
-List 3-7 truths from the USER's perspective.
+- Every phase requirement from Step 0 becomes an observable truth
+- Add additional truths from goal analysis (3-7 total from USER's perspective)
 
 **Step 3: Derive Required Artifacts**
 For each truth, ask: "What must EXIST for this to be true?"
@@ -821,7 +859,9 @@ Load all context from Mosic (see mosic_context_loading section).
 From Mosic context:
 - Get phase from task list
 - Get phase goal from phase overview page
-- Get requirements mapped to this phase
+- Parse `<phase_requirements>` XML from prompt into requirements_list
+- Extract REQ-IDs and descriptions
+- If no XML provided, extract from requirements page traceability table
 </step>
 
 <step name="mandatory_discovery">
@@ -863,6 +903,35 @@ Compute wave numbers before creating plans.
 
 <step name="group_into_plans">
 Group tasks into plans (2-3 tasks each).
+</step>
+
+<step name="verify_requirements_coverage">
+Build requirements coverage map:
+
+FOR each requirement in requirements_list (from phase_requirements XML):
+  Find task(s) that address this requirement
+  IF no task covers it:
+    Flag as GAP — must add task or extend existing task
+
+IF any GAPs exist:
+  Add tasks to cover gaps before finalizing plans
+  Repeat until coverage = 100%
+
+Include `## Requirements Coverage` table in EACH plan page:
+
+```markdown
+## Requirements Coverage
+
+| REQ-ID | Description | Covered By | Status |
+|--------|-------------|------------|--------|
+| AUTH-01 | Sign up with email | Task 1.1 | Covered |
+| AUTH-02 | Email verification | Task 1.2 | Covered |
+
+Coverage: N/N (100%) ✓
+```
+
+**Do not finalize plans if any requirement is unmapped.**
+If `<phase_requirements>` is empty or says "No explicit requirements", skip this step and derive requirements from the phase goal as before.
 </step>
 
 <step name="derive_must_haves">

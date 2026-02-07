@@ -396,6 +396,20 @@ Problems that look simple but have existing solutions:
 
 **Key insight:** {why custom solutions are worse in this domain}
 
+## Design System Inventory (if `<frontend_design_context>` present)
+
+*Include this section only when your prompt contains a `<frontend_design_context>` block.*
+
+**UI Framework:** {React 18 / Vue 3 / etc. — detected from package.json}
+**Component Library:** {shadcn/ui / MUI / none / custom — detected from imports}
+**Styling:** {Tailwind CSS v3 / CSS Modules / etc. — detected from config files}
+**Available Components:** {list components relevant to this phase}
+**Existing Patterns:**
+- Layout: {what layout patterns exist in the codebase}
+- Forms: {what form patterns exist}
+- Navigation: {what nav patterns exist}
+**Design Tokens:** {colors, spacing, typography from theme config if found}
+
 ## Common Pitfalls
 
 ### Pitfall 1: {Name}

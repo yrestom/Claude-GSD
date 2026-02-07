@@ -273,6 +273,47 @@ ELSE:
   Display: "Created plan page: https://mosic.pro/app/page/" + PLAN_PAGE_ID
 ```
 
+## 5.5 Extract Task Requirements
+
+```
+# Extract requirements mapped to this task from parent plan page's coverage table
+task_requirements = []
+
+# Check if parent plan page exists with Requirements Coverage section
+IF plan_content:
+  coverage_section = extract_section(plan_content, "## Requirements Coverage")
+  IF coverage_section:
+    FOR each row in parse_markdown_table(coverage_section):
+      IF row.covered_by contains TASK_IDENTIFIER or row.covered_by contains TASK_TITLE:
+        task_requirements.append({
+          id: row.req_id,
+          description: row.description
+        })
+
+# Fallback: Extract from full requirements page traceability
+IF not task_requirements AND requirements_content:
+  traceability_section = extract_section(requirements_content, "## Traceability")
+  IF NOT traceability_section:
+    traceability_section = extract_section(requirements_content, "## Requirements Traceability")
+  IF traceability_section:
+    phase_name = phase.title
+    FOR each row in parse_markdown_table(traceability_section):
+      IF row.phase matches phase_name:
+        task_requirements.append({
+          id: row.requirement_id,
+          description: row.description or find_requirement_description(requirements_content, row.requirement_id)
+        })
+
+# Build XML
+task_requirements_xml = "<phase_requirements>\n"
+IF task_requirements:
+  FOR each req in task_requirements:
+    task_requirements_xml += '<requirement id="' + req.id + '">' + req.description + '</requirement>\n'
+ELSE:
+  task_requirements_xml += "No explicit requirements found for this task. Derive from task description.\n"
+task_requirements_xml += "</phase_requirements>"
+```
+
 ## 6. Spawn gsd-planner Agent
 
 Display:
@@ -346,8 +387,25 @@ planner_decisions_xml = """
 </user_decisions>
 """
 
+# Frontend detection
+frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
+  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
+  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
+  "UX", "interface", "widget"]
+
+task_text = (TASK_TITLE + " " + (task.description or "")).toLowerCase()
+is_frontend = frontend_keywords.some(kw => task_text.includes(kw.toLowerCase()))
+
+frontend_design_xml = ""
+IF is_frontend:
+  frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
+  frontend_design_xml = extract_section(frontend_design_content, "## For Planners")
+  Display: "Frontend work detected — design specification will be required in plans."
+
 planner_prompt = """
 """ + planner_decisions_xml + """
+
+""" + task_requirements_xml + """
 
 <planning_context>
 
@@ -425,6 +483,10 @@ execute-task uses wave metadata to:
 - Detect file overlaps and prevent conflicts
 - Orchestrate commits in correct order
 </downstream_consumer>
+
+<frontend_design_context>
+""" + frontend_design_xml + """
+</frontend_design_context>
 
 <output_format>
 1. Update plan page """ + PLAN_PAGE_ID + """ with:
@@ -547,6 +609,8 @@ IF workflow_plan_check and not skip_verify:
 <verification_context>
 
 **Task:** """ + TASK_IDENTIFIER + """ - """ + TASK_TITLE + """
+
+""" + task_requirements_xml + """
 
 **Plan Page Content:**
 """ + plan_content + """
