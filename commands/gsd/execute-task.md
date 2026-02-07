@@ -423,6 +423,16 @@ IF is_frontend:
   frontend_design_content = Read("./.claude/get-shit-done/references/frontend-design.md")
   frontend_design_xml = extract_section(frontend_design_content, "## For Executors")
 
+# TDD execution context for subtasks
+tdd_execution_xml = ""
+IF plan_content contains 'tdd="true"' OR task has "tdd" tag:
+  tdd_reference = Read("~/.claude/get-shit-done/references/tdd.md")
+  tdd_execution_sections = extract_sections(tdd_reference, [
+    "<execution_flow>", "<test_quality>", "<commit_patterns>", "<mosic_test_tracking>"
+  ])
+  tdd_execution_xml = "<tdd_execution_context>\n" + tdd_execution_sections + "\n</tdd_execution_context>"
+  Display: "TDD task detected — executor will use RED-GREEN-REFACTOR cycle."
+
 # Shared context for all prompts (decisions XML placed BEFORE general context)
 shared_context = """
 """ + executor_decisions_xml + """
@@ -451,6 +461,9 @@ shared_context = """
 
 **Frontend Design Context (if applicable):**
 """ + (frontend_design_xml or "Not a frontend task.") + """
+
+**TDD Execution Context (if applicable):**
+""" + (tdd_execution_xml or "Not a TDD task.") + """
 """
 
 all_commits = []        # Collected across all waves

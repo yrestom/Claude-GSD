@@ -218,6 +218,24 @@ Generate 3-4 **phase-specific** gray areas, not generic categories.
 frontend-design reference (layout approach, interaction patterns, state visualization,
 responsive behavior, component reuse). Present ASCII wireframe options for layout decisions.
 
+**TDD gray area detection:**
+```
+tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
+  "state machine", "workflow engine", "utility", "helper", "business logic",
+  "data model", "schema", "converter", "calculator", "formatter", "serializer",
+  "authentication", "authorization"]
+
+tdd_config = config.workflow?.tdd ?? "auto"
+is_tdd_eligible = tdd_config !== false AND
+  tdd_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
+
+IF is_tdd_eligible:
+  # Add "Testing Approach" as an additional gray area
+  # "This phase involves testable logic. Should we use Test-Driven Development
+  #  (write tests first, then implement) for the core logic tasks?"
+  # Options: TDD for core logic / Standard (implement then test) / Mix (let planner decide)
+```
+
 ```
 Display:
 

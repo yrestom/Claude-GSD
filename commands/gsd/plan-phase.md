@@ -460,10 +460,49 @@ IF is_frontend:
   frontend_design_xml = extract_section(frontend_design_content, "## For Planners")
   Display: "Frontend work detected — design specification will be required in plans."
 
+# TDD detection and context loading
+tdd_config = config.workflow?.tdd ?? "auto"
+tdd_context_xml = ""
+
+IF tdd_config !== false:
+  tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
+    "state machine", "workflow engine", "utility", "helper", "business logic",
+    "data model", "schema", "converter", "calculator", "formatter", "serializer",
+    "authentication", "authorization"]
+
+  is_tdd_eligible = tdd_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
+
+  # Check context page for user TDD decision (from discuss-phase)
+  tdd_user_decision = extract_decision(context_content, "Testing Approach")
+    # Returns: "tdd" | "standard" | "planner_decides" | null
+
+  # Determine effective TDD mode
+  IF tdd_user_decision == "tdd":
+    tdd_mode = "prefer"
+  ELIF tdd_user_decision == "standard":
+    tdd_mode = "disabled"
+  ELIF tdd_config == true:
+    tdd_mode = "prefer"
+  ELIF tdd_config == "auto" AND is_tdd_eligible:
+    tdd_mode = "auto"
+  ELSE:
+    tdd_mode = "disabled"
+
+  IF tdd_mode != "disabled":
+    tdd_reference = Read("~/.claude/get-shit-done/references/tdd.md")
+    tdd_context_xml = """
+<tdd_context mode=\"""" + tdd_mode + """\">
+""" + tdd_reference + """
+</tdd_context>
+"""
+    Display: "TDD mode: " + tdd_mode + " — planner will use TDD heuristic for task classification."
+
 ```markdown
 """ + planner_decisions_xml + """
 
 """ + phase_requirements_xml + """
+
+""" + tdd_context_xml + """
 
 <planning_context>
 

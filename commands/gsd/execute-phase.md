@@ -353,6 +353,19 @@ IF is_frontend:
   frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
   frontend_design_xml = extract_section(frontend_design_content, "## For Executors")
 
+# TDD execution context
+tdd_execution_xml = ""
+has_tdd_tasks = tasks.some(t => t.description_contains('tdd="true"') or t.tags.includes("tdd"))
+
+IF has_tdd_tasks:
+  tdd_reference = Read("~/.claude/get-shit-done/references/tdd.md")
+  # Extract only execution-relevant sections
+  tdd_execution_sections = extract_sections(tdd_reference, [
+    "<execution_flow>", "<test_quality>", "<commit_patterns>", "<mosic_test_tracking>"
+  ])
+  tdd_execution_xml = "<tdd_execution_context>\n" + tdd_execution_sections + "\n</tdd_execution_context>"
+  Display: "TDD tasks detected — executor will use RED-GREEN-REFACTOR cycle."
+
 # Step 1: Build prompts for all plans in wave
 executor_prompts = []
 
@@ -391,6 +404,8 @@ Commit each subtask atomically. Create summary page. Update task status.
 <frontend_design_context>
 """ + frontend_design_xml + """
 </frontend_design_context>
+
+""" + tdd_execution_xml + """
 
 <success_criteria>
 - [ ] All subtasks executed

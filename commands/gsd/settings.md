@@ -100,6 +100,16 @@ AskUserQuestion([
       { label: "Yes", description: "Verify must-haves after execution" },
       { label: "No", description: "Skip post-execution verification" }
     ]
+  },
+  {
+    question: "Test-Driven Development mode?",
+    header: "TDD",
+    multiSelect: false,
+    options: [
+      { label: "Auto (Recommended)", description: "Planner decides per-task using TDD heuristic" },
+      { label: "Prefer TDD", description: "Use TDD for all eligible tasks (skips UI/config)" },
+      { label: "Off", description: "Never use TDD, all tasks use standard execution" }
+    ]
   }
 ])
 ```
@@ -391,7 +401,8 @@ Merge all settings into existing config.json:
   "workflow": {
     "research": true/false,
     "plan_check": true/false,
-    "verifier": true/false
+    "verifier": true/false,
+    "tdd": "auto" | true | false
   },
   "mosic": {
     ...existing_mosic_config,
@@ -426,6 +437,7 @@ Display summary of all changes made:
 | Plan Researcher      | {On/Off} |
 | Plan Checker         | {On/Off} |
 | Execution Verifier   | {On/Off} |
+| TDD Mode             | {Auto/Prefer TDD/Off} |
 
 ## Mosic Integration
 

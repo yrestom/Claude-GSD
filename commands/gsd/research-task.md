@@ -293,6 +293,37 @@ IF is_frontend:
   frontend_design_xml = extract_section(frontend_design_content, "## For Researchers")
   Display: "Frontend work detected — design system inventory will be included in research."
 
+# TDD detection for task research
+tdd_config = config.workflow?.tdd ?? "auto"
+tdd_research_xml = ""
+
+IF tdd_config !== false:
+  tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
+    "state machine", "workflow engine", "utility", "helper", "business logic",
+    "data model", "schema", "converter", "calculator", "formatter", "serializer",
+    "authentication", "authorization"]
+
+  task_text_lower = (task.title + " " + (task.description or "")).toLowerCase()
+  is_tdd_eligible = tdd_keywords.some(kw => task_text_lower.includes(kw.toLowerCase()))
+
+  # Check task context page AND phase context page for TDD decision
+  tdd_user_decision = extract_decision(task_context_content, "Testing Approach")
+  IF not tdd_user_decision:
+    tdd_user_decision = extract_decision(phase_context_content, "Testing Approach")
+
+  IF tdd_user_decision == "tdd" OR tdd_config == true OR (tdd_config == "auto" AND is_tdd_eligible):
+    tdd_research_xml = """
+<tdd_research_context>
+This task may use TDD. Research should include:
+- Test framework and runner already in project
+- Test patterns for this specific task domain
+- Examples of test-first approach for similar functionality
+- Test infrastructure gaps or setup needed
+Include a "## Testing Approach" section in research output.
+</tdd_research_context>
+"""
+    Display: "TDD-eligible task — researcher will include testing approach."
+
 ```
 researcher_prompt = """
 """ + user_decisions_xml + """
@@ -323,6 +354,8 @@ Answer: "What do I need to know to PLAN this task well?"
 <frontend_design_context>
 """ + frontend_design_xml + """
 </frontend_design_context>
+
+""" + tdd_research_xml + """
 
 <constraints>
 - Focus on this SPECIFIC task, not general phase topics

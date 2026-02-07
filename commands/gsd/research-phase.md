@@ -201,6 +201,34 @@ IF is_frontend:
   frontend_design_xml = extract_section(frontend_design_content, "## For Researchers")
   Display: "Frontend work detected — design system inventory will be included in research."
 
+# TDD detection for research
+tdd_config = config.workflow?.tdd ?? "auto"
+tdd_research_xml = ""
+
+IF tdd_config !== false:
+  tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
+    "state machine", "workflow engine", "utility", "helper", "business logic",
+    "data model", "schema", "converter", "calculator", "formatter", "serializer",
+    "authentication", "authorization"]
+
+  is_tdd_eligible = tdd_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
+
+  # Check context page for user TDD decision
+  tdd_user_decision = extract_decision(context_content, "Testing Approach")
+
+  IF tdd_user_decision == "tdd" OR tdd_config == true OR (tdd_config == "auto" AND is_tdd_eligible):
+    tdd_research_xml = """
+<tdd_research_context>
+This phase may use TDD. Research should include:
+- Identify existing test framework and configuration in the project
+- Recommend test patterns specific to this domain (unit, integration, contract)
+- Find examples of test-first patterns for the core logic
+- Note any testing gotchas or infrastructure gaps
+Include a "## Testing Approach" section in research output.
+</tdd_research_context>
+"""
+    Display: "TDD-eligible phase — researcher will include testing approach."
+
 Research modes: ecosystem (default), feasibility, implementation, comparison.
 
 ```markdown
@@ -262,6 +290,8 @@ Before declaring complete, verify:
 <frontend_design_context>
 """ + frontend_design_xml + """
 </frontend_design_context>
+
+""" + tdd_research_xml + """
 
 <output>
 Return research findings as structured markdown. The orchestrator will create the Mosic page.

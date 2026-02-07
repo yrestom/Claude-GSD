@@ -233,6 +233,38 @@ FOR each task in completed_tasks:
       status: evidence.length > 0 ? "MET" : "NOT MET",
       evidence: evidence
     })
+
+  # TDD compliance check per task
+  task_tags = mosic_get_document_tags("MTask", task.name)
+  is_tdd_task = task_tags.some(t => t.tag == "tdd")
+
+  IF is_tdd_task:
+    # Verify TDD commit pattern for this task
+    task_commits = run_bash("git log --all --oneline --grep='" + task.identifier + "'")
+    has_test_commit = task_commits.some(c => c.includes("test("))
+    has_feat_commit = task_commits.some(c => c.includes("feat("))
+
+    task_traceability.push({
+      task_id: task.name,
+      task_title: task.title,
+      requirement: "TDD: test commit(s) before implementation commit(s)",
+      status: has_test_commit ? "MET" : "NOT MET",
+      evidence: has_test_commit ? "Found test() commits" : "No test() commits found"
+    })
+
+    # Check RED/GREEN/REFACTOR subtask completion
+    subtasks = mosic_search_tasks({ parent_task: task.name })
+    tdd_phases = subtasks.filter(s => s.title.match(/^(RED|GREEN|REFACTOR):/))
+    incomplete_phases = tdd_phases.filter(s => !s.done)
+
+    IF incomplete_phases.length > 0:
+      task_traceability.push({
+        task_id: task.name,
+        task_title: task.title,
+        requirement: "TDD phases complete: " + tdd_phases.map(p => p.title).join(", "),
+        status: "NOT MET",
+        evidence: "Incomplete: " + incomplete_phases.map(p => p.title).join(", ")
+      })
 ```
 
 ### 3c. Code Quality Analysis
@@ -247,6 +279,22 @@ FOR each file in changed_files:
   # STUB DETECTION: TODO/FIXME, empty bodies, hardcoded values
 
   # Each finding: { severity: "Critical"|"Warning"|"Note", file, line, issue, fix, related_task }
+
+# Add TDD compliance to code quality report
+tdd_tasks = completed_tasks.filter(t => {
+  tags = mosic_get_document_tags("MTask", t.name)
+  return tags.some(tag => tag.tag == "tdd")
+})
+
+IF tdd_tasks.length > 0:
+  auto_findings.push({
+    severity: "Note",
+    file: "n/a",
+    line: "n/a",
+    issue: "TDD Compliance: " + tdd_tasks.length + " TDD tasks in phase",
+    fix: "Verify test-first commit ordering and RED/GREEN/REFACTOR phase completion",
+    related_task: tdd_tasks.map(t => t.identifier).join(", ")
+  })
 ```
 
 ### 3d. Present Phase Code Review

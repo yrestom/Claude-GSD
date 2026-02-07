@@ -184,6 +184,13 @@ IF phase_context_page:
   }).content
   phase_locked = extract_list_items(phase_context_content, "Implementation Decisions")
   locked_decisions = locked_decisions.concat(phase_locked)
+
+# Detect TDD task
+task_tags = mosic_get_document_tags("MTask", TASK_ID)
+is_tdd_task = task_tags.some(t => t.tag == "tdd")
+
+IF is_tdd_task:
+  Display: "TDD task detected — will verify test-first commit pattern."
 ```
 
 Display:
@@ -235,6 +242,35 @@ FOR each subtask in subtasks.results:
     type: "subtask_completion",
     done: subtask.done
   })
+
+# TDD-specific criteria (if TDD task)
+IF is_tdd_task:
+  # TDD commit pattern criterion
+  verification_criteria.push({
+    source: "tdd_pattern",
+    criterion: "TDD RED-GREEN-REFACTOR: test commit(s) exist before implementation commit(s)",
+    type: "tdd_compliance"
+  })
+
+  # TDD phase completion criteria (from RED/GREEN/REFACTOR subtasks)
+  FOR each subtask in subtasks.results:
+    IF subtask.title.match(/^(RED|GREEN|REFACTOR):/):
+      verification_criteria.push({
+        source: "tdd_phase",
+        criterion: subtask.title + " — " + (subtask.done ? "completed" : "INCOMPLETE"),
+        type: "tdd_phase_completion",
+        done: subtask.done
+      })
+
+  # TDD checklist items (RED/GREEN/REFACTOR checkboxes on parent task)
+  FOR each checklist in checklists:
+    IF checklist.title.match(/^(RED|GREEN|REFACTOR)/):
+      verification_criteria.push({
+        source: "tdd_checklist",
+        criterion: "TDD phase: " + checklist.title,
+        type: "tdd_phase",
+        done: checklist.done
+      })
 
 IF verification_criteria.length == 0:
   # Generate basic criteria from task title
@@ -317,6 +353,24 @@ FOR each criterion in verification_criteria:
     status: status,
     evidence: evidence
   })
+
+# TDD-specific traceability
+IF is_tdd_task:
+  # Verify commit ordering: test() commits should precede feat() commits
+  task_commits_list = run_bash("git log --all --oneline --format='%s' --grep='" + TASK_IDENTIFIER + "'")
+
+  test_commits = task_commits_list.filter(c => c.startsWith("test("))
+  feat_commits = task_commits_list.filter(c => c.startsWith("feat("))
+  refactor_commits = task_commits_list.filter(c => c.startsWith("refactor("))
+
+  traceability.push({
+    criterion: { criterion: "TDD: test() commits exist", type: "tdd_compliance" },
+    status: test_commits.length > 0 ? "MET" : "NOT MET",
+    evidence: test_commits.length > 0 ? test_commits.join(", ") : "No test() commits found"
+  })
+
+  IF not test_commits.length > 0:
+    Display: "WARNING: TDD task has no test() commits. TDD may not have been followed."
 
 # Flag files changed but not traced to any criterion
 unrequested = changed_files.filter(f =>

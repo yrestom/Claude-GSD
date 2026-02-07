@@ -53,6 +53,8 @@ The user provides a task title/description. You:
 - `--standard` (default): EXIT → `/gsd:plan-task` → `/gsd:execute-task`
 - `--full`: EXIT → `/gsd:discuss-task` → `/gsd:research-task` → `/gsd:plan-task` → `/gsd:execute-task` → `/gsd:verify-task`
 
+**TDD Mode:** Read `config.workflow.tdd` — if `true` (prefer TDD for eligible tasks) or `"auto"` (planner decides per task), display hint in workflow routing output.
+
 **Architecture:** Task created as MTask in current phase's task list. All documentation as M Pages linked to task. config.json tracks active task workflow.
 </objective>
 
@@ -336,6 +338,16 @@ Based on workflow level, display next steps and EXIT.
 
 **ALL workflows EXIT here. This command does NOT execute any work.**
 
+```
+# TDD hint for display
+tdd_config = config.workflow?.tdd ?? "auto"
+tdd_hint = ""
+IF tdd_config == true:
+  tdd_hint = "\n  TDD: Preferred — tests first for eligible tasks"
+ELIF tdd_config == "auto":
+  tdd_hint = "\n  TDD: Auto — planner decides per task"
+```
+
 ### Route A: Quick Workflow
 
 ```
@@ -382,6 +394,7 @@ IF workflow_level == "standard":
   -------------------------------------------
 
   Task: {TASK_IDENTIFIER} - {task_title}
+  """ + tdd_hint + """
 
   ---
 
@@ -416,6 +429,7 @@ IF workflow_level == "full":
   -------------------------------------------
 
   Task: {TASK_IDENTIFIER} - {task_title}
+  """ + tdd_hint + """
 
   This task will follow the complete GSD workflow:
 

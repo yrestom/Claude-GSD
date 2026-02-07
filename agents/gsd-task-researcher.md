@@ -226,6 +226,20 @@ Update the research M Page with:
 **Available Components:** {list relevant to this task}
 **Existing Patterns:** {layout, form, nav patterns found}
 
+## Testing Approach (if `<tdd_research_context>` present)
+
+*Include this section only when your prompt contains a `<tdd_research_context>` block.*
+
+**Test Framework:** {detected from project}
+**Test Location:** {where tests live}
+**Recommended Patterns:** {test patterns for this specific task}
+
+**TDD Suitability:** {Yes/No — can inputs/outputs be defined before implementation?}
+**Example Test:**
+```{language}
+{example failing test for this task's core behavior}
+```
+
 ## Gotchas
 
 ### {Gotcha 1}

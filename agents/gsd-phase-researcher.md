@@ -410,6 +410,36 @@ Problems that look simple but have existing solutions:
 - Navigation: {what nav patterns exist}
 **Design Tokens:** {colors, spacing, typography from theme config if found}
 
+## Testing Approach (if `<tdd_research_context>` present)
+
+*Include this section only when your prompt contains a `<tdd_research_context>` block.*
+
+**Test Framework:** {Jest / Vitest / pytest / PHPUnit / etc. — detected from project}
+**Test Runner:** {how tests are run — npm test, pytest, etc.}
+**Test Location:** {where tests live — __tests__/, tests/, spec/}
+**Existing Coverage:** {approximate — are there existing tests? how many?}
+
+**Recommended Test Patterns:**
+- {Pattern 1}: {when to use, example}
+- {Pattern 2}: {when to use, example}
+
+**TDD Suitability Assessment:**
+| Component | TDD Suitable? | Why |
+|-----------|--------------|-----|
+| {component} | Yes/No | {testable inputs/outputs vs UI/config} |
+
+**Test Infrastructure Gaps:**
+- {Any missing setup, fixtures, mocks needed}
+
+**Example Test-First Pattern:**
+```{language}
+// RED: Write failing test
+{example test for this domain}
+
+// GREEN: Minimal implementation
+{what the implementation looks like}
+```
+
 ## Common Pitfalls
 
 ### Pitfall 1: {Name}

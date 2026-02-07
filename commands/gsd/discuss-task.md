@@ -276,6 +276,23 @@ IF task_desc_lower.includes("data") or task_desc_lower.includes("store") or task
     reason: "How should data be stored, validated, and transformed?"
   })
 
+# TDD gray area detection
+tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
+  "state machine", "workflow engine", "utility", "helper", "business logic",
+  "data model", "schema", "converter", "calculator", "formatter", "serializer",
+  "authentication", "authorization"]
+
+tdd_config = config.workflow?.tdd ?? "auto"
+is_tdd_eligible = tdd_config !== false AND
+  tdd_keywords.some(kw => task_desc_lower.includes(kw.toLowerCase()))
+
+IF is_tdd_eligible:
+  gray_areas.push({
+    id: String.fromCharCode(65 + gray_areas.length),
+    name: "Testing Approach",
+    reason: "This task involves testable logic — TDD (write tests first) may improve quality"
+  })
+
 # Always include edge cases
 gray_areas.push({
   id: String.fromCharCode(65 + gray_areas.length),

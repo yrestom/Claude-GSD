@@ -284,9 +284,23 @@ Each task should take Claude **15-60 minutes** to execute.
 
 ## TDD Detection Heuristic
 
-**Heuristic:** Can you write `expect(fn(input)).toBe(output)` before writing `fn`?
-- Yes: Create a dedicated TDD plan for this feature
-- No: Standard task in standard plan
+**When `<tdd_context>` is present in prompt:**
+
+Evaluate EACH task against the TDD heuristic:
+- Can you write `expect(fn(input)).toBe(output)` before writing `fn`?
+- Does it have defined inputs/outputs? (API contract, data transformation, validation rules)
+- Is it business logic, not UI/config/glue?
+
+**If mode="prefer":** Default to tdd="true" for all eligible tasks. Skip only for UI/config/glue tasks.
+**If mode="auto":** Apply heuristic per-task. Mark with tdd="true" or tdd="false".
+
+**TDD task structure:**
+- Set type="tdd" in task metadata
+- Tag task with "tdd" in Mosic
+- Add checklist items: RED (failing test), GREEN (minimal implementation), REFACTOR (clean up)
+- Name subtasks: "RED: {test description}", "GREEN: {implementation}", "REFACTOR: {cleanup}"
+
+**When `<tdd_context>` is NOT present:** Skip TDD classification entirely (existing behavior).
 
 </task_breakdown>
 
@@ -366,11 +380,19 @@ plan_task = mosic_create_document("MTask", {
 })
 
 # Tag the task
-mosic_batch_add_tags_to_document("MTask", plan_task.name, [
-  tag_ids["gsd-managed"],
-  tag_ids["plan"],
-  tag_ids["phase-{N}"]
-])
+tags = [tag_ids["gsd-managed"], tag_ids["plan"], tag_ids["phase-{N}"]]
+
+# If TDD task (when <tdd_context> present and heuristic matched)
+IF task.tdd == true:
+  tags.push(tag_ids["tdd"] or "tdd")
+  # Add RED/GREEN/REFACTOR checklist items
+  plan_task.check_list = [
+    { title: "RED: Failing test written", done: false },
+    { title: "GREEN: Minimal implementation passes", done: false },
+    { title: "REFACTOR: Code cleaned up, tests green", done: false }
+  ]
+
+mosic_batch_add_tags_to_document("MTask", plan_task.name, tags)
 ```
 
 ### Step 2: Create M Page with Plan Details
