@@ -25,7 +25,9 @@ Content structure for capturing implementation decisions for a phase in Mosic.
 
 [Clear statement of what this phase delivers - the scope anchor. This comes from roadmap and is fixed. Discussion clarifies implementation within this boundary.]
 
-## Implementation Decisions
+## Decisions
+
+> **These exact section names (`## Decisions`, `## Claude's Discretion`, `## Deferred Ideas`) are parsed by downstream agents. Do not rename them.**
 
 ### [Area 1 that was discussed]
 - [Specific decision made]
@@ -37,7 +39,8 @@ Content structure for capturing implementation decisions for a phase in Mosic.
 ### [Area 3 that was discussed]
 - [Specific decision made]
 
-### Claude's Discretion
+## Claude's Discretion
+
 [Areas where user explicitly said "you decide" - Claude has flexibility here during planning/implementation]
 
 ## Specific Ideas
@@ -73,7 +76,7 @@ Content structure for capturing implementation decisions for a phase in Mosic.
 
 Display posts from followed users in a scrollable feed. Users can view posts and see engagement counts. Creating posts and interactions are separate phases.
 
-## Implementation Decisions
+## Decisions
 
 ### Layout style
 - Card-based layout, not timeline or list
@@ -89,7 +92,8 @@ Display posts from followed users in a scrollable feed. Users can view posts and
 - Friendly illustration + "Follow people to see posts here"
 - Suggest 3-5 accounts to follow based on interests
 
-### Claude's Discretion
+## Claude's Discretion
+
 - Loading skeleton design
 - Exact spacing and typography
 - Error state handling
@@ -121,7 +125,7 @@ Display posts from followed users in a scrollable feed. Users can view posts and
 
 CLI command to backup database to local file or S3. Supports full and incremental backups. Restore command is a separate phase.
 
-## Implementation Decisions
+## Decisions
 
 ### Output format
 - JSON for programmatic use, table format for humans
@@ -138,7 +142,8 @@ CLI command to backup database to local file or S3. Supports full and incrementa
 - --no-retry flag to fail fast
 - Partial backups are deleted on failure (no corrupt files)
 
-### Claude's Discretion
+## Claude's Discretion
+
 - Exact progress bar implementation
 - Compression algorithm choice
 - Temp file handling

@@ -207,7 +207,7 @@ ELSE:
 Display: "Research page: https://mosic.pro/app/page/" + RESEARCH_PAGE_ID
 ```
 
-## 6. Spawn Task Researcher Agent
+## 6. Extract Decisions and Spawn Task Researcher Agent
 
 Display:
 ```
@@ -218,8 +218,70 @@ Display:
 Investigating implementation approach...
 ```
 
+**Extract user decisions from context pages (task-level and phase-level):**
+```
+locked_decisions = ""
+deferred_ideas = ""
+discretion_areas = ""
+
+# Extract from task context page first
+IF task_context_content:
+  locked_decisions = extract_section(task_context_content, "## Decisions")
+  deferred_ideas = extract_section(task_context_content, "## Deferred Ideas")
+  discretion_areas = extract_section(task_context_content, "## Claude's Discretion")
+
+# Also load phase context for inherited decisions
+phase_context_page = phase_pages.find(p => p.title.includes("Context"))
+phase_context_content = ""
+IF phase_context_page:
+  phase_context_content = mosic_get_page(phase_context_page.name, {
+    content_format: "markdown"
+  }).content
+
+  # Merge phase-level decisions (task-level takes precedence)
+  IF not locked_decisions:
+    locked_decisions = extract_section(phase_context_content, "## Decisions")
+    IF not locked_decisions:
+      locked_decisions = extract_section(phase_context_content, "## Implementation Decisions")
+  ELSE:
+    phase_decisions = extract_section(phase_context_content, "## Decisions")
+    IF phase_decisions:
+      locked_decisions = locked_decisions + "\n\n**Inherited from phase:**\n" + phase_decisions
+
+  IF not deferred_ideas:
+    deferred_ideas = extract_section(phase_context_content, "## Deferred Ideas")
+  IF not discretion_areas:
+    discretion_areas = extract_section(phase_context_content, "## Claude's Discretion")
+
+# Also check research page for User Constraints
+IF phase_research_content AND not locked_decisions:
+  user_constraints = extract_section(phase_research_content, "## User Constraints")
+  IF user_constraints:
+    locked_decisions = extract_subsection(user_constraints, "### Locked Decisions")
+    deferred_ideas = extract_subsection(user_constraints, "### Deferred Ideas")
+    discretion_areas = extract_subsection(user_constraints, "### Claude's Discretion")
+
+user_decisions_xml = """
+<user_decisions>
+<locked_decisions>
+""" + (locked_decisions or "No locked decisions — all at Claude's discretion.") + """
+</locked_decisions>
+
+<deferred_ideas>
+""" + (deferred_ideas or "No deferred ideas.") + """
+</deferred_ideas>
+
+<discretion_areas>
+""" + (discretion_areas or "All areas at Claude's discretion.") + """
+</discretion_areas>
+</user_decisions>
+"""
+```
+
 ```
 researcher_prompt = """
+""" + user_decisions_xml + """
+
 <objective>
 Research how to implement task """ + TASK_IDENTIFIER + """: """ + TASK_TITLE + """
 

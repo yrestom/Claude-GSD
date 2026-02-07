@@ -406,6 +406,11 @@ or skip research and plan directly:
 </process>
 
 <context_page_format>
+**CRITICAL: Use canonical section names** — downstream agents parse these exact headings:
+- `## Decisions` (locked choices — NON-NEGOTIABLE)
+- `## Claude's Discretion` (flexible areas — top-level heading, NOT nested under Decisions)
+- `## Deferred Ideas` (out of scope — FORBIDDEN for downstream agents)
+
 The context page should follow this structure:
 
 ```markdown

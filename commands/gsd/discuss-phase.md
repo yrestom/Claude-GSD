@@ -201,6 +201,12 @@ Display: "Ready to create context?"
 Wait for confirmation.
 
 **Build context content:**
+
+**CRITICAL: Use canonical section names** — downstream agents parse these exact headings:
+- `## Decisions` (locked choices — NON-NEGOTIABLE)
+- `## Claude's Discretion` (flexible areas — top-level heading, NOT nested under Decisions)
+- `## Deferred Ideas` (out of scope — FORBIDDEN for downstream agents)
+
 ```
 context_content = build_context_markdown({
   phase: PHASE,

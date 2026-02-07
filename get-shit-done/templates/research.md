@@ -25,7 +25,7 @@ Content structure for comprehensive ecosystem research documentation in Mosic.
 **CRITICAL:** If a Context page exists from /gsd:discuss-phase, copy locked decisions here verbatim. These MUST be honored by the planner.
 
 ### Locked Decisions
-[Copy from Context page `## Implementation Decisions` section - these are NON-NEGOTIABLE]
+[Copy from Context page `## Decisions` section - these are NON-NEGOTIABLE]
 - [Decision 1]
 - [Decision 2]
 

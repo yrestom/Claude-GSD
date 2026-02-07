@@ -288,7 +288,67 @@ Analyzing task and creating subtasks...
 # Determine planning mode based on flags
 planning_mode = quick_mode ? "task-quick" : "task-planning"
 
+# --- Extract user decisions from context pages ---
+locked_decisions = ""
+deferred_ideas = ""
+discretion_areas = ""
+
+# Task-level context first (highest priority)
+IF task_context_content:
+  locked_decisions = extract_section(task_context_content, "## Decisions")
+  deferred_ideas = extract_section(task_context_content, "## Deferred Ideas")
+  discretion_areas = extract_section(task_context_content, "## Claude's Discretion")
+
+# Phase-level context (merge)
+IF context_content:
+  phase_locked = extract_section(context_content, "## Decisions")
+  IF not phase_locked:
+    phase_locked = extract_section(context_content, "## Implementation Decisions")
+  IF phase_locked:
+    locked_decisions = (locked_decisions ? locked_decisions + "\n\n**Inherited from phase:**\n" + phase_locked : phase_locked)
+  IF not deferred_ideas:
+    deferred_ideas = extract_section(context_content, "## Deferred Ideas")
+  IF not discretion_areas:
+    discretion_areas = extract_section(context_content, "## Claude's Discretion")
+
+# Research pages (fallback)
+IF research_content AND not locked_decisions:
+  user_constraints = extract_section(research_content, "## User Constraints")
+  IF user_constraints:
+    locked_decisions = extract_subsection(user_constraints, "### Locked Decisions")
+    IF not deferred_ideas:
+      deferred_ideas = extract_subsection(user_constraints, "### Deferred Ideas")
+    IF not discretion_areas:
+      discretion_areas = extract_subsection(user_constraints, "### Claude's Discretion")
+
+IF task_research_content AND not locked_decisions:
+  task_constraints = extract_section(task_research_content, "## User Constraints")
+  IF task_constraints:
+    locked_decisions = extract_subsection(task_constraints, "### Locked Decisions")
+    IF not deferred_ideas:
+      deferred_ideas = extract_subsection(task_constraints, "### Deferred Ideas")
+    IF not discretion_areas:
+      discretion_areas = extract_subsection(task_constraints, "### Claude's Discretion")
+
+planner_decisions_xml = """
+<user_decisions>
+<locked_decisions>
+""" + (locked_decisions or "No locked decisions — all at Claude's discretion.") + """
+</locked_decisions>
+
+<deferred_ideas>
+""" + (deferred_ideas or "No deferred ideas.") + """
+</deferred_ideas>
+
+<discretion_areas>
+""" + (discretion_areas or "All areas at Claude's discretion.") + """
+</discretion_areas>
+</user_decisions>
+"""
+
 planner_prompt = """
+""" + planner_decisions_xml + """
+
 <planning_context>
 
 **Mode:** """ + planning_mode + """

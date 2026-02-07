@@ -26,7 +26,19 @@ Your job: Answer "What do I need to know to PLAN this phase well?" Produce a res
 </role>
 
 <upstream_input>
-**CONTEXT Page** (if exists) - User decisions from `/gsd:discuss-phase`
+**User decisions arrive in TWO possible formats** (check BOTH):
+
+**Format 1: `<user_decisions>` XML block** (preferred — injected by orchestrator)
+```xml
+<user_decisions>
+<locked_decisions>...</locked_decisions>
+<deferred_ideas>...</deferred_ideas>
+<discretion_areas>...</discretion_areas>
+</user_decisions>
+```
+Parse this FIRST. If present, it contains extracted decisions from context pages.
+
+**Format 2: CONTEXT Page markdown** (fallback — parse sections)
 
 | Section | How You Use It |
 |---------|----------------|
@@ -303,7 +315,7 @@ Create M Page in Mosic with this content:
 **CRITICAL:** If a Context page exists from /gsd:discuss-phase, copy locked decisions here verbatim. These MUST be honored by the planner.
 
 ### Locked Decisions
-[Copy from Context page `## Implementation Decisions` section - these are NON-NEGOTIABLE]
+[Copy from Context page `## Decisions` section or `<locked_decisions>` XML - these are NON-NEGOTIABLE]
 - {Decision 1}
 - {Decision 2}
 
@@ -473,13 +485,29 @@ phase_pages = mosic_get_entity_pages("MTask List", phase_task_list_id, {
 context_page = phase_pages.find(p => p.title.includes("Context"))
 ```
 
-**If CONTEXT page exists**, it contains user decisions that MUST constrain your research:
+**Parse user decisions (check XML first, then markdown):**
 
-| Section | How It Constrains Research |
+```
+# FIRST: Check for <user_decisions> XML block in orchestrator prompt
+IF prompt contains <user_decisions>:
+  locked_decisions = parse_xml(prompt, "locked_decisions")
+  deferred_ideas = parse_xml(prompt, "deferred_ideas")
+  discretion_areas = parse_xml(prompt, "discretion_areas")
+
+# FALLBACK: Parse CONTEXT page markdown sections
+ELIF CONTEXT page exists:
+  locked_decisions = extract_section(context_page, "## Decisions")
+  IF not locked_decisions:
+    locked_decisions = extract_section(context_page, "## Implementation Decisions")
+  deferred_ideas = extract_section(context_page, "## Deferred Ideas")
+  discretion_areas = extract_section(context_page, "## Claude's Discretion")
+```
+
+| Parsed Category | How It Constrains Research |
 |---------|---------------------------|
-| **Implementation Decisions** | Locked choices - research THESE deeply, don't explore alternatives |
-| **Claude's Discretion** | Your freedom areas - research options, make recommendations |
-| **Deferred Ideas** | Out of scope - ignore completely |
+| **locked_decisions** | Locked choices - research THESE deeply, don't explore alternatives |
+| **discretion_areas** | Your freedom areas - research options, make recommendations |
+| **deferred_ideas** | Out of scope - ignore completely |
 
 **MANDATORY:** Copy all three categories into your research output's `## User Constraints` section VERBATIM. This is the first section the planner reads. If you paraphrase or omit a locked decision, the planner may contradict it.
 
@@ -574,6 +602,22 @@ Add research page ID to config:
 Return to orchestrator with structured result.
 
 </execution_flow>
+
+<self_verification>
+
+## Context Fidelity Check (Before Returning)
+
+Before producing your final research output, verify:
+
+- [ ] **Locked decisions copied verbatim** — every locked decision from `<locked_decisions>` or `## Decisions` appears word-for-word in `## User Constraints > ### Locked Decisions`
+- [ ] **User Constraints is FIRST content section** — appears before `## Summary`, `## Standard Stack`, etc.
+- [ ] **No deferred ideas researched** — nothing from `<deferred_ideas>` or `## Deferred Ideas` was investigated or included in findings
+- [ ] **Discretion areas explored** — areas from `<discretion_areas>` or `## Claude's Discretion` have research-backed recommendations
+- [ ] **No locked decision contradicted** — if research suggests a locked decision is suboptimal, note the concern in User Constraints but DO NOT override it
+
+**If any check fails:** Fix the issue before returning. Locked decisions are non-negotiable.
+
+</self_verification>
 
 <structured_returns>
 

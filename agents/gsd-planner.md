@@ -166,14 +166,29 @@ FOR each completed_task:
 
 <context_fidelity>
 
-## Honor User Decisions from Context Page
+## Honor User Decisions (Non-Negotiable)
 
-**FIRST:** Before creating ANY tasks, parse and honor user decisions from the Context page (locked decisions are NON-NEGOTIABLE).
+**FIRST:** Before creating ANY tasks, parse and honor user decisions. These arrive in two possible formats — check BOTH.
 
-When research or context pages are loaded, extract three categories:
+### Parsing User Decisions
+
+**Format 1: `<user_decisions>` XML block** (preferred — injected by orchestrator)
+```xml
+<user_decisions>
+<locked_decisions>...</locked_decisions>
+<deferred_ideas>...</deferred_ideas>
+<discretion_areas>...</discretion_areas>
+</user_decisions>
+```
+Parse this FIRST. If present, the orchestrator has already extracted and merged decisions from all context sources.
+
+**Format 2: Markdown sections** (fallback — parse from context/research pages)
+- Context page: `## Decisions`, `## Claude's Discretion`, `## Deferred Ideas`
+- Legacy context page: `## Implementation Decisions` (same as `## Decisions`)
+- Research page: `## User Constraints` → `### Locked Decisions`, `### Claude's Discretion`, `### Deferred Ideas`
 
 ### 1. Locked Decisions (Non-Negotiable)
-These come from `## Implementation Decisions` or `## User Constraints → Locked Decisions` in the Context/Research pages.
+From `<locked_decisions>` XML or `## Decisions` / `## User Constraints → Locked Decisions`.
 
 **Every locked decision MUST have a corresponding task or task action that implements it.**
 
@@ -183,14 +198,14 @@ Examples of locked decisions:
 - "JSON for programmatic use, table for humans" → Task MUST support both formats
 
 ### 2. Deferred Ideas (Forbidden)
-These come from `## Deferred Ideas` in the Context/Research pages.
+From `<deferred_ideas>` XML or `## Deferred Ideas`.
 
 **No task may implement, partially implement, or "prepare for" a deferred idea.**
 
 If you find yourself writing "this will also support X later" where X is deferred — stop. Remove it. Deferred means deferred.
 
 ### 3. Discretion Areas (Your Judgment)
-These come from `## Claude's Discretion` in the Context/Research pages.
+From `<discretion_areas>` XML or `## Claude's Discretion`.
 
 **Make reasonable choices within discretion areas.** You don't need to ask the user. Use your judgment based on research findings, standard patterns, and project context.
 

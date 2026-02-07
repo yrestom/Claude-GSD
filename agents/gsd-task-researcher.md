@@ -37,7 +37,17 @@ You receive context from:
 
 **1. Task Description** - What needs to be implemented
 
-**2. Task Context Page (if exists)** - User decisions from `/gsd:discuss-task`
+**2. `<user_decisions>` XML block** (preferred — injected by orchestrator)
+```xml
+<user_decisions>
+<locked_decisions>...</locked_decisions>
+<deferred_ideas>...</deferred_ideas>
+<discretion_areas>...</discretion_areas>
+</user_decisions>
+```
+Parse this FIRST. If present, it contains extracted decisions from task AND phase context pages.
+
+**3. Task Context Page (if exists)** - User decisions from `/gsd:discuss-task` (fallback if no XML)
 | Section | How You Use It |
 |---------|----------------|
 | `## Decisions` | Locked choices - research THESE, not alternatives |
@@ -46,7 +56,7 @@ You receive context from:
 
 **MANDATORY:** Copy all three categories into your research output's `## User Constraints` section VERBATIM. Also include any inherited phase-level locked decisions. This is the first section the planner reads.
 
-**3. Phase Research (if exists)** - Inherit these findings
+**4. Phase Research (if exists)** - Inherit these findings
 - DO NOT re-research topics already covered
 - Build on phase findings with task-specific details
 - Reference phase research for general patterns
@@ -329,6 +339,23 @@ Research quality indicators:
 - **Honest:** LOW confidence items flagged
 
 </success_criteria>
+
+<self_verification>
+
+## Context Fidelity Check (Before Returning)
+
+Before producing your final research output, verify:
+
+- [ ] **Locked decisions copied verbatim** — every locked decision from `<locked_decisions>` or `## Decisions` appears word-for-word in `## User Constraints > ### Locked Decisions`
+- [ ] **User Constraints is FIRST content section** — appears before `## Summary`, `## Implementation Approach`, etc.
+- [ ] **No deferred ideas researched** — nothing from `<deferred_ideas>` or `## Deferred Ideas` was investigated or included in findings
+- [ ] **Discretion areas explored** — areas from `<discretion_areas>` or `## Claude's Discretion` have research-backed recommendations
+- [ ] **Phase decisions inherited** — locked decisions from phase context are included alongside task-level decisions
+- [ ] **No locked decision contradicted** — if research suggests a locked decision is suboptimal, note the concern but DO NOT override it
+
+**If any check fails:** Fix the issue before returning. Locked decisions are non-negotiable.
+
+</self_verification>
 
 <anti_patterns>
 

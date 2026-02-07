@@ -144,7 +144,7 @@ Context loaded:
 Proceeding to research...
 ```
 
-## 5. Spawn gsd-phase-researcher Agent
+## 5. Extract Decisions and Spawn gsd-phase-researcher Agent
 
 Display:
 ```
@@ -153,6 +153,36 @@ Display:
 -------------------------------------------
 
 Spawning researcher...
+```
+
+**Extract user decisions from context page (if exists):**
+```
+locked_decisions = ""
+deferred_ideas = ""
+discretion_areas = ""
+
+IF context_content:
+  locked_decisions = extract_section(context_content, "## Decisions")
+  IF not locked_decisions:
+    locked_decisions = extract_section(context_content, "## Implementation Decisions")
+  deferred_ideas = extract_section(context_content, "## Deferred Ideas")
+  discretion_areas = extract_section(context_content, "## Claude's Discretion")
+
+user_decisions_xml = """
+<user_decisions>
+<locked_decisions>
+""" + (locked_decisions or "No locked decisions — all at Claude's discretion.") + """
+</locked_decisions>
+
+<deferred_ideas>
+""" + (deferred_ideas or "No deferred ideas.") + """
+</deferred_ideas>
+
+<discretion_areas>
+""" + (discretion_areas or "All areas at Claude's discretion.") + """
+</discretion_areas>
+</user_decisions>
+"""
 ```
 
 Research modes: ecosystem (default), feasibility, implementation, comparison.
@@ -174,6 +204,8 @@ For this phase, discover:
 - What's SOTA vs what Claude's training thinks is SOTA?
 - What should NOT be hand-rolled?
 </key_insight>
+
+""" + user_decisions_xml + """
 
 <objective>
 Research implementation approach for Phase {PHASE}: {phase.title}

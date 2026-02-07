@@ -271,7 +271,47 @@ FOR each plan in wave:
   })
 ```
 
-### 4.2 Spawn Executors
+### 4.2 Extract Decisions and Spawn Executors
+
+**Extract user decisions from context page (once per phase, reused across all waves):**
+```
+locked_decisions = ""
+deferred_ideas = ""
+discretion_areas = ""
+
+IF context_content:
+  locked_decisions = extract_section(context_content, "## Decisions")
+  IF not locked_decisions:
+    locked_decisions = extract_section(context_content, "## Implementation Decisions")
+  deferred_ideas = extract_section(context_content, "## Deferred Ideas")
+  discretion_areas = extract_section(context_content, "## Claude's Discretion")
+
+# Also check research page for User Constraints
+IF research_content AND not locked_decisions:
+  user_constraints = extract_section(research_content, "## User Constraints")
+  IF user_constraints:
+    locked_decisions = extract_subsection(user_constraints, "### Locked Decisions")
+    IF not deferred_ideas:
+      deferred_ideas = extract_subsection(user_constraints, "### Deferred Ideas")
+    IF not discretion_areas:
+      discretion_areas = extract_subsection(user_constraints, "### Claude's Discretion")
+
+executor_decisions_xml = """
+<user_decisions>
+<locked_decisions>
+""" + (locked_decisions or "No locked decisions — all at Claude's discretion.") + """
+</locked_decisions>
+
+<deferred_ideas>
+""" + (deferred_ideas or "No deferred ideas.") + """
+</deferred_ideas>
+
+<discretion_areas>
+""" + (discretion_areas or "All areas at Claude's discretion.") + """
+</discretion_areas>
+</user_decisions>
+"""
+```
 
 ```
 # Step 1: Build prompts for all plans in wave
@@ -279,6 +319,8 @@ executor_prompts = []
 
 FOR each plan in wave:
   prompt = """
+""" + executor_decisions_xml + """
+
 <objective>
 Execute task {plan.task.identifier}: {plan.task.title}
 
