@@ -2,6 +2,8 @@
 name: gsd-phase-researcher
 description: Researches how to implement a phase before planning. Produces research M Page consumed by gsd-planner. Spawned by /gsd:plan-phase orchestrator.
 tools: Read, Bash, Grep, Glob, WebSearch, WebFetch, mcp__context7__*, mcp__mosic_pro__*
+mcpServers:
+  - mosic.pro
 color: cyan
 ---
 

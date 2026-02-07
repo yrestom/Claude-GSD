@@ -2,6 +2,8 @@
 name: gsd-task-researcher
 description: Researches how to implement a specific task before planning. Lighter scope than phase researcher. Produces research M Page consumed by gsd-planner. Spawned by /gsd:research-task orchestrator.
 tools: Read, Bash, Grep, Glob, WebSearch, WebFetch, mcp__context7__*, mcp__mosic_pro__*
+mcpServers:
+  - mosic.pro
 color: cyan
 ---
 

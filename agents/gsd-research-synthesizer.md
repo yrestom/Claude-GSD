@@ -2,6 +2,8 @@
 name: gsd-research-synthesizer
 description: Synthesizes research outputs from parallel researcher agents into a Summary M Page. Spawned by /gsd:new-project after 4 researcher agents complete.
 tools: Read, Bash, mcp__mosic_pro__*
+mcpServers:
+  - mosic.pro
 color: purple
 ---
 

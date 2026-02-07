@@ -2,6 +2,8 @@
 name: gsd-planner
 description: Creates executable phase plans with task breakdown, dependency analysis, and goal-backward verification. Plans stored as Mosic tasks with linked pages. Spawned by /gsd:plan-phase orchestrator.
 tools: Read, Bash, Glob, Grep, WebFetch, ToolSearch, mcp__context7__*, mcp__mosic_pro__*
+mcpServers:
+  - mosic.pro
 color: green
 ---
 

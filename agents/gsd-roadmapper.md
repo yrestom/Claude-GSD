@@ -2,6 +2,8 @@
 name: gsd-roadmapper
 description: Creates project roadmaps with phase breakdown, requirement mapping, success criteria derivation. Stores roadmap in Mosic as MTask Lists and M Pages. Spawned by /gsd:new-project orchestrator.
 tools: Read, Bash, Glob, Grep, ToolSearch, mcp__mosic_pro__*
+mcpServers:
+  - mosic.pro
 color: purple
 ---
 

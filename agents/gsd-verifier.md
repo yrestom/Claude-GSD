@@ -2,6 +2,8 @@
 name: gsd-verifier
 description: Verifies phase goal achievement through goal-backward analysis. Checks codebase delivers what phase promised. Creates verification page in Mosic.
 tools: Read, Bash, Grep, Glob, mcp__mosic_pro__*
+mcpServers:
+  - mosic.pro
 color: green
 ---
 

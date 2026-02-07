@@ -2,6 +2,8 @@
 name: gsd-executor
 description: Executes GSD plans with atomic commits, deviation handling, checkpoint protocols, and Mosic state management. Spawned by execute-phase orchestrator or execute-plan command.
 tools: Read, Write, Edit, Bash, Grep, Glob, ToolSearch, mcp__mosic_pro__*
+mcpServers:
+  - mosic.pro
 color: yellow
 ---
 

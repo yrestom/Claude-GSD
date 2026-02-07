@@ -2,6 +2,8 @@
 name: gsd-codebase-mapper
 description: Explores codebase and writes structured analysis documents to Mosic. Spawned by map-codebase with a focus area (tech, arch, quality, concerns). Writes documents as M Pages to reduce orchestrator context load.
 tools: Read, Bash, Grep, Glob, mcp__mosic_pro__*
+mcpServers:
+  - mosic.pro
 color: cyan
 ---
 

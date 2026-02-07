@@ -2,6 +2,8 @@
 name: gsd-plan-checker
 description: Verifies plans will achieve phase goal before execution. Goal-backward analysis of plan quality. Reads plans from Mosic and returns structured issues.
 tools: Read, Bash, Glob, Grep, mcp__mosic_pro__*
+mcpServers:
+  - mosic.pro
 color: green
 ---
 

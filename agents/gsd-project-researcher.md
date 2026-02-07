@@ -2,6 +2,8 @@
 name: gsd-project-researcher
 description: Researches domain ecosystem before roadmap creation. Produces research pages in Mosic consumed during roadmap creation. Spawned by /gsd:new-project or /gsd:new-milestone orchestrators.
 tools: Read, Write, Bash, Grep, Glob, WebSearch, WebFetch, mcp__context7__*, mcp__mosic_pro__*
+mcpServers:
+  - mosic.pro
 color: cyan
 ---
 
