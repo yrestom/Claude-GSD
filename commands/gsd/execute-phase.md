@@ -31,6 +31,14 @@ Check `config.parallelization` before spawning agents. Parallel execution is con
 
 **TRUE PARALLEL EXECUTION (when enabled):**
 To spawn agents in parallel within a wave, you MUST make all Task() calls in a SINGLE response message. A FOR loop does NOT create parallel execution - it creates sequential execution.
+
+**PLAN-LEVEL GIT COORDINATION:**
+Unlike `/gsd:execute-task` (which uses subtask mode + orchestrator-managed commits), plan-level parallel executors run in **normal mode** and commit independently. This is safe because:
+- The planner ensures wave-concurrent plans don't modify overlapping files
+- Plan-level tasks operate on genuinely independent areas of the codebase
+- Each executor's commits are atomic per-subtask and don't interfere
+
+If git `index.lock` errors occur during parallel plan execution, fall back to sequential execution for the remaining plans in that wave.
 </critical_requirements>
 
 <objective>
@@ -109,52 +117,18 @@ phase = mosic_get_task_list(task_list_id, {
   include_tasks: true
 })
 
-# Load phase pages (research, context) for executor context
+# Discover phase page IDs (do NOT load content — executor loads from Mosic)
 phase_pages = mosic_get_entity_pages("MTask List", task_list_id, {
   include_subtree: false
 })
 
-# Find phase-level context pages
 research_page = phase_pages.find(p => p.title contains "Research")
 context_page = phase_pages.find(p => p.title contains "Context" or p.title contains "Decisions")
 
-# Load their content if they exist
-research_content = ""
-IF research_page:
-  research_content = mosic_get_page(research_page.name, {
-    content_format: "markdown"
-  }).content
-
-context_content = ""
-IF context_page:
-  context_content = mosic_get_page(context_page.name, {
-    content_format: "markdown"
-  }).content
-
-# Extract phase requirements for executor awareness
-requirements_content = ""
-IF config.mosic.pages.requirements:
-  requirements_content = mosic_get_page(config.mosic.pages.requirements, {
-    content_format: "markdown"
-  }).content
-
-phase_requirements = []
-IF requirements_content:
-  traceability_section = extract_section(requirements_content, "## Traceability")
-  IF NOT traceability_section:
-    traceability_section = extract_section(requirements_content, "## Requirements Traceability")
-  IF traceability_section:
-    FOR each row in parse_markdown_table(traceability_section):
-      IF row.phase matches current phase:
-        phase_requirements.append({ id: row.requirement_id, description: row.description })
-
-phase_requirements_xml = "<phase_requirements>\n"
-IF phase_requirements:
-  FOR each req in phase_requirements:
-    phase_requirements_xml += '<requirement id="' + req.id + '">' + req.description + '</requirement>\n'
-ELSE:
-  phase_requirements_xml += "No explicit requirements found for this phase.\n"
-phase_requirements_xml += "</phase_requirements>"
+# Store IDs only — executor self-loads content via execute-plan.md workflow
+research_page_id = research_page ? research_page.name : null
+context_page_id = context_page ? context_page.name : null
+requirements_page_id = config.mosic.pages.requirements or null
 
 # Filter to plan tasks only
 plan_tasks = phase.tasks.filter(t => t.title starts with "Plan")
@@ -296,85 +270,18 @@ FOR each plan in wave:
   })
 ```
 
-### 4.2 Extract Decisions and Spawn Executors
+### 4.2 Build Lean Prompts and Spawn Executors
 
-**Extract user decisions from context page (once per phase, reused across all waves):**
-```
-locked_decisions = ""
-deferred_ideas = ""
-discretion_areas = ""
+**Build prompts with `<mosic_references>` — IDs only, no content embedding.**
 
-IF context_content:
-  locked_decisions = extract_section(context_content, "## Decisions")
-  IF not locked_decisions:
-    locked_decisions = extract_section(context_content, "## Implementation Decisions")
-  deferred_ideas = extract_section(context_content, "## Deferred Ideas")
-  discretion_areas = extract_section(context_content, "## Claude's Discretion")
-
-# Also check research page for User Constraints
-IF research_content AND not locked_decisions:
-  user_constraints = extract_section(research_content, "## User Constraints")
-  IF user_constraints:
-    locked_decisions = extract_subsection(user_constraints, "### Locked Decisions")
-    IF not deferred_ideas:
-      deferred_ideas = extract_subsection(user_constraints, "### Deferred Ideas")
-    IF not discretion_areas:
-      discretion_areas = extract_subsection(user_constraints, "### Claude's Discretion")
-
-executor_decisions_xml = """
-<user_decisions>
-<locked_decisions>
-""" + (locked_decisions or "No locked decisions — all at Claude's discretion.") + """
-</locked_decisions>
-
-<deferred_ideas>
-""" + (deferred_ideas or "No deferred ideas.") + """
-</deferred_ideas>
-
-<discretion_areas>
-""" + (discretion_areas or "All areas at Claude's discretion.") + """
-</discretion_areas>
-</user_decisions>
-"""
-```
+The executor's `execute-plan.md` workflow loads all content from Mosic using these IDs and self-extracts user decisions, requirements, frontend/TDD context.
 
 ```
-# Frontend detection for executor context
-frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
-  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
-  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
-  "UX", "interface", "widget"]
-
-phase_text = (phase.title + " " + (phase.description or "")).toLowerCase()
-is_frontend = frontend_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
-
-frontend_design_xml = ""
-IF is_frontend:
-  frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
-  frontend_design_xml = extract_section(frontend_design_content, "## For Executors")
-
-# TDD execution context
-tdd_execution_xml = ""
-has_tdd_tasks = tasks.some(t => t.description_contains('tdd="true"') or t.tags.includes("tdd"))
-
-IF has_tdd_tasks:
-  tdd_reference = Read("~/.claude/get-shit-done/references/tdd.md")
-  # Extract only execution-relevant sections
-  tdd_execution_sections = extract_sections(tdd_reference, [
-    "<execution_flow>", "<test_quality>", "<commit_patterns>", "<mosic_test_tracking>"
-  ])
-  tdd_execution_xml = "<tdd_execution_context>\n" + tdd_execution_sections + "\n</tdd_execution_context>"
-  Display: "TDD tasks detected — executor will use RED-GREEN-REFACTOR cycle."
-
-# Step 1: Build prompts for all plans in wave
+# Build prompts for all plans in wave
 executor_prompts = []
 
 FOR each plan in wave:
   prompt = """
-""" + executor_decisions_xml + """
-
-""" + phase_requirements_xml + """
-
 <objective>
 Execute task {plan.task.identifier}: {plan.task.title}
 
@@ -385,27 +292,15 @@ Commit each subtask atomically. Create summary page. Update task status.
 @~/.claude/get-shit-done/workflows/execute-plan.md
 </execution_context>
 
-<context>
-**Task:** {plan.task.title}
-**Task ID:** {plan.task.name}
-**Phase:** {PHASE} - {phase.title}
-**Workspace:** {workspace_id}
-
-**Plan Content:**
-{plan.content}
-
-**Phase Research (if available):**
-{research_content or "No research page for this phase."}
-
-**Phase Context & Decisions (if available):**
-{context_content or "No context page for this phase."}
-</context>
-
-<frontend_design_context>
-""" + frontend_design_xml + """
-</frontend_design_context>
-
-""" + tdd_execution_xml + """
+<mosic_references>
+<task id="{plan.task.name}" identifier="{plan.task.identifier}" title="{plan.task.title}" />
+<phase id="{task_list_id}" title="{phase.title}" number="{PHASE}" />
+<workspace id="{workspace_id}" />
+<plan_page id="{plan.page.name}" />
+<research_page id="{research_page_id}" />
+<context_page id="{context_page_id}" />
+<requirements_page id="{requirements_page_id}" />
+</mosic_references>
 
 <success_criteria>
 - [ ] All subtasks executed
@@ -480,25 +375,26 @@ FOR each executor_prompt in executor_prompts:
 
 ### 4.3 Handle Executor Results
 
-After each executor completes:
+After all executors in wave complete, pair results with plans:
 
 ```
-FOR each completed_plan:
-  # Mark task complete
-  mosic_complete_task(plan.task.name)
+# Results correspond to executor_prompts by spawn order
+FOR each (ep, agent_result) in zip(executor_prompts, wave_results):
+  plan = ep.plan
+  executor_summary = parse_executor_output(agent_result)
 
-  # Update task metadata
+  # Ensure task is marked complete (idempotent — executor already did this in normal mode)
+  mosic_complete_task(plan.task.name)
   mosic_update_document("MTask", plan.task.name, {
     status: "Completed"
   })
 
-  # Update checklist items based on summary
+  # Update checklist items based on executor's returned summary
   task_with_checklists = mosic_get_task(plan.task.name, {
     include_checklists: true
   })
 
   FOR each completed_item in executor_summary.completed_tasks:
-    # Flexible matching: check exact match, contains, or normalized match
     matching_checklist = task_with_checklists.checklists.find(c =>
       c.title == completed_item OR
       c.title.toLowerCase().includes(completed_item.toLowerCase()) OR
@@ -509,19 +405,24 @@ FOR each completed_plan:
         done: true
       })
 
-  # Create summary page linked to task
-  # Standardized title format: "{identifier} Execution Summary"
-  summary_page = mosic_create_entity_page("MTask", plan.task.name, {
-    workspace_id: workspace_id,
-    title: plan.task.identifier + " Execution Summary",
-    page_type: "Document",
-    icon: config.mosic.page_icons.summary,
-    status: "Published",
-    content: convert_to_editorjs(executor_summary),
-    relation_type: "Related"
-  })
+  # Find executor's summary page (already created by execute-plan.md workflow in normal mode)
+  # Do NOT create a duplicate — the executor's page has richer content from execution context
+  task_pages = mosic_get_entity_pages("MTask", plan.task.name, { include_subtree: false })
+  summary_page = task_pages.find(p => p.title.includes("Execution Summary"))
 
-  # Tag summary page
+  IF NOT summary_page:
+    # Fallback: create summary if executor didn't (unexpected but recoverable)
+    summary_page = mosic_create_entity_page("MTask", plan.task.name, {
+      workspace_id: workspace_id,
+      title: plan.task.identifier + " Execution Summary",
+      page_type: "Document",
+      icon: config.mosic.page_icons.summary,
+      status: "Published",
+      content: convert_to_editorjs(executor_summary),
+      relation_type: "Related"
+    })
+
+  # Tag summary page (idempotent — safe even if executor already tagged)
   mosic_batch_add_tags_to_document("M Page", summary_page.name, [
     config.mosic.tags.gsd_managed,
     config.mosic.tags.summary,
@@ -531,18 +432,21 @@ FOR each completed_plan:
   # Store in config
   config.mosic.pages["phase-" + PHASE + "-summary-" + plan.number] = summary_page.name
 
-  # Add completion comment with commit info
+  # Add orchestrator completion comment with commit details
+  # Complements executor's comment (which has duration/subtask count)
   # IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace: workspace_id,
     ref_doc: "MTask",
     ref_name: plan.task.name,
-    content: "<p><strong>Completed</strong></p>" +
+    content: "<p><strong>Phase Orchestrator: Completed</strong></p>" +
       "<p><strong>Commits:</strong></p>" +
       "<ul>" + executor_summary.commits.map(c => "<li><code>" + c.hash + "</code>: " + c.message + "</li>").join("") + "</ul>"
   })
 
-  # Create relation between plan page and summary page
+  # Create relation between plan page and summary page (page→page)
+  # This is NOT a duplicate: executor creates task→page relation,
+  # this creates plan_page→summary_page relation for cross-reference
   plan_page_id = config.mosic.pages["phase-" + PHASE + "-plan-" + plan.number]
   IF plan_page_id:
     mosic_create_document("M Relation", {

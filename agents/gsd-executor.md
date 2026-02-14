@@ -30,23 +30,18 @@ This is a BLOCKING REQUIREMENT - Mosic tools are deferred and will fail if not l
 
 ## Honor User Decisions During Execution
 
-Your prompt may contain a `<user_decisions>` XML block injected by the orchestrator. This contains user decisions that constrain your implementation.
+User decisions are extracted during the `load_context` step of the `execute-plan.md` workflow. The workflow handles the full extraction hierarchy automatically.
 
-### Parsing User Decisions
+### How Decisions Are Obtained (priority order)
 
-**Check for `<user_decisions>` XML block first:**
-```xml
-<user_decisions>
-<locked_decisions>...</locked_decisions>
-<deferred_ideas>...</deferred_ideas>
-<discretion_areas>...</discretion_areas>
-</user_decisions>
-```
+1. **Self-extraction from Mosic pages (PRIMARY):** The workflow's `load_context` step loads context/research pages via `<mosic_references>` IDs and extracts decisions from them. This is the standard path for lean orchestrators.
 
-**If no XML block, parse from context content** (look for these sections in "Phase Context & Decisions" or "Task-Specific Context"):
-- `## Decisions` — locked choices
-- `## Claude's Discretion` — flexible areas
-- `## Deferred Ideas` — forbidden scope
+2. **Orchestrator-injected `<user_decisions>` XML (FALLBACK):** Older orchestrator patterns may embed a pre-extracted XML block. If present in your prompt, it takes effect automatically.
+
+3. **Manual parsing from inline context (LAST RESORT):** If neither self-extraction nor XML block produced results, look for these sections in any inline "Phase Context & Decisions" or "Task-Specific Context" content:
+   - `## Decisions` — locked choices
+   - `## Claude's Discretion` — flexible areas
+   - `## Deferred Ideas` — forbidden scope
 
 ### Rules
 
@@ -81,7 +76,9 @@ Before creating a commit for each task, verify:
 
 ## Verify Requirements During Implementation
 
-Your prompt may contain a `<phase_requirements>` XML block with REQ-IDs mapped to this task or phase.
+Requirements are obtained during the `load_context` step of the `execute-plan.md` workflow, which extracts them from the requirements page and plan page coverage table via Mosic IDs.
+
+If the workflow's self-extraction didn't find requirements, your prompt may contain a `<phase_requirements>` XML block as a fallback from the orchestrator.
 
 ### Rules
 - Each requirement mapped to your task MUST be implemented
@@ -94,15 +91,19 @@ Your prompt may contain a `<phase_requirements>` XML block with REQ-IDs mapped t
 - [ ] Implementation matches requirement description (not just partially)
 - [ ] Acceptance criteria from plan cover the requirement
 
-**If no `<phase_requirements>` block is present or it says "No explicit requirements":** Skip this check and rely on plan task specifications instead.
+**If no requirements were extracted (self or XML) or it says "No explicit requirements":** Skip this check and rely on plan task specifications instead.
 
 </requirements_awareness>
 
 <frontend_design_execution>
 
-## Frontend Implementation (Active When `<frontend_design_context>` Present)
+## Frontend Implementation
 
-If your prompt or plan page contains frontend design context:
+Frontend design context is activated in two ways:
+1. **Self-detection (PRIMARY):** The `load_context` step of `execute-plan.md` scans task title, description, and plan content for UI keywords. If detected, it reads `references/frontend-design.md` automatically.
+2. **Orchestrator-injected `<frontend_design_context>` XML (FALLBACK):** Older orchestrator patterns may embed this directly.
+
+If frontend work is detected (by either method):
 
 ### Implementation Rules
 1. Follow the Design Specification from the plan page EXACTLY
@@ -120,7 +121,7 @@ If your prompt or plan page contains frontend design context:
 - [ ] Responsive behavior implemented (if specified)
 - [ ] No "AI slop" patterns (Inter font, purple gradients, generic shadows)
 
-**If no `<frontend_design_context>` is present:** Skip these checks.
+**If no frontend context detected (neither self nor XML):** Skip these checks.
 
 </frontend_design_execution>
 
@@ -217,6 +218,42 @@ When your prompt contains `**Execution Mode:** subtask`, you are executing ONE s
 
 </subtask_mode>
 
+<mosic_references_protocol>
+
+## ID-Based Context Loading (Preferred Path)
+
+Orchestrators (`/gsd:execute-phase`, `/gsd:execute-task`) pass a `<mosic_references>` XML block containing Mosic entity IDs instead of embedding full page content. You load all context from Mosic yourself using these IDs.
+
+**Format received from orchestrator:**
+```xml
+<mosic_references>
+<task id="{uuid}" identifier="{id}" title="{title}" />
+<phase id="{uuid}" title="{title}" number="{N}" />
+<workspace id="{uuid}" />
+<plan_page id="{uuid}" />
+<research_page id="{uuid}" />
+<context_page id="{uuid}" />
+<requirements_page id="{uuid}" />
+<task_context_page id="{uuid}" />
+<task_research_page id="{uuid}" />
+</mosic_references>
+```
+
+**How context loading works:**
+1. The `execute-plan.md` workflow's `load_mosic_context` step detects `<mosic_references>` in your prompt
+2. It uses the provided IDs to load page content directly from Mosic (no title-based discovery needed)
+3. The `load_context` step then self-extracts user decisions, requirements, frontend/TDD context from the loaded content
+4. This replaces the previous pattern where orchestrators embedded full content inline
+
+**Benefits:**
+- Orchestrator prompts are lean (IDs only, ~200 tokens vs ~2000-7000 tokens of embedded content)
+- Executor loads exactly what it needs from Mosic
+- No redundant content (orchestrator doesn't load content that executor will load again)
+
+**Backward compatibility:** If no `<mosic_references>` block is present, the workflow falls back to title-based discovery from Mosic (the original pattern). If the orchestrator still embeds inline content, it will be used.
+
+</mosic_references_protocol>
+
 <execution_flow>
 
 <step name="load_mosic_tools" priority="critical">
@@ -236,73 +273,22 @@ This loads tools for:
 </step>
 
 <step name="load_mosic_context" priority="first">
-Before any operation, load project context from Mosic:
+**Follow the `execute-plan.md` workflow's `load_mosic_context` and `load_context` steps.**
+
+The workflow handles all Mosic loading with two paths:
+- **Path A (`<mosic_references>` present):** Uses orchestrator-provided page IDs for direct Mosic loading — no discovery needed.
+- **Path B (no references):** Falls back to title-based discovery from Mosic.
+
+Both paths produce the same result: plan content, phase context, phase research, requirements, task-specific pages, and self-extracted user decisions/requirements/frontend/TDD context.
 
 **Read config.json for Mosic IDs:**
 ```bash
 cat config.json 2>/dev/null
 ```
 
-Extract:
-- `mosic.workspace_id`
-- `mosic.project_id`
-- `mosic.task_lists` (phase mappings)
-- `mosic.tasks` (plan mappings)
-- `mosic.tags` (tag IDs)
+Extract: `mosic.workspace_id`, `mosic.project_id`, `mosic.task_lists`, `mosic.tasks`, `mosic.tags`
 
-**If config.json missing:** Error - project not initialized. Run `/gsd:new-project`.
-
-**Load project state from Mosic:**
-```
-project = mosic_get_project(project_id, {
-  include_task_lists: true,
-  include_comments: true
-})
-
-# Get current phase task list
-current_phase_id = config.mosic.task_lists["phase-{N}"]
-phase = mosic_get_task_list(current_phase_id, {
-  include_tasks: true
-})
-
-# Find accumulated decisions and context at project level
-project_pages = mosic_get_entity_pages("MProject", project_id, {
-  include_subtree: false,
-  content_format: "markdown"
-})
-
-# CRITICAL: Load phase-level pages (context and research)
-# These are created by /gsd:discuss-phase and /gsd:research-phase
-phase_pages = mosic_get_entity_pages("MTask List", current_phase_id, {
-  content_format: "markdown"
-})
-
-# Find phase context (user decisions) and research (technical findings)
-phase_context_page = phase_pages.find(p =>
-  p.title.includes("Context") or p.title.includes("Decisions")
-)
-phase_research_page = phase_pages.find(p => p.title.includes("Research"))
-
-# Load content if pages exist
-phase_context_content = ""
-if phase_context_page:
-  phase_context_content = mosic_get_page(phase_context_page.name, {
-    content_format: "markdown"
-  }).content
-
-phase_research_content = ""
-if phase_research_page:
-  phase_research_content = mosic_get_page(phase_research_page.name, {
-    content_format: "markdown"
-  }).content
-```
-
-**Parse project state:**
-- Current position from task statuses
-- Accumulated decisions from project pages
-- Phase context (user decisions from /gsd:discuss-phase)
-- Phase research (technical findings from /gsd:research-phase)
-- Blockers from task relations (type: "Blocker")
+**If config.json missing:** Error — project not initialized. Run `/gsd:new-project`.
 </step>
 
 <step name="load_plan">

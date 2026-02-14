@@ -169,7 +169,7 @@ IF incomplete_subtasks.length == 0:
   Display: "All subtasks already complete. Creating summary..."
   GOTO step 7
 
-# Get plan page
+# Get plan page (ID only — executor loads content from Mosic)
 task_pages = mosic_get_entity_pages("MTask", TASK_ID, {
   include_subtree: false
 })
@@ -178,13 +178,16 @@ plan_page = task_pages.find(p =>
   p.title.includes("Plan") or p.page_type == "Spec"
 )
 
-plan_content = ""
-IF plan_page:
-  plan_content = mosic_get_page(plan_page.name, {
-    content_format: "markdown"
-  }).content
-ELSE:
+plan_page_id = plan_page ? plan_page.name : null
+
+IF NOT plan_page:
   Display: "Warning: No plan page found. Proceeding with subtask execution."
+
+# Discover task-specific context/research page IDs
+task_context_page = task_pages.find(p => p.title.includes("Context"))
+task_research_page = task_pages.find(p => p.title.includes("Research"))
+task_context_page_id = task_context_page ? task_context_page.name : null
+task_research_page_id = task_research_page ? task_research_page.name : null
 ```
 
 Display:
@@ -195,14 +198,21 @@ Task: {TASK_IDENTIFIER}
 - Remaining: {incomplete_subtasks.length}
 ```
 
-## 3. Load Phase Context
+## 3. Discover Phase Page IDs
 
 ```
 # Get parent phase
 phase_id = task.task_list
 phase = mosic_get_task_list(phase_id, { include_tasks: false })
 
-# Get phase pages for context
+# Derive phase number from config (reverse-lookup task_list_id)
+PHASE = null
+FOR each key, value in config.mosic.task_lists:
+  IF value == phase_id:
+    PHASE = key.replace("phase-", "")  # e.g., "phase-01" → "01"
+    BREAK
+
+# Discover phase page IDs (do NOT load content — executor loads from Mosic)
 phase_pages = mosic_get_entity_pages("MTask List", phase_id, {
   include_subtree: false
 })
@@ -210,33 +220,10 @@ phase_pages = mosic_get_entity_pages("MTask List", phase_id, {
 research_page = phase_pages.find(p => p.title.includes("Research"))
 context_page = phase_pages.find(p => p.title.includes("Context"))
 
-research_content = ""
-IF research_page:
-  research_content = mosic_get_page(research_page.name, {
-    content_format: "markdown"
-  }).content
-
-context_content = ""
-IF context_page:
-  context_content = mosic_get_page(context_page.name, {
-    content_format: "markdown"
-  }).content
-
-# Load task-specific context
-task_context_page = task_pages.find(p => p.title.includes("Context"))
-task_research_page = task_pages.find(p => p.title.includes("Research"))
-
-task_context_content = ""
-IF task_context_page:
-  task_context_content = mosic_get_page(task_context_page.name, {
-    content_format: "markdown"
-  }).content
-
-task_research_content = ""
-IF task_research_page:
-  task_research_content = mosic_get_page(task_research_page.name, {
-    content_format: "markdown"
-  }).content
+# Store IDs only — executor self-loads content via execute-plan.md workflow
+research_page_id = research_page ? research_page.name : null
+context_page_id = context_page ? context_page.name : null
+requirements_page_id = config.mosic.pages.requirements or null
 ```
 
 ## 4. Group Subtasks by Wave and Detect File Overlaps
@@ -340,130 +327,20 @@ Mode: {execution_mode_label}
 ## 6. Execute Subtasks
 
 ```
-# --- Extract user decisions from context pages ---
-locked_decisions = ""
-deferred_ideas = ""
-discretion_areas = ""
-
-# Task-level context first (highest priority)
-IF task_context_content:
-  locked_decisions = extract_section(task_context_content, "## Decisions")
-  deferred_ideas = extract_section(task_context_content, "## Deferred Ideas")
-  discretion_areas = extract_section(task_context_content, "## Claude's Discretion")
-
-# Phase-level context (merge)
-IF context_content:
-  phase_locked = extract_section(context_content, "## Decisions")
-  IF not phase_locked:
-    phase_locked = extract_section(context_content, "## Implementation Decisions")
-  IF phase_locked:
-    locked_decisions = (locked_decisions ? locked_decisions + "\n\n**Inherited from phase:**\n" + phase_locked : phase_locked)
-  IF not deferred_ideas:
-    deferred_ideas = extract_section(context_content, "## Deferred Ideas")
-  IF not discretion_areas:
-    discretion_areas = extract_section(context_content, "## Claude's Discretion")
-
-# Research pages (fallback)
-IF research_content AND not locked_decisions:
-  user_constraints = extract_section(research_content, "## User Constraints")
-  IF user_constraints:
-    locked_decisions = extract_subsection(user_constraints, "### Locked Decisions")
-    IF not deferred_ideas:
-      deferred_ideas = extract_subsection(user_constraints, "### Deferred Ideas")
-    IF not discretion_areas:
-      discretion_areas = extract_subsection(user_constraints, "### Claude's Discretion")
-
-IF task_research_content AND not locked_decisions:
-  task_constraints = extract_section(task_research_content, "## User Constraints")
-  IF task_constraints:
-    locked_decisions = extract_subsection(task_constraints, "### Locked Decisions")
-    IF not deferred_ideas:
-      deferred_ideas = extract_subsection(task_constraints, "### Deferred Ideas")
-    IF not discretion_areas:
-      discretion_areas = extract_subsection(task_constraints, "### Claude's Discretion")
-
-executor_decisions_xml = """
-<user_decisions>
-<locked_decisions>
-""" + (locked_decisions or "No locked decisions — all at Claude's discretion.") + """
-</locked_decisions>
-
-<deferred_ideas>
-""" + (deferred_ideas or "No deferred ideas.") + """
-</deferred_ideas>
-
-<discretion_areas>
-""" + (discretion_areas or "All areas at Claude's discretion.") + """
-</discretion_areas>
-</user_decisions>
-"""
-
-# Extract task-specific requirements from plan page coverage table
-task_requirements_xml = "<phase_requirements>\n"
-IF plan_content:
-  coverage_section = extract_section(plan_content, "## Requirements Coverage")
-  IF coverage_section:
-    FOR each row in parse_markdown_table(coverage_section):
-      task_requirements_xml += '<requirement id="' + row.req_id + '">' + row.description + '</requirement>\n'
-IF task_requirements_xml == "<phase_requirements>\n":
-  task_requirements_xml += "No explicit requirements extracted from plan.\n"
-task_requirements_xml += "</phase_requirements>"
-
-# Frontend detection
-frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
-  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
-  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
-  "UX", "interface", "widget"]
-
-task_text = (TASK_TITLE + " " + (task.description or "") + " " + (plan_content or "")).toLowerCase()
-is_frontend = frontend_keywords.some(kw => task_text.includes(kw.toLowerCase()))
-
-frontend_design_xml = ""
-IF is_frontend:
-  frontend_design_content = Read("./.claude/get-shit-done/references/frontend-design.md")
-  frontend_design_xml = extract_section(frontend_design_content, "## For Executors")
-
-# TDD execution context for subtasks
-tdd_execution_xml = ""
-IF plan_content contains 'tdd="true"' OR task has "tdd" tag:
-  tdd_reference = Read("~/.claude/get-shit-done/references/tdd.md")
-  tdd_execution_sections = extract_sections(tdd_reference, [
-    "<execution_flow>", "<test_quality>", "<commit_patterns>", "<mosic_test_tracking>"
-  ])
-  tdd_execution_xml = "<tdd_execution_context>\n" + tdd_execution_sections + "\n</tdd_execution_context>"
-  Display: "TDD task detected — executor will use RED-GREEN-REFACTOR cycle."
-
-# Shared context for all prompts (decisions XML placed BEFORE general context)
-shared_context = """
-""" + executor_decisions_xml + """
-
-""" + task_requirements_xml + """
-
-**Parent Task:** """ + TASK_IDENTIFIER + """ - """ + TASK_TITLE + """
-**Parent Task ID:** """ + TASK_ID + """
-**Phase:** """ + phase.title + """
-**Workspace:** """ + workspace_id + """
-
-**Plan Content:**
-""" + (plan_content or "No plan page available.") + """
-
-**Phase Research (if available):**
-""" + (research_content or "No phase research.") + """
-
-**Phase Context & Decisions (if available):**
-""" + (context_content or "No phase context.") + """
-
-**Task-Specific Context (if available):**
-""" + (task_context_content or "No task-specific context.") + """
-
-**Task-Specific Research (if available):**
-""" + (task_research_content or "No task-specific research.") + """
-
-**Frontend Design Context (if applicable):**
-""" + (frontend_design_xml or "Not a frontend task.") + """
-
-**TDD Execution Context (if applicable):**
-""" + (tdd_execution_xml or "Not a TDD task.") + """
+# Build <mosic_references> block — IDs only, no content embedding.
+# Executor self-loads all content from Mosic via execute-plan.md workflow.
+mosic_refs = """
+<mosic_references>
+<task id="{TASK_ID}" identifier="{TASK_IDENTIFIER}" title="{TASK_TITLE}" />
+<phase id="{phase_id}" title="{phase.title}" number="{PHASE}" />
+<workspace id="{workspace_id}" />
+<plan_page id="{plan_page_id}" />
+<research_page id="{research_page_id}" />
+<context_page id="{context_page_id}" />
+<requirements_page id="{requirements_page_id}" />
+<task_context_page id="{task_context_page_id}" />
+<task_research_page id="{task_research_page_id}" />
+</mosic_references>
 """
 
 all_commits = []        # Collected across all waves
@@ -476,19 +353,11 @@ all_failures = []       # Track failures across all waves
 
 ```
 IF NOT use_parallel:
-  # Build full subtask list for single agent
-  subtask_details = ""
+  # Build subtask IDs list for single agent
+  subtask_ids = ""
   FOR each subtask in incomplete_subtasks:
     st = subtask_details_map[subtask.name]
-    subtask_details += """
-
-### Subtask: """ + st.identifier + """ - """ + st.title + """
-**Status:** """ + st.status + """
-**Description:**
-""" + st.description + """
-
----
-"""
+    subtask_ids += "- **" + st.identifier + "** (" + st.name + "): " + st.title + "\n"
 
   executor_prompt = """
 <objective>
@@ -501,12 +370,10 @@ Implement all subtasks and then ask for user permission to create commits. Creat
 @./.claude/get-shit-done/workflows/execute-plan.md
 </execution_context>
 
-<context>
-""" + shared_context + """
+""" + mosic_refs + """
 
-**Subtasks to Execute:**
-""" + subtask_details + """
-</context>
+**Subtasks to Execute (load details from Mosic):**
+""" + subtask_ids + """
 
 <commit_rules>
 **Per-Subtask Commits:**
@@ -604,15 +471,10 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
 @./.claude/get-shit-done/workflows/execute-plan.md
 </execution_context>
 
-<context>
-""" + shared_context + """
+""" + mosic_refs + """
 
 **Subtask to Execute (ONLY THIS ONE):**
-
-### Subtask: """ + st.identifier + """ - """ + st.title + """
-**Description:**
-""" + st.description + """
-</context>
+- **""" + st.identifier + """** (""" + st.name + """): """ + st.title + """
 
 <commit_rules>
 **DEFERRED COMMITS — DO NOT COMMIT.**
@@ -667,15 +529,10 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
 @./.claude/get-shit-done/workflows/execute-plan.md
 </execution_context>
 
-<context>
-""" + shared_context + """
+""" + mosic_refs + """
 
 **Subtask to Execute (ONLY THIS ONE):**
-
-### Subtask: """ + st.identifier + """ - """ + st.title + """
-**Description:**
-""" + st.description + """
-</context>
+- **""" + st.identifier + """** (""" + st.name + """): """ + st.title + """
 """
 
       wave_prompts.push({
@@ -718,35 +575,44 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
       )
 
     # 4. Collect results from all agents in this wave
+    # Task() results correspond to wave_prompts by spawn order
     wave_current_failures = []
-    FOR each agent_result in wave_results:
+    wave_results_passed = []
+    FOR each (wp, agent_result) in zip(wave_prompts, wave_results):
       IF agent_result contains "## SUBTASK COMPLETE" or agent_result contains "## EXECUTION COMPLETE":
-        files = extract_file_list(agent_result)
-        all_files_changed.push(...parse_file_list(files))
+        files = parse_file_list(extract_file_list(agent_result))
+        all_files_changed.push(...files)
         all_results.push(agent_result)
 
         IF NOT wave_parallel:
           # Normal-mode agent committed on its own — extract commit info
           commits = extract_commits(agent_result)
           all_commits.push(...commits)
-          mosic_complete_task(wave_subtasks[0].name)
+          mosic_complete_task(wp.subtask.name)
           mosic_create_document("M Comment", {
             workspace: workspace_id,
             ref_doc: "MTask",
-            ref_name: wave_subtasks[0].name,
+            ref_name: wp.subtask.name,
             content: "<p><strong>Completed</strong></p>" +
               (commits.length > 0 ? "<p>Commit: <code>" + commits[0].hash + "</code></p>" : "")
           })
+        ELSE:
+          # Parallel mode — collect for orchestrator-managed commits (section 6)
+          wave_results_passed.push({
+            subtask: wp.subtask,
+            files_modified: files,
+            result_text: agent_result
+          })
 
       ELIF agent_result contains "## SUBTASK FAILED":
-        wave_current_failures.push(agent_result)
-        all_failures.push(agent_result)
+        wave_current_failures.push({ subtask: wp.subtask, result: agent_result })
+        all_failures.push({ subtask: wp.subtask, result: agent_result })
 
     # 5. Handle failures in this wave
     IF wave_current_failures.length > 0:
       Display: "Wave " + wave_num + " had " + wave_current_failures.length + " failure(s)"
       FOR each failure in wave_current_failures:
-        Display: failure
+        Display: failure.result
 
       AskUserQuestion({
         questions: [{
@@ -782,8 +648,8 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
         FOR each file in files:
           git add {file}
 
-        # Determine commit type from result content
-        commit_type = infer_commit_type(result)
+        # Determine commit type from result text content
+        commit_type = infer_commit_type(result.result_text)
         git commit -m "{commit_type}({TASK_IDENTIFIER}): {subtask.title}"
         commit_hash = git rev-parse --short HEAD
         all_commits.push({ hash: commit_hash, message: commit_type + "(" + TASK_IDENTIFIER + "): " + subtask.title })
