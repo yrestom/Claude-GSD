@@ -29,7 +29,7 @@ Verify tools are available before proceeding. If ToolSearch fails, report error.
 
 <step name="load_mosic_context" priority="first">
 
-**Load context from Mosic:**
+**Load context from Mosic using references or discovery:**
 
 ```
 Read config.json for Mosic IDs:
@@ -41,35 +41,128 @@ Read config.json for Mosic IDs:
 - model_profile (default: balanced)
 ```
 
+**Step 1: Check for `<mosic_references>` XML in your prompt (preferred path).**
+
+The orchestrator may pass page IDs directly instead of embedding content:
+
+```xml
+<mosic_references>
+<task id="{uuid}" identifier="{id}" title="{title}" />
+<phase id="{uuid}" title="{title}" number="{N}" />
+<workspace id="{uuid}" />
+<plan_page id="{uuid}" />
+<research_page id="{uuid}" />
+<context_page id="{uuid}" />
+<requirements_page id="{uuid}" />
+<!-- Optional task-specific pages -->
+<task_context_page id="{uuid}" />
+<task_research_page id="{uuid}" />
+</mosic_references>
+```
+
+**Step 2: Load content using IDs (direct) or discovery (fallback).**
+
 ```javascript
-// Get the task with full details
-task = mosic_get_task(task_id, { description_format: "markdown" })
+// --- PATH A: <mosic_references> present (lean orchestrator) ---
+if (prompt.includes("<mosic_references>")) {
+  refs = parse_mosic_references(prompt)
 
-// Get task pages (plan, context, etc.)
-task_pages = mosic_get_entity_pages("MTask", task_id)
-plan_page = task_pages.find(p => p.title.includes("Plan"))
+  task = mosic_get_task(refs.task.id, { description_format: "markdown" })
+  workspace_id = refs.workspace.id
 
-// Get plan content if exists
-if (plan_page) {
-  plan_content = mosic_get_page(plan_page.name, { content_format: "markdown" })
+  // Load plan page by direct ID
+  plan_content = ""
+  if (refs.plan_page?.id) {
+    plan_content = mosic_get_page(refs.plan_page.id, { content_format: "markdown" }).content
+  }
+
+  // Load phase context page by direct ID
+  phase_context_content = ""
+  if (refs.context_page?.id) {
+    phase_context_content = mosic_get_page(refs.context_page.id, { content_format: "markdown" }).content
+  }
+
+  // Load phase research page by direct ID
+  phase_research_content = ""
+  if (refs.research_page?.id) {
+    phase_research_content = mosic_get_page(refs.research_page.id, { content_format: "markdown" }).content
+  }
+
+  // Load requirements page by direct ID
+  requirements_content = ""
+  if (refs.requirements_page?.id) {
+    requirements_content = mosic_get_page(refs.requirements_page.id, { content_format: "markdown" }).content
+  }
+
+  // Load task-specific pages by direct ID (if provided)
+  task_context_content = ""
+  if (refs.task_context_page?.id) {
+    task_context_content = mosic_get_page(refs.task_context_page.id, { content_format: "markdown" }).content
+  }
+
+  task_research_content = ""
+  if (refs.task_research_page?.id) {
+    task_research_content = mosic_get_page(refs.task_research_page.id, { content_format: "markdown" }).content
+  }
+
+  // Get phase task list for metadata
+  phase_task_list = mosic_get_task_list(refs.phase.id || task.task_list, { include_tasks: false })
+
+  // Get task pages for plan discovery (if plan_page not in refs)
+  task_pages = mosic_get_entity_pages("MTask", task.name)
 }
 
-// Get parent task list for phase context
-phase_task_list = mosic_get_task_list(task.task_list, { include_tasks: false })
-phase_pages = mosic_get_entity_pages("MTask List", task.task_list)
+// --- PATH B: No <mosic_references> — fallback to title-based discovery ---
+else {
+  // Get the task with full details
+  task = mosic_get_task(task_id, { description_format: "markdown" })
 
-// Load phase-level pages (context and research are on phase, not task)
-phase_context_page = phase_pages.find(p => p.title.includes("Context") || p.title.includes("Decisions"))
-phase_research_page = phase_pages.find(p => p.title.includes("Research"))
+  // Get task pages (plan, context, etc.)
+  task_pages = mosic_get_entity_pages("MTask", task_id)
+  plan_page = task_pages.find(p => p.title.includes("Plan"))
 
-phase_context_content = ""
-if (phase_context_page) {
-  phase_context_content = mosic_get_page(phase_context_page.name, { content_format: "markdown" }).content
-}
+  // Get plan content if exists
+  plan_content = ""
+  if (plan_page) {
+    plan_content = mosic_get_page(plan_page.name, { content_format: "markdown" }).content
+  }
 
-phase_research_content = ""
-if (phase_research_page) {
-  phase_research_content = mosic_get_page(phase_research_page.name, { content_format: "markdown" }).content
+  // Get parent task list for phase context
+  phase_task_list = mosic_get_task_list(task.task_list, { include_tasks: false })
+  phase_pages = mosic_get_entity_pages("MTask List", task.task_list)
+
+  // Load phase-level pages (context and research are on phase, not task)
+  phase_context_page = phase_pages.find(p => p.title.includes("Context") || p.title.includes("Decisions"))
+  phase_research_page = phase_pages.find(p => p.title.includes("Research"))
+
+  phase_context_content = ""
+  if (phase_context_page) {
+    phase_context_content = mosic_get_page(phase_context_page.name, { content_format: "markdown" }).content
+  }
+
+  phase_research_content = ""
+  if (phase_research_page) {
+    phase_research_content = mosic_get_page(phase_research_page.name, { content_format: "markdown" }).content
+  }
+
+  // Load requirements page from config
+  requirements_content = ""
+  if (config.mosic?.pages?.requirements) {
+    requirements_content = mosic_get_page(config.mosic.pages.requirements, { content_format: "markdown" }).content
+  }
+
+  // Task-specific context (discovered from task pages)
+  task_context_page = task_pages.find(p => p.title.includes("Context"))
+  task_context_content = ""
+  if (task_context_page) {
+    task_context_content = mosic_get_page(task_context_page.name, { content_format: "markdown" }).content
+  }
+
+  task_research_page = task_pages.find(p => p.title.includes("Research"))
+  task_research_content = ""
+  if (task_research_page) {
+    task_research_content = mosic_get_page(task_research_page.name, { content_format: "markdown" }).content
+  }
 }
 ```
 
@@ -172,29 +265,144 @@ No segmentation benefit - execute entirely in main
 </step>
 
 <step name="load_context">
-Read plan and context from Mosic:
+Process loaded content into execution context. All content was loaded in `load_mosic_context` step.
 
 ```javascript
-// Plan content loaded in load_mosic_context step
 execution_instructions = plan_content || task.description
-
-// Phase context and research loaded in load_mosic_context step
-// - phase_context_content: User decisions from /gsd:discuss-phase
-// - phase_research_content: Research findings from /gsd:research-phase
-
-// Check for task-specific context page (rare, but possible)
-task_context_page = task_pages.find(p => p.title.includes("Context"))
-if (task_context_page) {
-  task_context_content = mosic_get_page(task_context_page.name, { content_format: "markdown" })
-}
 ```
 
 This IS the execution instructions. Follow it exactly.
 
 **Context hierarchy (use all that exist):**
-1. **Phase context** (`phase_context_content`): User's vision and decisions for the entire phase - from `/gsd:discuss-phase`. Honor these decisions throughout execution.
-2. **Phase research** (`phase_research_content`): Technical findings and recommendations - from `/gsd:research-phase`. Reference for implementation patterns.
-3. **Task context** (`task_context_content`): Task-specific notes if any.
+1. **Task context** (`task_context_content`): Task-specific decisions — highest priority.
+2. **Phase context** (`phase_context_content`): User's vision and decisions for the entire phase — from `/gsd:discuss-phase`. Honor these decisions throughout execution.
+3. **Phase research** (`phase_research_content`): Technical findings and recommendations — from `/gsd:research-phase`. Reference for implementation patterns.
+
+**Self-extract user decisions (when NOT already provided by orchestrator):**
+
+Skip this extraction if your prompt already contains a `<user_decisions>` XML block — the orchestrator has pre-extracted decisions for you.
+
+```javascript
+if (!prompt.includes("<user_decisions>")) {
+  locked_decisions = ""
+  deferred_ideas = ""
+  discretion_areas = ""
+
+  // Task-level context first (highest priority)
+  if (task_context_content) {
+    locked_decisions = extract_section(task_context_content, "## Decisions")
+    deferred_ideas = extract_section(task_context_content, "## Deferred Ideas")
+    discretion_areas = extract_section(task_context_content, "## Claude's Discretion")
+  }
+
+  // Phase-level context (merge)
+  if (phase_context_content) {
+    phase_locked = extract_section(phase_context_content, "## Decisions")
+      || extract_section(phase_context_content, "## Implementation Decisions")
+    if (phase_locked) {
+      locked_decisions = locked_decisions
+        ? locked_decisions + "\n\n**Inherited from phase:**\n" + phase_locked
+        : phase_locked
+    }
+    if (!deferred_ideas) deferred_ideas = extract_section(phase_context_content, "## Deferred Ideas")
+    if (!discretion_areas) discretion_areas = extract_section(phase_context_content, "## Claude's Discretion")
+  }
+
+  // Research pages (fallback)
+  if (phase_research_content && !locked_decisions) {
+    user_constraints = extract_section(phase_research_content, "## User Constraints")
+    if (user_constraints) {
+      locked_decisions = extract_subsection(user_constraints, "### Locked Decisions")
+      if (!deferred_ideas) deferred_ideas = extract_subsection(user_constraints, "### Deferred Ideas")
+      if (!discretion_areas) discretion_areas = extract_subsection(user_constraints, "### Claude's Discretion")
+    }
+  }
+
+  if (task_research_content && !locked_decisions) {
+    task_constraints = extract_section(task_research_content, "## User Constraints")
+    if (task_constraints) {
+      locked_decisions = extract_subsection(task_constraints, "### Locked Decisions")
+      if (!deferred_ideas) deferred_ideas = extract_subsection(task_constraints, "### Deferred Ideas")
+      if (!discretion_areas) discretion_areas = extract_subsection(task_constraints, "### Claude's Discretion")
+    }
+  }
+
+  // Store as internal state for context_fidelity enforcement
+  self_extracted_decisions = { locked_decisions, deferred_ideas, discretion_areas }
+}
+```
+
+**Self-extract requirements (when NOT already provided by orchestrator):**
+
+Skip if your prompt already contains a `<phase_requirements>` XML block.
+
+```javascript
+if (!prompt.includes("<phase_requirements>")) {
+  phase_requirements = []
+
+  // From requirements page (loaded in load_mosic_context)
+  if (requirements_content) {
+    traceability = extract_section(requirements_content, "## Traceability")
+      || extract_section(requirements_content, "## Requirements Traceability")
+    if (traceability) {
+      for (row of parse_markdown_table(traceability)) {
+        if (row.phase matches current phase) {
+          phase_requirements.push({ id: row.requirement_id, description: row.description })
+        }
+      }
+    }
+  }
+
+  // From plan page coverage table
+  if (plan_content) {
+    coverage = extract_section(plan_content, "## Requirements Coverage")
+    if (coverage) {
+      for (row of parse_markdown_table(coverage)) {
+        phase_requirements.push({ id: row.req_id, description: row.description })
+      }
+    }
+  }
+}
+```
+
+**Self-detect frontend work (when NOT already provided by orchestrator):**
+
+Skip if your prompt already contains a `<frontend_design_context>` XML block.
+
+```javascript
+if (!prompt.includes("<frontend_design_context>")) {
+  frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
+    "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
+    "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
+    "UX", "interface", "widget"]
+
+  task_text = (task.title + " " + (task.description || "") + " " + (plan_content || "")).toLowerCase()
+  is_frontend = frontend_keywords.some(kw => task_text.includes(kw.toLowerCase()))
+
+  if (is_frontend) {
+    frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
+    frontend_design_context = extract_section(frontend_design_content, "## For Executors")
+  }
+}
+```
+
+**Self-detect TDD tasks (when NOT already provided by orchestrator):**
+
+Skip if your prompt already contains a `<tdd_execution_context>` XML block.
+
+```javascript
+if (!prompt.includes("<tdd_execution_context>")) {
+  has_tdd = (plan_content && plan_content.includes('tdd="true"'))
+    || (task.tags && task.tags.includes("tdd"))
+
+  if (has_tdd) {
+    tdd_reference = Read("~/.claude/get-shit-done/references/tdd.md")
+    tdd_execution_context = extract_sections(tdd_reference, [
+      "<execution_flow>", "<test_quality>", "<commit_patterns>", "<mosic_test_tracking>"
+    ])
+  }
+}
+```
 </step>
 
 <step name="detect_execution_mode">
