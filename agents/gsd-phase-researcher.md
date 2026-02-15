@@ -265,7 +265,24 @@ For each WebSearch finding:
 
 ## Requirements Gap Analysis Protocol
 
-After completing research and before creating the research page, cross-reference findings against requirements and decisions.
+**Key principle:** Discussion gap analysis is a *surface-level scan* done BEFORE deep research. It cross-references goals against requirements using only discovery findings and user intuition. Research gap analysis happens AFTER deep technical investigation — you have knowledge discussion didn't have. Your analysis must be independent and additive, not a rubber stamp of discussion's conclusions.
+
+### Step 0: Process Discussion Gap Status
+
+If `<discussion_gaps>` XML is present in your prompt, process it as INPUT (not as conclusions):
+
+**Remaining gaps** (discussion identified but didn't resolve):
+- These are priority investigation items — your research should answer them
+- Investigate each with the depth that only post-research analysis can provide
+- A remaining gap may turn out to be NON-BLOCKING after research reveals a clear best practice
+
+**Resolved gaps** (discussion marked as resolved via user decisions):
+- Validate technical soundness — the user decided during discussion, before deep research
+- If research reveals a resolved decision is technically problematic (library doesn't support it, architecture conflict, performance issue), flag as `DISCUSSION_INVALIDATED`
+- If technically sound, acknowledge and move on
+
+**No discussion gaps provided:**
+- Research starts gap analysis from scratch — no prior analysis to build on
 
 ### Step 1: Enumerate Requirements
 
@@ -275,29 +292,53 @@ Gather all requirements and decisions from:
 - **Requirements page** — explicit requirements mapped to this phase (if provided)
 - **Implicit requirements** — requirements logically derived from the phase goal (e.g., "build auth" implies session management, password hashing, etc.)
 
-### Step 2: Cross-Reference Against Findings
+### Step 2: Cross-Reference Against Findings (Three Categories)
 
-For each requirement/decision:
-1. Does research provide sufficient guidance for the planner to create tasks?
-2. Is the requirement specific enough to implement? (Can you write acceptance criteria?)
-3. Are there conflicting signals between requirements and research findings?
+For each requirement/decision, check research provides sufficient guidance. Then look for gaps in THREE categories:
 
-### Step 3: Classify Gaps
+**Category A — Discussion-remaining gaps:**
+Gaps discussion identified but didn't resolve. For each:
+1. Does your research now provide enough guidance to resolve it?
+2. If yes → document the resolution with research evidence
+3. If no → it remains a gap, now with research context added
 
-**BLOCKING** — must be resolved before planning:
-- Ambiguous requirement with 2+ valid interpretations that lead to different implementations
-- Conflicting requirements (requirement A contradicts requirement B)
-- Missing core behavior specification (phase goal implies X but no requirement defines it)
-- Locked decision found infeasible by research (technology doesn't support what was decided)
+**Category B — Discussion-invalidated gaps:**
+Gaps discussion resolved but research finds technically problematic. For each:
+1. Does research reveal the user's decision is infeasible or problematic?
+2. What specific technical evidence contradicts the decision?
+3. What alternative would research recommend?
 
-**NON-BLOCKING** — planner can handle with reasonable defaults:
-- Edge case behavior with an obvious default
-- Implementation detail with clear best practice from research
-- Minor preference where any reasonable choice works
+**Category C — Research-discovered gaps (NEW):**
+Gaps only visible AFTER deep research that discussion had no visibility into:
+- Architecture constraints discovered during investigation (e.g., framework X doesn't support pattern Y)
+- Library limitations that affect requirements (e.g., library caps at N connections)
+- Integration issues between components (e.g., library A and B have conflicting dependencies)
+- Performance/security/scalability implications of decisions
+- Missing specifications only apparent when you understand the implementation path
+- Edge cases that emerge from understanding the technical domain deeply
 
-**CLEAR** — no gaps found:
-- All requirements have actionable research findings
-- Requirements are specific enough for task creation
+### Step 3: Classify and Tag Gaps
+
+Each gap gets a **severity** AND a **source tag**:
+
+**Severity:**
+- **BLOCKING** — must be resolved before planning:
+  - Ambiguous requirement with 2+ valid interpretations leading to different implementations
+  - Conflicting requirements (requirement A contradicts requirement B)
+  - Missing core behavior specification (phase goal implies X but no requirement defines it)
+  - Locked decision found infeasible by research (technology doesn't support what was decided)
+
+- **NON-BLOCKING** — planner can handle with reasonable defaults:
+  - Edge case behavior with an obvious default
+  - Implementation detail with clear best practice from research
+  - Minor preference where any reasonable choice works
+
+**Source tag (provenance):**
+- `DISCUSSION_REMAINING` — discussion identified this gap; research investigated it
+- `DISCUSSION_INVALIDATED` — discussion resolved this gap; research found technical issues
+- `RESEARCH_DISCOVERED` — new gap found only through deep technical research
+
+**CLEAR** — no gaps found across all three categories.
 
 ### Search Before Claiming Absence
 
@@ -523,23 +564,38 @@ Verified patterns from official sources:
 
 **Status:** {CLEAR | NON-BLOCKING | BLOCKING}
 
-### Blocking Gaps
-{Gaps requiring user decision before planning. If none: "None identified."}
+### Discussion-Remaining Gaps
+{Gaps discussion identified but didn't resolve, now investigated by research. If none or no discussion gaps: "None — no unresolved discussion gaps."}
 
-For each blocking gap:
+For each:
+- **Gap:** {what was flagged by discussion}
+- **Source:** `DISCUSSION_REMAINING`
+- **Research finding:** {what research discovered about this gap}
+- **Severity:** {BLOCKING or NON-BLOCKING}
+- **Resolution/Default:** {if research resolves it: the answer. If still open: suggested resolution for user}
+
+### Discussion-Invalidated Gaps
+{Gaps discussion resolved but research found technically problematic. If none: "None — all discussion resolutions are technically sound."}
+
+For each:
+- **Gap:** {what was resolved by discussion}
+- **Original resolution:** {what user/discussion decided}
+- **Source:** `DISCUSSION_INVALIDATED`
+- **Technical issue:** {what research found — specific evidence}
+- **Severity:** BLOCKING
+- **Suggested alternative:** {what research recommends instead}
+
+### Research-Discovered Gaps
+{NEW gaps found only through deep technical research. If none: "None — research found no additional gaps."}
+
+For each:
 - **Gap:** {what's missing or ambiguous}
-- **Relates to:** {which requirement or decision}
-- **Evidence checked:** {what was searched to confirm gap is real}
+- **Source:** `RESEARCH_DISCOVERED`
+- **Why discussion couldn't find this:** {architecture constraint, library limitation, integration issue, etc.}
+- **Severity:** {BLOCKING or NON-BLOCKING}
+- **Evidence:** {research findings that revealed this gap}
 - **Impact if unresolved:** {what goes wrong if planner guesses}
-- **Suggested resolution:** {options for user}
-
-### Non-Blocking Gaps
-{Gaps the planner can handle with defaults. If none: "None — all requirements are actionable."}
-
-For each non-blocking gap:
-- **Gap:** {what's unclear}
-- **Relates to:** {which requirement or decision}
-- **Default approach:** {what planner should assume}
+- **Suggested resolution/Default:** {options for user or default for planner}
 
 ## Sources
 
@@ -669,20 +725,51 @@ Run through verification protocol checklist:
 - [ ] Confidence levels assigned honestly
 - [ ] "What might I have missed?" review
 
-## Step 4.5: Requirements Gap Analysis
+## Step 4.5: Requirements Gap Analysis (Independent)
 
-Cross-reference research findings against all requirements and decisions:
+**Run this step REGARDLESS of discussion gap status.** Discussion gap analysis was a surface scan done before deep research. Your analysis must go deeper — you now have technical knowledge discussion didn't have.
 
-1. **Enumerate** all requirements/decisions from: locked_decisions, phase goal, requirements page, implicit requirements derived from phase goal
-2. **Cross-reference** each requirement against research findings — does research provide enough guidance for the planner to create actionable tasks?
-3. **Classify** any gaps as BLOCKING or NON-BLOCKING (see `<gap_analysis>` protocol)
-4. **Verify** each gap claim — re-check context, requirements, and findings before flagging (search before claiming absence)
-5. **Include** results in the `## Gap Analysis` section of the research output
-
+**4.5a: Process `<discussion_gaps>` XML (if present)**
 ```
-IF blocking gaps found:
+IF prompt contains <discussion_gaps>:
+  remaining_gaps = parse discussion remaining gaps
+  resolved_gaps = parse discussion resolved gaps
+
+  # Remaining → priority investigation items
+  FOR each remaining gap:
+    Investigate with research depth. Can research answer this now?
+
+  # Resolved → validate technical soundness
+  FOR each resolved gap:
+    Does research confirm this resolution is technically sound?
+    If NOT: flag as DISCUSSION_INVALIDATED
+```
+
+**4.5b: Enumerate all requirements/decisions**
+Gather from: locked_decisions, phase goal, requirements page, implicit requirements derived from phase goal.
+
+**4.5c: Cross-reference each requirement against research findings**
+Does research provide enough guidance for the planner to create actionable tasks?
+
+**4.5d: Find NEW research-discovered gaps**
+Specifically look for gaps in areas discussion had no visibility into:
+- Architecture constraints discovered during research
+- Library limitations that affect requirements
+- Integration issues between components
+- Performance/security/scalability implications of decisions
+- Missing specifications only apparent when you understand the implementation path
+
+**4.5e: Classify and tag each gap**
+Every gap gets severity (BLOCKING/NON-BLOCKING) AND source tag (`DISCUSSION_REMAINING`, `DISCUSSION_INVALIDATED`, `RESEARCH_DISCOVERED`) — see `<gap_analysis>` protocol.
+
+**4.5f: Verify each gap claim**
+Re-check context, requirements, and findings before flagging (search before claiming absence).
+
+**4.5g: Include results in `## Gap Analysis` section of research output**
+```
+IF any BLOCKING gaps (from any source):
   gaps_status = "BLOCKING"
-ELIF non-blocking gaps found:
+ELIF any NON-BLOCKING gaps:
   gaps_status = "NON-BLOCKING"
 ELSE:
   gaps_status = "CLEAR"

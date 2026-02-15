@@ -269,18 +269,30 @@ Update the research M Page with:
 
 **Status:** {CLEAR | NON-BLOCKING | BLOCKING}
 
-### Blocking Gaps
-{Gaps requiring user decision. If none: "None identified."}
-- **Gap:** {what's missing or ambiguous}
-- **Relates to:** {which requirement or decision}
-- **Impact if unresolved:** {what goes wrong}
-- **Suggested resolution:** {options}
+### Discussion-Remaining Gaps
+{Gaps discussion identified but didn't resolve, investigated by task research. If none: "None."}
+- **Gap:** {what was flagged}
+- **Source:** `DISCUSSION_REMAINING`
+- **Research finding:** {what task research discovered}
+- **Severity:** {BLOCKING or NON-BLOCKING}
+- **Resolution/Default:** {answer or suggested resolution}
 
-### Non-Blocking Gaps
-{Gaps planner can handle. If none: "None — all requirements are actionable."}
-- **Gap:** {what's unclear}
-- **Relates to:** {which requirement or decision}
-- **Default approach:** {what planner should assume}
+### Discussion-Invalidated Gaps
+{Gaps discussion resolved but research found problematic. If none: "None."}
+- **Gap:** {what was resolved}
+- **Source:** `DISCUSSION_INVALIDATED`
+- **Technical issue:** {what research found}
+- **Severity:** BLOCKING
+- **Suggested alternative:** {recommendation}
+
+### Research-Discovered Gaps
+{NEW gaps found through task-specific research. If none: "None."}
+- **Gap:** {what's missing or ambiguous}
+- **Source:** `RESEARCH_DISCOVERED`
+- **Why discussion couldn't find this:** {reason}
+- **Severity:** {BLOCKING or NON-BLOCKING}
+- **Impact if unresolved:** {what goes wrong}
+- **Suggested resolution/Default:** {options or default}
 
 ## Sources
 
@@ -318,17 +330,30 @@ Research ONLY the gaps identified:
 </step>
 
 <step name="gap_analysis">
-Cross-reference findings against task requirements:
+**Run this step REGARDLESS of discussion gap status.** Discussion gap analysis was a surface scan done before deep research. Your analysis must go deeper.
+
+**Process `<discussion_gaps>` XML (if present):**
+- **Remaining gaps** → priority investigation items. Can your task-specific research answer these now?
+- **Resolved gaps** → validate technical soundness. Does research confirm the resolution works for THIS task?
+- If resolution is technically problematic, flag as `DISCUSSION_INVALIDATED`
+
+**Independent analysis:**
 1. Parse task description for implicit requirements (what must be true for the task to be "done"?)
 2. Check locked decisions from task AND phase context
 3. For each requirement/decision: does research provide actionable guidance?
-4. Classify gaps as BLOCKING (ambiguous requirement, conflicting decisions, missing core spec) or NON-BLOCKING (edge case with obvious default, implementation detail with clear best practice)
-5. Verify each gap claim — re-check context, phase research, and findings before flagging (search before claiming absence)
+4. Find NEW research-discovered gaps — areas discussion had no visibility into:
+   - Architecture constraints discovered during task-specific investigation
+   - Library limitations affecting this task's requirements
+   - Integration issues with other components
+   - Edge cases that emerge from understanding the implementation path
+   - Phase research gaps that surface at task level
+5. Classify each gap with severity (BLOCKING/NON-BLOCKING) AND source tag (`DISCUSSION_REMAINING`, `DISCUSSION_INVALIDATED`, `RESEARCH_DISCOVERED`)
+6. Verify each gap claim — re-check context, phase research, and findings before flagging (search before claiming absence)
 
 ```
-IF blocking gaps found:
+IF any BLOCKING gaps (from any source):
   gaps_status = "BLOCKING"
-ELIF non-blocking gaps found:
+ELIF any NON-BLOCKING gaps:
   gaps_status = "NON-BLOCKING"
 ELSE:
   gaps_status = "CLEAR"
