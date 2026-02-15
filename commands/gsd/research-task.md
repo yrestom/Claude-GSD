@@ -407,8 +407,15 @@ If no context: "No user constraints — all decisions at Claude's discretion"
 ## Dependencies
 - {Library}: {version} - {why needed}
 
-## Open Questions
-- {Any unresolved questions for planner}
+## Gap Analysis
+
+**Status:** {CLEAR | NON-BLOCKING | BLOCKING}
+
+### Blocking Gaps
+{If any: list gap, what it relates to, impact, suggested resolution. If none: "None identified."}
+
+### Non-Blocking Gaps
+{If any: list gap, what it relates to, default approach. If none: "None — all requirements are actionable."}
 
 ---
 
@@ -416,6 +423,7 @@ Return:
 ## RESEARCH COMPLETE
 
 **Confidence:** {level}
+**Gaps Status:** {CLEAR | NON-BLOCKING | BLOCKING}
 **Key Finding:** {one-liner}
 **Research Page:** https://mosic.pro/app/page/""" + RESEARCH_PAGE_ID + """
 </output>
@@ -441,6 +449,48 @@ IF researcher_output contains "## RESEARCH COMPLETE":
   mosic_update_document("M Page", RESEARCH_PAGE_ID, {
     status: "Published"
   })
+
+  # Parse gap status
+  gaps_status = extract_field(researcher_output, "Gaps Status:")
+
+  IF gaps_status == "BLOCKING":
+    blocking_gaps = extract_section(researcher_output, "### Blocking Gaps")
+
+    Display:
+    """
+    -------------------------------------------
+     ⚠ BLOCKING GAPS DETECTED
+    -------------------------------------------
+
+    Research found gaps that need your input before planning:
+
+    {blocking_gaps}
+
+    ---
+    """
+
+    AskUserQuestion({
+      questions: [{
+        question: "How would you like to handle these blocking gaps?",
+        header: "Gaps",
+        options: [
+          { label: "Resolve gaps", description: "Run /gsd:discuss-task to make decisions, then re-research" },
+          { label: "Proceed anyway", description: "Continue to planning — planner will use best judgment" }
+        ],
+        multiSelect: false
+      }]
+    })
+
+    IF user_selection == "Resolve gaps":
+      Display:
+      """
+      To resolve these gaps:
+      1. `/gsd:discuss-task {TASK_IDENTIFIER}` — make decisions on the blocking gaps
+      2. `/gsd:research-task {TASK_IDENTIFIER}` — re-research with updated context
+
+      Research page saved: https://mosic.pro/app/page/{RESEARCH_PAGE_ID}
+      """
+      EXIT
 
   # Add research comment to task
   mosic_create_document("M Comment", {
@@ -480,6 +530,9 @@ Display:
 
 Confidence: {confidence}
 Key Finding: {key_finding}
+Gap Status: {gaps_status or "Not assessed"}
+{IF gaps_status == "NON-BLOCKING": "Non-blocking gaps documented — planner will use defaults."}
+{IF gaps_status == "BLOCKING": "⚠ Blocking gaps overridden — planner will use best judgment."}
 
 Research: https://mosic.pro/app/page/{RESEARCH_PAGE_ID}
 

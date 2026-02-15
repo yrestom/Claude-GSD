@@ -358,6 +358,59 @@ Research synced to Mosic
 Page: https://mosic.pro/app/page/{research_page_id}
 ```
 
+### Handle Gap Status
+
+```
+# Parse gaps_status from researcher return
+gaps_status = extract_field(researcher_output, "Gaps Status:")
+
+IF gaps_status == "BLOCKING":
+  blocking_gaps = extract_section(researcher_output, "### Blocking Gaps")
+
+  Display:
+  """
+  -------------------------------------------
+   ⚠ BLOCKING GAPS DETECTED
+  -------------------------------------------
+
+  Research found gaps that need your input before planning:
+
+  {blocking_gaps}
+
+  ---
+  """
+
+  AskUserQuestion({
+    questions: [{
+      question: "How would you like to handle these blocking gaps?",
+      header: "Gaps",
+      options: [
+        { label: "Resolve gaps", description: "Run /gsd:discuss-phase to make decisions, then re-research" },
+        { label: "Proceed anyway", description: "Continue to planning — planner will use best judgment" },
+        { label: "View research", description: "View the full research page first" }
+      ],
+      multiSelect: false
+    }]
+  })
+
+  IF user_selection == "Resolve gaps":
+    Display:
+    """
+    To resolve these gaps:
+    1. `/gsd:discuss-phase {PHASE}` — make decisions on the blocking gaps
+    2. `/gsd:research-phase {PHASE}` — re-research with updated context
+
+    Research page saved: https://mosic.pro/app/page/{research_page_id}
+    """
+    EXIT
+
+  IF user_selection == "View research":
+    research_full = mosic_get_page(research_page_id, { content_format: "markdown" })
+    Display: research_full.content
+    # Return to gap handling menu
+    GOTO "Handle Gap Status"
+```
+
 **If `## CHECKPOINT REACHED`:**
 - Present checkpoint to user
 - Get response
@@ -409,6 +462,10 @@ Key findings:
 - {summary_point_1}
 - {summary_point_2}
 - {summary_point_3}
+
+Gap Status: {gaps_status or "Not assessed"}
+{IF gaps_status == "NON-BLOCKING": "Non-blocking gaps documented — planner will use defaults."}
+{IF gaps_status == "BLOCKING": "⚠ Blocking gaps overridden — planner will use best judgment."}
 
 ---
 

@@ -346,6 +346,16 @@ IF --gaps:
     }).content
 ```
 
+### Extract Gap Context from Research
+
+```
+gap_context = ""
+IF research_content:
+  gap_analysis_section = extract_section(research_content, "## Gap Analysis")
+  IF gap_analysis_section:
+    gap_context = gap_analysis_section
+```
+
 ## 7.5 Extract Phase Requirements
 
 ```
@@ -501,6 +511,10 @@ IF tdd_config !== false:
 """ + planner_decisions_xml + """
 
 """ + phase_requirements_xml + """
+
+<gap_context>
+""" + (gap_context or "No gap analysis available.") + """
+</gap_context>
 
 """ + tdd_context_xml + """
 
