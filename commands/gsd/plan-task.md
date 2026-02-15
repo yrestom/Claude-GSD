@@ -172,65 +172,42 @@ IF existing_plan_page or existing_subtasks.length > 0:
     EXIT
 ```
 
-## 4. Load Phase Context
+## 4. Discover Phase/Task Page IDs
+
+Discover page IDs only — planner self-loads all content from Mosic.
 
 ```
 # Get parent task list (phase)
 phase_id = task.task_list
 phase = mosic_get_task_list(phase_id, { include_tasks: false })
 
-# Get phase pages for context
+# Get phase pages (IDs only)
 phase_pages = mosic_get_entity_pages("MTask List", phase_id, {
   include_subtree: false
 })
 
-# Load available context
 research_page = phase_pages.find(p => p.title.includes("Research"))
 context_page = phase_pages.find(p => p.title.includes("Context") or p.title.includes("Decisions"))
 
-research_content = ""
-IF research_page:
-  research_content = mosic_get_page(research_page.name, {
-    content_format: "markdown"
-  }).content
+# Store IDs only — planner self-loads content
+research_page_id = research_page ? research_page.name : null
+context_page_id = context_page ? context_page.name : null
+requirements_page_id = config.mosic.pages.requirements or null
 
-context_content = ""
-IF context_page:
-  context_content = mosic_get_page(context_page.name, {
-    content_format: "markdown"
-  }).content
-
-# Load task-specific context page if exists
+# Task-specific pages
 task_context_page = task_pages.find(p => p.title.includes("Context"))
 task_research_page = task_pages.find(p => p.title.includes("Research"))
-
-task_context_content = ""
-IF task_context_page:
-  task_context_content = mosic_get_page(task_context_page.name, {
-    content_format: "markdown"
-  }).content
-
-task_research_content = ""
-IF task_research_page:
-  task_research_content = mosic_get_page(task_research_page.name, {
-    content_format: "markdown"
-  }).content
-
-# Load requirements
-requirements_content = ""
-IF config.mosic.pages.requirements:
-  requirements_content = mosic_get_page(config.mosic.pages.requirements, {
-    content_format: "markdown"
-  }).content
+task_context_page_id = task_context_page ? task_context_page.name : null
+task_research_page_id = task_research_page ? task_research_page.name : null
 ```
 
 Display:
 ```
-Context loaded:
-- Phase research: {research_page ? "Yes" : "No"}
-- Phase context: {context_page ? "Yes" : "No"}
-- Task context: {task_context_page ? "Yes" : "No"}
-- Task research: {task_research_page ? "Yes" : "No"}
+Context discovered:
+- Phase research: {research_page_id ? "Yes" : "No"}
+- Phase context: {context_page_id ? "Yes" : "No"}
+- Task context: {task_context_page_id ? "Yes" : "No"}
+- Task research: {task_research_page_id ? "Yes" : "No"}
 ```
 
 ## 5. Create or Update Plan Page
@@ -273,46 +250,7 @@ ELSE:
   Display: "Created plan page: https://mosic.pro/app/page/" + PLAN_PAGE_ID
 ```
 
-## 5.5 Extract Task Requirements
-
-```
-# Extract requirements mapped to this task from parent plan page's coverage table
-task_requirements = []
-
-# Check if parent plan page exists with Requirements Coverage section
-IF plan_content:
-  coverage_section = extract_section(plan_content, "## Requirements Coverage")
-  IF coverage_section:
-    FOR each row in parse_markdown_table(coverage_section):
-      IF row.covered_by contains TASK_IDENTIFIER or row.covered_by contains TASK_TITLE:
-        task_requirements.append({
-          id: row.req_id,
-          description: row.description
-        })
-
-# Fallback: Extract from full requirements page traceability
-IF not task_requirements AND requirements_content:
-  traceability_section = extract_section(requirements_content, "## Traceability")
-  IF NOT traceability_section:
-    traceability_section = extract_section(requirements_content, "## Requirements Traceability")
-  IF traceability_section:
-    phase_name = phase.title
-    FOR each row in parse_markdown_table(traceability_section):
-      IF row.phase matches phase_name:
-        task_requirements.append({
-          id: row.requirement_id,
-          description: row.description or find_requirement_description(requirements_content, row.requirement_id)
-        })
-
-# Build XML
-task_requirements_xml = "<phase_requirements>\n"
-IF task_requirements:
-  FOR each req in task_requirements:
-    task_requirements_xml += '<requirement id="' + req.id + '">' + req.description + '</requirement>\n'
-ELSE:
-  task_requirements_xml += "No explicit requirements found for this task. Derive from task description.\n"
-task_requirements_xml += "</phase_requirements>"
-```
+*Step 5.5 removed — planner self-extracts requirements from Mosic pages.*
 
 ## 6. Spawn gsd-planner Agent
 
@@ -325,161 +263,29 @@ Display:
 Analyzing task and creating subtasks...
 ```
 
+Build lean prompt with page IDs only — planner self-loads all content from Mosic:
+
 ```
-# Determine planning mode based on flags
 planning_mode = quick_mode ? "task-quick" : "task-planning"
 
-# --- Extract user decisions from context pages ---
-locked_decisions = ""
-deferred_ideas = ""
-discretion_areas = ""
-
-# Task-level context first (highest priority)
-IF task_context_content:
-  locked_decisions = extract_section(task_context_content, "## Decisions")
-  deferred_ideas = extract_section(task_context_content, "## Deferred Ideas")
-  discretion_areas = extract_section(task_context_content, "## Claude's Discretion")
-
-# Phase-level context (merge)
-IF context_content:
-  phase_locked = extract_section(context_content, "## Decisions")
-  IF not phase_locked:
-    phase_locked = extract_section(context_content, "## Implementation Decisions")
-  IF phase_locked:
-    locked_decisions = (locked_decisions ? locked_decisions + "\n\n**Inherited from phase:**\n" + phase_locked : phase_locked)
-  IF not deferred_ideas:
-    deferred_ideas = extract_section(context_content, "## Deferred Ideas")
-  IF not discretion_areas:
-    discretion_areas = extract_section(context_content, "## Claude's Discretion")
-
-# Research pages (fallback)
-IF research_content AND not locked_decisions:
-  user_constraints = extract_section(research_content, "## User Constraints")
-  IF user_constraints:
-    locked_decisions = extract_subsection(user_constraints, "### Locked Decisions")
-    IF not deferred_ideas:
-      deferred_ideas = extract_subsection(user_constraints, "### Deferred Ideas")
-    IF not discretion_areas:
-      discretion_areas = extract_subsection(user_constraints, "### Claude's Discretion")
-
-IF task_research_content AND not locked_decisions:
-  task_constraints = extract_section(task_research_content, "## User Constraints")
-  IF task_constraints:
-    locked_decisions = extract_subsection(task_constraints, "### Locked Decisions")
-    IF not deferred_ideas:
-      deferred_ideas = extract_subsection(task_constraints, "### Deferred Ideas")
-    IF not discretion_areas:
-      discretion_areas = extract_subsection(task_constraints, "### Claude's Discretion")
-
-planner_decisions_xml = """
-<user_decisions>
-<locked_decisions>
-""" + (locked_decisions or "No locked decisions — all at Claude's discretion.") + """
-</locked_decisions>
-
-<deferred_ideas>
-""" + (deferred_ideas or "No deferred ideas.") + """
-</deferred_ideas>
-
-<discretion_areas>
-""" + (discretion_areas or "All areas at Claude's discretion.") + """
-</discretion_areas>
-</user_decisions>
-"""
-
-# Frontend detection
-frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
-  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
-  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
-  "UX", "interface", "widget"]
-
-task_text = (TASK_TITLE + " " + (task.description or "")).toLowerCase()
-is_frontend = frontend_keywords.some(kw => task_text.includes(kw.toLowerCase()))
-
-frontend_design_xml = ""
-IF is_frontend:
-  frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
-  frontend_design_xml = extract_section(frontend_design_content, "## For Planners")
-  Display: "Frontend work detected — design specification will be required in plans."
-
-# TDD detection and context loading
-tdd_config = config.workflow?.tdd ?? "auto"
-tdd_context_xml = ""
-
-IF tdd_config !== false:
-  tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
-    "state machine", "workflow engine", "utility", "helper", "business logic",
-    "data model", "schema", "converter", "calculator", "formatter", "serializer",
-    "authentication", "authorization"]
-
-  is_tdd_eligible = tdd_keywords.some(kw => task_text.includes(kw.toLowerCase()))
-
-  # Check task context page for TDD decision, fall back to phase context
-  tdd_user_decision = extract_decision(task_context_content, "Testing Approach")
-  IF not tdd_user_decision:
-    tdd_user_decision = extract_decision(context_content, "Testing Approach")
-
-  # Determine effective TDD mode
-  # Priority: user decision > config setting > keyword heuristic
-  IF tdd_user_decision == "tdd":
-    tdd_mode = "prefer"
-  ELIF tdd_user_decision == "standard":
-    tdd_mode = "disabled"
-  ELIF tdd_user_decision == "planner_decides":
-    tdd_mode = "auto"
-  ELIF tdd_config == true:
-    tdd_mode = "prefer"
-  ELIF tdd_config == "auto" AND is_tdd_eligible:
-    tdd_mode = "auto"
-  ELSE:
-    tdd_mode = "disabled"
-
-  IF tdd_mode != "disabled":
-    tdd_reference = Read("~/.claude/get-shit-done/references/tdd.md")
-    tdd_context_xml = """
-<tdd_context mode=\"""" + tdd_mode + """\">
-""" + tdd_reference + """
-</tdd_context>
-"""
-    Display: "TDD mode: " + tdd_mode + " — planner will use TDD heuristic for task classification."
-
 planner_prompt = """
-""" + planner_decisions_xml + """
+<mosic_references>
+<task id="{TASK_ID}" identifier="{TASK_IDENTIFIER}" title="{TASK_TITLE}" />
+<phase id="{phase_id}" title="{phase.title}" />
+<workspace id="{workspace_id}" />
+<project id="{project_id}" />
+<plan_page id="{PLAN_PAGE_ID}" />
+<research_page id="{research_page_id}" />
+<context_page id="{context_page_id}" />
+<requirements_page id="{requirements_page_id}" />
+<task_context_page id="{task_context_page_id}" />
+<task_research_page id="{task_research_page_id}" />
+</mosic_references>
 
-""" + task_requirements_xml + """
-
-""" + tdd_context_xml + """
-
-<planning_context>
-
-**Mode:** """ + planning_mode + """
-**Task ID:** """ + TASK_ID + """
-**Task Identifier:** """ + TASK_IDENTIFIER + """
-**Task Title:** """ + TASK_TITLE + """
-**Task Description:**
-""" + task.description + """
-
-**Plan Page ID:** """ + PLAN_PAGE_ID + """
-**Workspace ID:** """ + workspace_id + """
-
-**Phase:** """ + phase.title + """
-
-**Phase Research (if available):**
-""" + (research_content or "No phase research available.") + """
-
-**Phase Context & Decisions (if available):**
-""" + (context_content or "No phase context available.") + """
-
-**Task-Specific Context (if available):**
-""" + (task_context_content or "No task-specific context.") + """
-
-**Task-Specific Research (if available):**
-""" + (task_research_content or "No task-specific research.") + """
-
-**Requirements (if available):**
-""" + (requirements_content or "No requirements loaded.") + """
-
-</planning_context>
+<planning_config>
+<mode>""" + planning_mode + """</mode>
+<tdd_config>""" + (config.workflow?.tdd ?? "auto") + """</tdd_config>
+</planning_config>
 
 <constraints>
 """ + (quick_mode ? """
@@ -527,12 +333,8 @@ execute-task uses wave metadata to:
 - Orchestrate commits in correct order
 </downstream_consumer>
 
-<frontend_design_context>
-""" + frontend_design_xml + """
-</frontend_design_context>
-
 <output_format>
-1. Update plan page """ + PLAN_PAGE_ID + """ with:
+1. Update plan page (ID from mosic_references) with:
    - Objective
    - Must-haves (observable truths)
    - Wave structure table
@@ -540,9 +342,9 @@ execute-task uses wave metadata to:
    - Success criteria
 
 2. Create MTask subtasks with:
-   - parent_task: """ + TASK_ID + """
-   - workspace: """ + workspace_id + """
-   - task_list: """ + phase_id + """
+   - parent_task from mosic_references task.id
+   - workspace from mosic_references workspace.id
+   - task_list from mosic_references phase.id
    - title: descriptive subtask name
    - description: Editor.js format with Metadata/Files/Action/Verify/Done sections
 
@@ -569,7 +371,7 @@ Return structured result with:
 | 3 | ... | 2 | ... |
 
 ### Next Steps
-/gsd:execute-task """ + TASK_IDENTIFIER + """
+/gsd:execute-task {TASK_IDENTIFIER}
 </output_format>
 """
 
@@ -631,6 +433,48 @@ IF workflow_plan_check and not skip_verify:
 
   Checking plan quality...
   """
+
+  # Load requirements for verification (deferred from step 4 — not needed by planner)
+  requirements_content = ""
+  IF config.mosic.pages.requirements:
+    requirements_content = mosic_get_page(config.mosic.pages.requirements, {
+      content_format: "markdown"
+    }).content
+
+  # Extract task requirements for checker
+  task_requirements = []
+  IF requirements_content:
+    # Check parent plan page coverage table first
+    IF existing_plan_page:
+      parent_plan_content = mosic_get_page(existing_plan_page.name, {
+        content_format: "markdown"
+      }).content
+      coverage_section = extract_section(parent_plan_content, "## Requirements Coverage")
+      IF coverage_section:
+        FOR each row in parse_markdown_table(coverage_section):
+          IF row.covered_by contains TASK_IDENTIFIER or row.covered_by contains TASK_TITLE:
+            task_requirements.append({ id: row.req_id, description: row.description })
+
+    # Fallback: traceability table
+    IF not task_requirements:
+      traceability_section = extract_section(requirements_content, "## Traceability")
+      IF NOT traceability_section:
+        traceability_section = extract_section(requirements_content, "## Requirements Traceability")
+      IF traceability_section:
+        FOR each row in parse_markdown_table(traceability_section):
+          IF row.phase matches phase.title:
+            task_requirements.append({
+              id: row.requirement_id,
+              description: row.description or find_requirement_description(requirements_content, row.requirement_id)
+            })
+
+  task_requirements_xml = "<phase_requirements>\n"
+  IF task_requirements:
+    FOR each req in task_requirements:
+      task_requirements_xml += '<requirement id="' + req.id + '">' + req.description + '</requirement>\n'
+  ELSE:
+    task_requirements_xml += "No explicit requirements found for this task. Derive from task description.\n"
+  task_requirements_xml += "</phase_requirements>"
 
   # Load plan page content
   plan_content = mosic_get_page(PLAN_PAGE_ID, {
@@ -780,10 +624,9 @@ IF mosic operation fails during subtask creation:
 
 <success_criteria>
 - [ ] Task loaded from Mosic (by identifier or active task)
-- [ ] Phase context loaded (research, decisions)
-- [ ] Context fidelity enforced (locked decisions mapped, deferred ideas excluded)
+- [ ] Phase/task page IDs discovered
 - [ ] Plan page created/updated linked to task
-- [ ] gsd-planner spawned with full context
+- [ ] gsd-planner spawned with page IDs (planner self-loads content)
 - [ ] Subtasks created with parent_task field
 - [ ] Checklist items added for acceptance criteria
 - [ ] Plan page tagged (gsd-managed, plan)

@@ -146,10 +146,7 @@ workflow_research = config.workflow.research (default: true)
 
 ```
 IF research_page AND not --research flag:
-  # Load research content for planner
-  research_content = mosic_get_page(research_page.name, {
-    content_format: "markdown"
-  })
+  research_page_id = research_page.name
   Display: "Using existing research page: {research_page.title}"
   Skip to step 6
 ```
@@ -309,95 +306,21 @@ IF existing_plan_tasks.length > 0:
       })
 ```
 
-## 7. Load Context for Planner
+## 7. Discover Page IDs for Planner
 
-Load all relevant pages from Mosic:
+All IDs already known from step 3 or step 5. No content loading — planner self-loads.
 
 ```
-# Research content (loaded above or load now)
-IF not research_content AND research_page:
-  research_content = mosic_get_page(research_page.name, {
-    content_format: "markdown"
-  }).content
+research_page_id = research_page ? research_page.name : null
+context_page_id = context_page ? context_page.name : null
+requirements_page_id = config.mosic.pages.requirements or null
+roadmap_page_id = config.mosic.pages.roadmap or null
 
-# Context content (loaded above or load now)
-IF not context_content AND context_page:
-  context_content = mosic_get_page(context_page.name, {
-    content_format: "markdown"
-  }).content
-
-# Requirements
-requirements_content = mosic_get_page(config.mosic.pages.requirements, {
-  content_format: "markdown"
-}).content if config.mosic.pages.requirements
-
-# Roadmap
-roadmap_content = mosic_get_page(config.mosic.pages.roadmap, {
-  content_format: "markdown"
-}).content if config.mosic.pages.roadmap
-
-# Gap closure (if --gaps mode)
-verification_content = ""
+# Gap closure verification page (if --gaps mode)
+verification_page_id = null
 IF --gaps:
   verification_page = phase_pages.find(p => p.title contains "Verification")
-  IF verification_page:
-    verification_content = mosic_get_page(verification_page.name, {
-      content_format: "markdown"
-    }).content
-```
-
-### Extract Gap Context from Research
-
-```
-gap_context = ""
-IF research_content:
-  gap_analysis_section = extract_section(research_content, "## Gap Analysis")
-  IF gap_analysis_section:
-    gap_context = gap_analysis_section
-```
-
-## 7.5 Extract Phase Requirements
-
-```
-# Parse traceability table from requirements page to find requirements mapped to this phase
-phase_requirements = []
-
-IF requirements_content:
-  # Look for traceability table (format: | REQ-ID | Description | Phase | Status |)
-  traceability_section = extract_section(requirements_content, "## Traceability")
-  IF NOT traceability_section:
-    traceability_section = extract_section(requirements_content, "## Requirements Traceability")
-
-  IF traceability_section:
-    FOR each row in parse_markdown_table(traceability_section):
-      IF row.phase matches current phase (PHASE or phase.title):
-        # Get full description from requirements section
-        req_description = find_requirement_description(requirements_content, row.requirement_id)
-        phase_requirements.append({
-          id: row.requirement_id,
-          description: req_description or row.description
-        })
-
-  # Fallback: Extract from phase overview's ## Requirements section
-  IF not phase_requirements:
-    phase_overview_page = phase_pages.find(p => p.title contains "Overview")
-    IF phase_overview_page:
-      overview_content = mosic_get_page(phase_overview_page.name, {
-        content_format: "markdown"
-      }).content
-      requirements_section = extract_section(overview_content, "## Requirements")
-      IF requirements_section:
-        FOR each line matching "- {REQ-ID}: {description}" or "- **{REQ-ID}**: {description}":
-          phase_requirements.append({ id: REQ-ID, description: description })
-
-# Build XML block for planner
-phase_requirements_xml = "<phase_requirements>\n"
-IF phase_requirements:
-  FOR each req in phase_requirements:
-    phase_requirements_xml += '<requirement id="' + req.id + '">' + req.description + '</requirement>\n'
-ELSE:
-  phase_requirements_xml += "No explicit requirements found for this phase. Derive from phase goal.\n"
-phase_requirements_xml += "</phase_requirements>"
+  verification_page_id = verification_page ? verification_page.name : null
 ```
 
 ## 8. Spawn gsd-planner Agent
@@ -411,137 +334,25 @@ Display:
 Spawning planner...
 ```
 
-**Extract user decisions for planner (merge context + research):**
-```
-locked_decisions = ""
-deferred_ideas = ""
-discretion_areas = ""
-
-IF context_content:
-  locked_decisions = extract_section(context_content, "## Decisions")
-  IF not locked_decisions:
-    locked_decisions = extract_section(context_content, "## Implementation Decisions")
-  deferred_ideas = extract_section(context_content, "## Deferred Ideas")
-  discretion_areas = extract_section(context_content, "## Claude's Discretion")
-
-# Also check research page for User Constraints (researcher copies them there)
-IF research_content:
-  user_constraints = extract_section(research_content, "## User Constraints")
-  IF user_constraints:
-    research_locked = extract_subsection(user_constraints, "### Locked Decisions")
-    IF research_locked AND not locked_decisions:
-      locked_decisions = research_locked
-    research_deferred = extract_subsection(user_constraints, "### Deferred Ideas")
-    IF research_deferred AND not deferred_ideas:
-      deferred_ideas = research_deferred
-    research_discretion = extract_subsection(user_constraints, "### Claude's Discretion")
-    IF research_discretion AND not discretion_areas:
-      discretion_areas = research_discretion
-
-planner_decisions_xml = """
-<user_decisions>
-<locked_decisions>
-""" + (locked_decisions or "No locked decisions — all at Claude's discretion.") + """
-</locked_decisions>
-
-<deferred_ideas>
-""" + (deferred_ideas or "No deferred ideas.") + """
-</deferred_ideas>
-
-<discretion_areas>
-""" + (discretion_areas or "All areas at Claude's discretion.") + """
-</discretion_areas>
-</user_decisions>
-"""
-```
-
-# Frontend detection
-frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
-  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
-  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
-  "UX", "interface", "widget"]
-
-phase_text = (phase.title + " " + (phase.description or "") + " " + (requirements_content or "")).toLowerCase()
-is_frontend = frontend_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
-
-frontend_design_xml = ""
-IF is_frontend:
-  frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
-  frontend_design_xml = extract_section(frontend_design_content, "## For Planners")
-  Display: "Frontend work detected — design specification will be required in plans."
-
-# TDD detection and context loading
-tdd_config = config.workflow?.tdd ?? "auto"
-tdd_context_xml = ""
-
-IF tdd_config !== false:
-  tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
-    "state machine", "workflow engine", "utility", "helper", "business logic",
-    "data model", "schema", "converter", "calculator", "formatter", "serializer",
-    "authentication", "authorization"]
-
-  is_tdd_eligible = tdd_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
-
-  # Check context page for user TDD decision (from discuss-phase)
-  tdd_user_decision = extract_decision(context_content, "Testing Approach")
-    # Returns: "tdd" | "standard" | "planner_decides" | null
-
-  # Determine effective TDD mode
-  # Priority: user decision > config setting > keyword heuristic
-  IF tdd_user_decision == "tdd":
-    tdd_mode = "prefer"
-  ELIF tdd_user_decision == "standard":
-    tdd_mode = "disabled"
-  ELIF tdd_user_decision == "planner_decides":
-    tdd_mode = "auto"
-  ELIF tdd_config == true:
-    tdd_mode = "prefer"
-  ELIF tdd_config == "auto" AND is_tdd_eligible:
-    tdd_mode = "auto"
-  ELSE:
-    tdd_mode = "disabled"
-
-  IF tdd_mode != "disabled":
-    tdd_reference = Read("~/.claude/get-shit-done/references/tdd.md")
-    tdd_context_xml = """
-<tdd_context mode=\"""" + tdd_mode + """\">
-""" + tdd_reference + """
-</tdd_context>
-"""
-    Display: "TDD mode: " + tdd_mode + " — planner will use TDD heuristic for task classification."
+Build lean prompt with page IDs only — planner self-loads all content from Mosic:
 
 ```markdown
-""" + planner_decisions_xml + """
+planner_prompt = """
+<mosic_references>
+<phase id="{task_list_id}" title="{phase.title}" number="{PHASE}" />
+<workspace id="{workspace_id}" />
+<project id="{project_id}" />
+<research_page id="{research_page_id}" />
+<context_page id="{context_page_id}" />
+<requirements_page id="{requirements_page_id}" />
+<roadmap_page id="{roadmap_page_id}" />
+""" + (verification_page_id ? '<verification_page id="' + verification_page_id + '" />\n' : "") + """
+</mosic_references>
 
-""" + phase_requirements_xml + """
-
-<gap_context>
-""" + (gap_context or "No gap analysis available.") + """
-</gap_context>
-
-""" + tdd_context_xml + """
-
-<planning_context>
-
-**Phase:** {PHASE}
-**Mode:** {standard | gap_closure}
-
-**Phase Goal:**
-{phase.description}
-
-**Requirements (if exists):**
-{requirements_content}
-
-**Phase Context (if exists):**
-{context_content}
-
-**Research (if exists):**
-{research_content}
-
-**Gap Closure (if --gaps mode):**
-{verification_content}
-
-</planning_context>
+<planning_config>
+<mode>""" + (--gaps ? "gap_closure" : "standard") + """</mode>
+<tdd_config>""" + (config.workflow?.tdd ?? "auto") + """</tdd_config>
+</planning_config>
 
 <downstream_consumer>
 Output consumed by /gsd:execute-phase
@@ -552,10 +363,6 @@ Plans must include:
 - Verification criteria
 - must_haves for goal-backward verification
 </downstream_consumer>
-
-<frontend_design_context>
-""" + frontend_design_xml + """
-</frontend_design_context>
 
 <output_format>
 Return plans as structured markdown with:
@@ -569,6 +376,7 @@ Return plans as structured markdown with:
 
 The orchestrator will create MTasks and M Pages in Mosic.
 </output_format>
+"""
 ```
 
 ```
@@ -715,6 +523,39 @@ Display:
 Spawning plan checker...
 ```
 
+**Load requirements for verification (deferred from step 7 — not needed by planner):**
+
+```
+requirements_content = ""
+IF config.mosic.pages.requirements:
+  requirements_content = mosic_get_page(config.mosic.pages.requirements, {
+    content_format: "markdown"
+  }).content
+
+# Extract phase requirements for checker
+phase_requirements = []
+IF requirements_content:
+  traceability_section = extract_section(requirements_content, "## Traceability")
+  IF NOT traceability_section:
+    traceability_section = extract_section(requirements_content, "## Requirements Traceability")
+  IF traceability_section:
+    FOR each row in parse_markdown_table(traceability_section):
+      IF row.phase matches current phase (PHASE or phase.title):
+        req_description = find_requirement_description(requirements_content, row.requirement_id)
+        phase_requirements.append({
+          id: row.requirement_id,
+          description: req_description or row.description
+        })
+
+phase_requirements_xml = "<phase_requirements>\n"
+IF phase_requirements:
+  FOR each req in phase_requirements:
+    phase_requirements_xml += '<requirement id="' + req.id + '">' + req.description + '</requirement>\n'
+ELSE:
+  phase_requirements_xml += "No explicit requirements found for this phase. Derive from phase goal.\n"
+phase_requirements_xml += "</phase_requirements>"
+```
+
 **Spawn gsd-plan-checker:**
 
 ```
@@ -835,7 +676,7 @@ IF mosic operation fails during plan creation:
 <success_criteria>
 - [ ] Phase loaded from Mosic
 - [ ] Research completed (unless skipped) and page created/updated
-- [ ] gsd-planner spawned with full context from Mosic
+- [ ] gsd-planner spawned with page IDs (planner self-loads content)
 - [ ] Plans created as MTasks linked to phase task list
 - [ ] Plan pages created and linked to plan tasks
 - [ ] Checklist items created for each plan task
