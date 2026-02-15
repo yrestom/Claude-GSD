@@ -177,19 +177,27 @@ What's changed recently:
 **Deprecated/outdated:**
 - [Thing]: [why it's outdated, what replaced it]
 
-## Open Questions
+## Gap Analysis
 
-Things that couldn't be fully resolved:
+**Status:** [CLEAR | NON-BLOCKING | BLOCKING]
 
-1. **[Question]**
-   - What we know: [partial info]
-   - What's unclear: [the gap]
-   - Recommendation: [how to handle during planning/execution]
+### Blocking Gaps
+[Gaps requiring user decision before planning can proceed. If none: "None identified."]
 
-2. **[Question]**
-   - What we know: [partial info]
-   - What's unclear: [the gap]
-   - Recommendation: [how to handle]
+For each blocking gap:
+- **Gap:** [What's missing or ambiguous]
+- **Relates to:** [Which requirement or decision this affects]
+- **Evidence checked:** [What was searched/verified to confirm this is genuinely unaddressed]
+- **Impact if unresolved:** [What goes wrong if planner guesses]
+- **Suggested resolution:** [Options for user to choose between]
+
+### Non-Blocking Gaps
+[Gaps the planner can handle with reasonable defaults. If none: "None — all requirements are actionable."]
+
+For each non-blocking gap:
+- **Gap:** [What's unclear]
+- **Relates to:** [Which requirement or decision]
+- **Default approach:** [What the planner should assume]
 
 ## Sources
 
@@ -249,12 +257,19 @@ Things that couldn't be fully resolved:
 - Pitfalls: Include warning signs, not just "don't do this"
 - Sources: Mark confidence levels honestly
 
+**Gap analysis:**
+- Cross-reference findings against requirements and decisions
+- Classify gaps as BLOCKING (needs user input) or NON-BLOCKING (planner uses defaults)
+- Use "search before claiming absence" — verify a gap is real before reporting it
+- BLOCKING gaps trigger feedback loop to discussion; NON-BLOCKING gaps inform planner
+
 **Integration with planning:**
 - Research page linked to MTask List (phase)
 - Standard stack informs library choices
 - Don't hand-roll prevents custom solutions
 - Pitfalls inform verification criteria
 - Code examples can be referenced in task actions
+- Gap analysis section gives planner awareness of ambiguities and recommended defaults
 
 </guidelines>
 

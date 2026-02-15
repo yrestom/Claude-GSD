@@ -261,6 +261,56 @@ For each WebSearch finding:
 
 </source_hierarchy>
 
+<gap_analysis>
+
+## Requirements Gap Analysis Protocol
+
+After completing research and before creating the research page, cross-reference findings against requirements and decisions.
+
+### Step 1: Enumerate Requirements
+
+Gather all requirements and decisions from:
+- **Locked decisions** — from `<user_decisions>` XML or Context page `## Decisions`
+- **Phase goal** — the core objective stated in the phase description
+- **Requirements page** — explicit requirements mapped to this phase (if provided)
+- **Implicit requirements** — requirements logically derived from the phase goal (e.g., "build auth" implies session management, password hashing, etc.)
+
+### Step 2: Cross-Reference Against Findings
+
+For each requirement/decision:
+1. Does research provide sufficient guidance for the planner to create tasks?
+2. Is the requirement specific enough to implement? (Can you write acceptance criteria?)
+3. Are there conflicting signals between requirements and research findings?
+
+### Step 3: Classify Gaps
+
+**BLOCKING** — must be resolved before planning:
+- Ambiguous requirement with 2+ valid interpretations that lead to different implementations
+- Conflicting requirements (requirement A contradicts requirement B)
+- Missing core behavior specification (phase goal implies X but no requirement defines it)
+- Locked decision found infeasible by research (technology doesn't support what was decided)
+
+**NON-BLOCKING** — planner can handle with reasonable defaults:
+- Edge case behavior with an obvious default
+- Implementation detail with clear best practice from research
+- Minor preference where any reasonable choice works
+
+**CLEAR** — no gaps found:
+- All requirements have actionable research findings
+- Requirements are specific enough for task creation
+
+### Search Before Claiming Absence
+
+Before flagging ANY gap, verify it's genuinely unaddressed:
+1. Re-check the Context page for relevant decisions
+2. Re-check requirements for implicit coverage
+3. Re-check your own research findings for applicable guidance
+4. Only flag as a gap if NONE of these sources address it
+
+A gap claim without evidence of search is not valid.
+
+</gap_analysis>
+
 <mosic_context_loading>
 
 ## Load Project and Phase Context from Mosic
@@ -469,14 +519,27 @@ Verified patterns from official sources:
 **Deprecated/outdated:**
 - {Thing}: {why, what replaced it}
 
-## Open Questions
+## Gap Analysis
 
-Things that couldn't be fully resolved:
+**Status:** {CLEAR | NON-BLOCKING | BLOCKING}
 
-1. **{Question}**
-   - What we know: {partial info}
-   - What's unclear: {the gap}
-   - Recommendation: {how to handle}
+### Blocking Gaps
+{Gaps requiring user decision before planning. If none: "None identified."}
+
+For each blocking gap:
+- **Gap:** {what's missing or ambiguous}
+- **Relates to:** {which requirement or decision}
+- **Evidence checked:** {what was searched to confirm gap is real}
+- **Impact if unresolved:** {what goes wrong if planner guesses}
+- **Suggested resolution:** {options for user}
+
+### Non-Blocking Gaps
+{Gaps the planner can handle with defaults. If none: "None — all requirements are actionable."}
+
+For each non-blocking gap:
+- **Gap:** {what's unclear}
+- **Relates to:** {which requirement or decision}
+- **Default approach:** {what planner should assume}
 
 ## Sources
 
@@ -605,6 +668,25 @@ Run through verification protocol checklist:
 - [ ] Multiple sources for critical claims
 - [ ] Confidence levels assigned honestly
 - [ ] "What might I have missed?" review
+
+## Step 4.5: Requirements Gap Analysis
+
+Cross-reference research findings against all requirements and decisions:
+
+1. **Enumerate** all requirements/decisions from: locked_decisions, phase goal, requirements page, implicit requirements derived from phase goal
+2. **Cross-reference** each requirement against research findings — does research provide enough guidance for the planner to create actionable tasks?
+3. **Classify** any gaps as BLOCKING or NON-BLOCKING (see `<gap_analysis>` protocol)
+4. **Verify** each gap claim — re-check context, requirements, and findings before flagging (search before claiming absence)
+5. **Include** results in the `## Gap Analysis` section of the research output
+
+```
+IF blocking gaps found:
+  gaps_status = "BLOCKING"
+ELIF non-blocking gaps found:
+  gaps_status = "NON-BLOCKING"
+ELSE:
+  gaps_status = "CLEAR"
+```
 
 ## Step 5: Create Research M Page in Mosic
 
@@ -741,9 +823,13 @@ https://mosic.pro/app/Page/{research_page_id}
 | Architecture | {level} | {why} |
 | Pitfalls | {level} | {why} |
 
-### Open Questions
+### Gaps Status
 
-{Gaps that couldn't be resolved, planner should be aware}
+**Gaps Status:** {CLEAR | NON-BLOCKING | BLOCKING}
+
+### Blocking Gaps
+
+{If BLOCKING: list each gap with what's missing and suggested resolution. If not BLOCKING: "None."}
 
 ### Ready for Planning
 
@@ -792,6 +878,11 @@ Research is complete when:
 - [ ] Code examples provided
 - [ ] Source hierarchy followed (Context7 -> Official -> WebSearch)
 - [ ] All findings have confidence levels
+- [ ] Gap analysis completed (requirements cross-referenced against findings)
+- [ ] Gap claims verified (search before claiming absence)
+- [ ] Gaps classified as BLOCKING, NON-BLOCKING, or CLEAR
+- [ ] Gap Analysis section included in research output
+- [ ] Gaps Status included in structured return
 - [ ] Research M Page created in Mosic
 - [ ] Page linked to phase task list
 - [ ] Page tagged appropriately

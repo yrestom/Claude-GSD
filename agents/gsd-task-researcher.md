@@ -265,9 +265,22 @@ Update the research M Page with:
 **Affected by:**
 - {External factor} - {impact}
 
-## Open Questions
+## Gap Analysis
 
-{Any unresolved questions the planner should be aware of}
+**Status:** {CLEAR | NON-BLOCKING | BLOCKING}
+
+### Blocking Gaps
+{Gaps requiring user decision. If none: "None identified."}
+- **Gap:** {what's missing or ambiguous}
+- **Relates to:** {which requirement or decision}
+- **Impact if unresolved:** {what goes wrong}
+- **Suggested resolution:** {options}
+
+### Non-Blocking Gaps
+{Gaps planner can handle. If none: "None — all requirements are actionable."}
+- **Gap:** {what's unclear}
+- **Relates to:** {which requirement or decision}
+- **Default approach:** {what planner should assume}
 
 ## Sources
 
@@ -302,6 +315,24 @@ Research ONLY the gaps identified:
 2. Official docs for API details
 3. WebSearch for patterns (with year)
 4. Verify findings
+</step>
+
+<step name="gap_analysis">
+Cross-reference findings against task requirements:
+1. Parse task description for implicit requirements (what must be true for the task to be "done"?)
+2. Check locked decisions from task AND phase context
+3. For each requirement/decision: does research provide actionable guidance?
+4. Classify gaps as BLOCKING (ambiguous requirement, conflicting decisions, missing core spec) or NON-BLOCKING (edge case with obvious default, implementation detail with clear best practice)
+5. Verify each gap claim — re-check context, phase research, and findings before flagging (search before claiming absence)
+
+```
+IF blocking gaps found:
+  gaps_status = "BLOCKING"
+ELIF non-blocking gaps found:
+  gaps_status = "NON-BLOCKING"
+ELSE:
+  gaps_status = "CLEAR"
+```
 </step>
 
 <step name="update_page">
@@ -349,6 +380,7 @@ Return structured result:
 
 **Task:** {identifier} - {title}
 **Confidence:** {HIGH/MEDIUM/LOW}
+**Gaps Status:** {CLEAR | NON-BLOCKING | BLOCKING}
 **Key Finding:** {one-liner}
 **Research Page:** https://mosic.pro/app/page/{page_id}
 
@@ -356,6 +388,9 @@ Return structured result:
 - {Finding 1}
 - {Finding 2}
 - {Finding 3}
+
+### Blocking Gaps
+{If BLOCKING: list each gap with what's missing and suggested resolution. If not BLOCKING: "None."}
 
 ### Ready for Planning
 Research complete. Planner can create subtasks.
@@ -377,6 +412,11 @@ Task research is complete when:
 - [ ] Code patterns provided with sources
 - [ ] Gotchas identified
 - [ ] Dependencies listed
+- [ ] Gap analysis completed (requirements cross-referenced against findings)
+- [ ] Gap claims verified (search before claiming absence)
+- [ ] Gaps classified as BLOCKING, NON-BLOCKING, or CLEAR
+- [ ] Gap Analysis section included in research output
+- [ ] Gaps Status included in structured return
 - [ ] Research page updated in Mosic
 - [ ] Phase topic tags applied to research page
 - [ ] Task-specific topic tags derived if applicable
