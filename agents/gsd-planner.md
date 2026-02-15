@@ -486,15 +486,15 @@ Each task should take Claude **15-60 minutes** to execute.
 
 ## TDD Detection Heuristic
 
-**When `<tdd_context>` is present in prompt:**
+**When `tdd_mode` is "prefer" or "auto" (resolved in step 4 of `<planning_context_extraction>`):**
 
 Evaluate EACH task against the TDD heuristic:
 - Can you write `expect(fn(input)).toBe(output)` before writing `fn`?
 - Does it have defined inputs/outputs? (API contract, data transformation, validation rules)
 - Is it business logic, not UI/config/glue?
 
-**If mode="prefer":** Default to tdd="true" for all eligible tasks. Skip only for UI/config/glue tasks.
-**If mode="auto":** Apply heuristic per-task. Mark with tdd="true" or tdd="false".
+**If tdd_mode="prefer":** Default to tdd="true" for all eligible tasks. Skip only for UI/config/glue tasks.
+**If tdd_mode="auto":** Apply heuristic per-task. Mark with tdd="true" or tdd="false".
 
 **TDD task structure:**
 - Set type="tdd" in task metadata
@@ -502,7 +502,7 @@ Evaluate EACH task against the TDD heuristic:
 - Add checklist items: RED (failing test), GREEN (minimal implementation), REFACTOR (clean up)
 - Name subtasks: "RED: {test description}", "GREEN: {implementation}", "REFACTOR: {cleanup}"
 
-**When `<tdd_context>` is NOT present:** Skip TDD classification entirely (existing behavior).
+**When `tdd_mode` is "disabled":** Skip TDD classification entirely.
 
 </task_breakdown>
 
@@ -584,7 +584,7 @@ plan_task = mosic_create_document("MTask", {
 # Tag the task
 tags = [tag_ids["gsd-managed"], tag_ids["plan"], tag_ids["phase-{N}"]]
 
-# If TDD task (when <tdd_context> present and heuristic matched)
+# If TDD task (when tdd_mode is "prefer" or "auto" and heuristic matched)
 IF task.tdd == true:
   tags.push(tag_ids["tdd"] or "tdd")
   # Add RED/GREEN/REFACTOR checklist items
@@ -737,7 +737,7 @@ subtask = mosic_create_document("MTask", {
       { type: "paragraph", data: { text: "{what to do}" } },
       { type: "header", data: { text: "Metadata", level: 2 } },
       { type: "paragraph", data: {
-        text: "**Wave:** {wave_number}\n**Depends On:** {comma-separated subtask titles or 'None'}\n**Type:** {auto|checkpoint:*}"
+        text: "**Wave:** {wave_number}\n**Depends On:** {comma-separated subtask titles or 'None'}\n**Type:** {auto|tdd|checkpoint:*}"
       }},
       { type: "header", data: { text: "Files", level: 2 } },
       { type: "list", data: { style: "unordered", items: file_paths } },
@@ -760,6 +760,25 @@ subtask = mosic_create_document("MTask", {
 - Checkpoint subtasks should be in their own wave (they block parallel execution)
 - If ALL subtasks are sequential, assign Wave 1, 2, 3... (one per wave)
 - If ALL subtasks are independent, assign all to Wave 1
+
+### Step 4.5: Tag TDD Subtasks
+
+```
+IF any subtask has Type=tdd:
+  # Tag parent task with "tdd"
+  mosic_add_tag_to_document("MTask", TASK_ID, config.mosic.tags.tdd or "tdd")
+
+  # For each TDD subtask: add tag + RED/GREEN/REFACTOR checklist
+  FOR each subtask where Type == "tdd":
+    mosic_add_tag_to_document("MTask", subtask.name, config.mosic.tags.tdd or "tdd")
+    mosic_update_document("MTask", subtask.name, {
+      check_list: [
+        { title: "RED: Failing test written", done: false },
+        { title: "GREEN: Minimal implementation passes", done: false },
+        { title: "REFACTOR: Code cleaned up, tests green", done: false }
+      ]
+    })
+```
 
 ### Step 5: Create Checklist Items on Parent Task
 ```
