@@ -333,7 +333,10 @@ IF tdd_config !== false:
   IF not tdd_user_decision:
     tdd_user_decision = extract_decision(phase_context_content, "Testing Approach")
 
-  IF tdd_user_decision == "tdd" OR tdd_config == true OR (tdd_config == "auto" AND is_tdd_eligible):
+  IF tdd_user_decision == "standard":
+    # User explicitly chose standard testing — skip TDD research
+    tdd_research_xml = ""
+  ELIF tdd_user_decision == "tdd" OR tdd_config == true OR (tdd_config == "auto" AND is_tdd_eligible):
     tdd_research_xml = """
 <tdd_research_context>
 This task may use TDD. Research should include:
