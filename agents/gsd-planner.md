@@ -93,9 +93,9 @@ Plan -> Execute -> Ship -> Learn -> Repeat
 
 <mosic_context_loading>
 
-## Load Project Context from Mosic
+## Load Planning Context from Mosic
 
-**CRITICAL PREREQUISITE - Load Mosic MCP tools first:**
+**CRITICAL PREREQUISITE — Load Mosic MCP tools first:**
 ```
 ToolSearch("mosic task create document entity page tag relation batch")
 ```
@@ -104,9 +104,7 @@ Verify tools are available before proceeding. If tools fail to load, STOP and re
 
 ---
 
-Before planning, load all context from Mosic:
-
-**Read config.json for Mosic IDs:**
+**Step 1: Read config.json for Mosic IDs:**
 ```bash
 cat config.json 2>/dev/null
 ```
@@ -118,44 +116,108 @@ Extract:
 - `mosic.pages` (page IDs)
 - `mosic.tags` (tag IDs)
 
-**Load project context:**
-```
-project = mosic_get_project(project_id, {
-  include_task_lists: true
-})
+**Step 2: Check for `<mosic_references>` XML in your prompt (preferred path).**
 
-# Get project pages for requirements, roadmap, overview
-project_pages = mosic_get_entity_pages("MProject", project_id, {
-  include_subtree: true,
-  content_format: "markdown"
-})
+The orchestrator passes page IDs directly:
 
-# Find specific pages
-overview_page = project_pages.find(p => p.title.includes("Overview"))
-requirements_page = project_pages.find(p => p.title.includes("Requirements"))
-roadmap_page = project_pages.find(p => p.title.includes("Roadmap"))
-```
-
-**Load current phase context:**
-```
-phase_task_list_id = config.mosic.task_lists["phase-{N}"]
-phase = mosic_get_task_list(phase_task_list_id, {
-  include_tasks: true
-})
-
-# Get phase pages (research, context, etc.)
-phase_pages = mosic_get_entity_pages("MTask List", phase_task_list_id, {
-  content_format: "markdown"
-})
-
-# Find context and research if they exist
-context_page = phase_pages.find(p => p.title.includes("Context"))
-research_page = phase_pages.find(p => p.title.includes("Research"))
+```xml
+<mosic_references>
+<phase id="{uuid}" title="{title}" number="{N}" />
+<workspace id="{uuid}" />
+<project id="{uuid}" />
+<plan_page id="{uuid}" />           <!-- task-mode only -->
+<task id="{uuid}" identifier="{id}" title="{title}" /> <!-- task-mode only -->
+<research_page id="{uuid}" />
+<context_page id="{uuid}" />
+<requirements_page id="{uuid}" />
+<roadmap_page id="{uuid}" />
+<task_context_page id="{uuid}" />   <!-- task-mode only -->
+<task_research_page id="{uuid}" />  <!-- task-mode only -->
+<verification_page id="{uuid}" />   <!-- gap_closure mode only -->
+</mosic_references>
 ```
 
-**Load prior plan summaries if needed:**
+**Step 3: Load content using IDs (preferred) or discovery (fallback).**
+
+```javascript
+// --- PATH A: <mosic_references> present (lean orchestrator) ---
+if (prompt.includes("<mosic_references>")) {
+  refs = parse_mosic_references(prompt)
+  workspace_id = refs.workspace.id
+
+  // Load phase with tasks
+  phase = mosic_get_task_list(refs.phase.id, { include_tasks: true })
+
+  // Load pages by direct ID
+  research_content = refs.research_page?.id ?
+    mosic_get_page(refs.research_page.id, { content_format: "markdown" }).content : ""
+
+  context_content = refs.context_page?.id ?
+    mosic_get_page(refs.context_page.id, { content_format: "markdown" }).content : ""
+
+  requirements_content = refs.requirements_page?.id ?
+    mosic_get_page(refs.requirements_page.id, { content_format: "markdown" }).content : ""
+
+  roadmap_content = refs.roadmap_page?.id ?
+    mosic_get_page(refs.roadmap_page.id, { content_format: "markdown" }).content : ""
+
+  // Task-mode: load task and task-specific pages
+  task = refs.task?.id ?
+    mosic_get_task(refs.task.id, { description_format: "markdown" }) : null
+
+  task_context_content = refs.task_context_page?.id ?
+    mosic_get_page(refs.task_context_page.id, { content_format: "markdown" }).content : ""
+
+  task_research_content = refs.task_research_page?.id ?
+    mosic_get_page(refs.task_research_page.id, { content_format: "markdown" }).content : ""
+
+  // Gap closure mode
+  verification_content = refs.verification_page?.id ?
+    mosic_get_page(refs.verification_page.id, { content_format: "markdown" }).content : ""
+
+  // Load project for broader context
+  project = mosic_get_project(refs.project?.id or config.mosic.project_id, {
+    include_task_lists: true
+  })
+}
+
+// --- PATH B: No <mosic_references> — fallback to discovery ---
+else {
+  workspace_id = config.mosic.workspace_id
+  project_id = config.mosic.project_id
+
+  project = mosic_get_project(project_id, { include_task_lists: true })
+
+  // Discover phase from config
+  phase_task_list_id = config.mosic.task_lists["phase-{N}"]
+  phase = mosic_get_task_list(phase_task_list_id, { include_tasks: true })
+
+  // Get phase pages and find by title
+  phase_pages = mosic_get_entity_pages("MTask List", phase_task_list_id, {
+    include_subtree: false
+  })
+  context_page = phase_pages.find(p => p.title.includes("Context"))
+  research_page = phase_pages.find(p => p.title.includes("Research"))
+
+  context_content = context_page ?
+    mosic_get_page(context_page.name, { content_format: "markdown" }).content : ""
+  research_content = research_page ?
+    mosic_get_page(research_page.name, { content_format: "markdown" }).content : ""
+
+  requirements_content = config.mosic.pages.requirements ?
+    mosic_get_page(config.mosic.pages.requirements, { content_format: "markdown" }).content : ""
+  roadmap_content = config.mosic.pages.roadmap ?
+    mosic_get_page(config.mosic.pages.roadmap, { content_format: "markdown" }).content : ""
+
+  // Task-mode pages (if spawned by plan-task without mosic_references)
+  task_context_content = ""
+  task_research_content = ""
+  verification_content = ""
+}
 ```
-# Get completed plans in this phase
+
+**Step 4: Load prior plan summaries if needed:**
+```
 completed_tasks = phase.tasks.filter(t => t.done)
 
 FOR each completed_task:
@@ -164,17 +226,160 @@ FOR each completed_task:
   })
   summary = summary_pages.find(p => p.title.includes("Summary"))
 ```
+
 </mosic_context_loading>
+
+<planning_context_extraction>
+
+## Self-Extract Planning Context
+
+After loading pages from Mosic, extract all planning-relevant context yourself.
+
+### 1. Extract User Decisions
+
+Parse from loaded context pages (task-level first, phase-level second, research fallback):
+
+```
+# Task-level context (highest priority, task-mode only)
+IF task_context_content:
+  locked_decisions = extract_section(task_context_content, "## Decisions")
+  deferred_ideas = extract_section(task_context_content, "## Deferred Ideas")
+  discretion_areas = extract_section(task_context_content, "## Claude's Discretion")
+
+# Phase-level context (merge with task-level)
+IF context_content:
+  phase_locked = extract_section(context_content, "## Decisions")
+  IF not phase_locked:
+    phase_locked = extract_section(context_content, "## Implementation Decisions")
+  IF phase_locked:
+    locked_decisions = locked_decisions
+      ? locked_decisions + "\n\n**Inherited from phase:**\n" + phase_locked
+      : phase_locked
+  IF not deferred_ideas:
+    deferred_ideas = extract_section(context_content, "## Deferred Ideas")
+  IF not discretion_areas:
+    discretion_areas = extract_section(context_content, "## Claude's Discretion")
+
+# Research pages (fallback if no context pages)
+IF research_content AND not locked_decisions:
+  user_constraints = extract_section(research_content, "## User Constraints")
+  IF user_constraints:
+    locked_decisions = extract_subsection(user_constraints, "### Locked Decisions")
+    deferred_ideas = deferred_ideas or extract_subsection(user_constraints, "### Deferred Ideas")
+    discretion_areas = discretion_areas or extract_subsection(user_constraints, "### Claude's Discretion")
+
+# Same fallback for task_research_content in task mode
+IF task_research_content AND not locked_decisions:
+  task_constraints = extract_section(task_research_content, "## User Constraints")
+  IF task_constraints:
+    locked_decisions = extract_subsection(task_constraints, "### Locked Decisions")
+    deferred_ideas = deferred_ideas or extract_subsection(task_constraints, "### Deferred Ideas")
+    discretion_areas = discretion_areas or extract_subsection(task_constraints, "### Claude's Discretion")
+```
+
+### 2. Extract Phase Requirements
+
+```
+phase_requirements = []
+
+IF requirements_content:
+  traceability_section = extract_section(requirements_content, "## Traceability")
+  IF NOT traceability_section:
+    traceability_section = extract_section(requirements_content, "## Requirements Traceability")
+
+  IF traceability_section:
+    FOR each row in parse_markdown_table(traceability_section):
+      IF row.phase matches current phase:
+        phase_requirements.append({ id: row.req_id, description: row.description })
+
+  # Fallback: phase overview Requirements section
+  IF not phase_requirements:
+    phase_overview = phase_pages.find(p => p.title.includes("Overview"))
+    IF phase_overview:
+      overview_content = mosic_get_page(phase_overview.name, { content_format: "markdown" }).content
+      requirements_section = extract_section(overview_content, "## Requirements")
+      IF requirements_section:
+        FOR each line matching "- {REQ-ID}: {description}" or "- **{REQ-ID}**: {description}":
+          phase_requirements.append({ id: REQ-ID, description: description })
+```
+
+### 3. Extract Gap Context from Research
+
+```
+gap_analysis = ""
+IF research_content:
+  gap_analysis = extract_section(research_content, "## Gap Analysis")
+```
+
+### 4. Detect TDD Eligibility
+
+Read `<planning_config>` for tdd_config value:
+
+```
+tdd_config = planning_config.tdd_config  # "auto", true, or false
+
+IF tdd_config !== false AND tdd_config !== "false":
+  # Check context page for user TDD decision
+  tdd_user_decision = extract_decision(context_content, "Testing Approach")
+  IF task_context_content:
+    tdd_user_decision = extract_decision(task_context_content, "Testing Approach") or tdd_user_decision
+
+  # Keyword detection from loaded text
+  phase_text = (phase.title + " " + (phase.description or "") + " " + (requirements_content or "")).toLowerCase()
+  tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
+    "state machine", "workflow engine", "utility", "helper", "business logic",
+    "data model", "schema", "converter", "calculator", "formatter", "serializer",
+    "authentication", "authorization"]
+  is_tdd_eligible = tdd_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
+
+  # Resolve mode (priority: user decision > config setting > keyword heuristic)
+  IF tdd_user_decision == "tdd": tdd_mode = "prefer"
+  ELIF tdd_user_decision == "standard": tdd_mode = "disabled"
+  ELIF tdd_user_decision == "planner_decides": tdd_mode = "auto"
+  ELIF tdd_config == true OR tdd_config == "true": tdd_mode = "prefer"
+  ELIF tdd_config == "auto" AND is_tdd_eligible: tdd_mode = "auto"
+  ELSE: tdd_mode = "disabled"
+
+  # Load TDD reference if needed
+  IF tdd_mode != "disabled":
+    tdd_reference = Read("~/.claude/get-shit-done/references/tdd.md")
+ELSE:
+  tdd_mode = "disabled"
+```
+
+### 5. Detect Frontend Work
+
+```
+frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
+  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
+  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
+  "UX", "interface", "widget"]
+
+phase_text = phase_text or (phase.title + " " + (phase.description or "")).toLowerCase()
+is_frontend = frontend_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
+
+IF is_frontend:
+  frontend_design_ref = Read("~/.claude/get-shit-done/references/frontend-design.md")
+  frontend_design_context = extract_section(frontend_design_ref, "## For Planners")
+```
+
+</planning_context_extraction>
 
 <context_fidelity>
 
 ## Honor User Decisions (Non-Negotiable)
 
-**FIRST:** Before creating ANY tasks, parse and honor user decisions. These arrive in two possible formats — check BOTH.
+**FIRST:** Before creating ANY tasks, parse and honor user decisions.
 
 ### Parsing User Decisions
 
-**Format 1: `<user_decisions>` XML block** (preferred — injected by orchestrator)
+**Primary:** Self-extract from Mosic pages loaded in `<mosic_context_loading>` step.
+See `<planning_context_extraction>` section step 1 for the full extraction logic:
+- Parse from context pages: `## Decisions`, `## Claude's Discretion`, `## Deferred Ideas`
+- Parse from research pages: `## User Constraints` → `### Locked Decisions`, `### Claude's Discretion`, `### Deferred Ideas`
+- Task-level context takes priority over phase-level, which takes priority over research fallback
+
+**Legacy:** `<user_decisions>` XML block (backward compat — if injected by orchestrator, parse it FIRST)
 ```xml
 <user_decisions>
 <locked_decisions>...</locked_decisions>
@@ -182,12 +387,7 @@ FOR each completed_task:
 <discretion_areas>...</discretion_areas>
 </user_decisions>
 ```
-Parse this FIRST. If present, the orchestrator has already extracted and merged decisions from all context sources.
-
-**Format 2: Markdown sections** (fallback — parse from context/research pages)
-- Context page: `## Decisions`, `## Claude's Discretion`, `## Deferred Ideas`
-- Legacy context page: `## Implementation Decisions` (same as `## Decisions`)
-- Research page: `## User Constraints` → `### Locked Decisions`, `### Claude's Discretion`, `### Deferred Ideas`
+If present, the orchestrator has already extracted and merged decisions — use these directly.
 
 ### 1. Locked Decisions (Non-Negotiable)
 From `<locked_decisions>` XML or `## Decisions` / `## User Constraints → Locked Decisions`.
@@ -724,7 +924,7 @@ Coverage: {N}/{N} (100%)
 ## The Process
 
 **Step 0: Load Phase Requirements**
-Parse `<phase_requirements>` XML if present. Each requirement becomes an observable truth in Step 2.
+Use self-extracted `phase_requirements` from `<planning_context_extraction>`. Each requirement becomes an observable truth in Step 2.
 
 **Step 1: State the Goal**
 Take the phase goal from roadmap page. This is the outcome, not the work.
@@ -769,7 +969,11 @@ must_haves:
 
 Triggered by `--gaps` flag. Creates plans to address verification or UAT failures.
 
-**1. Load verification page from Mosic:**
+**1. Load verification content:**
+
+If `<mosic_references>` provided a `verification_page` ID, `verification_content` is already loaded in `<mosic_context_loading>`.
+
+Otherwise (fallback), search Mosic:
 ```
 verification_pages = mosic_search_pages({
   workspace_id: workspace_id,
@@ -782,7 +986,7 @@ verification_pages = mosic_search_pages({
 verification_page = verification_pages[0]
 verification_content = mosic_get_page(verification_page.name, {
   content_format: "markdown"
-})
+}).content
 ```
 
 **2. Parse gaps from verification content**
@@ -878,16 +1082,27 @@ This loads the following essential tools:
 </step>
 
 <step name="load_mosic_context" priority="first">
-Load all context from Mosic (see mosic_context_loading section).
+Load all context from Mosic using `<mosic_references>` IDs (preferred) or discovery fallback.
+See `<mosic_context_loading>` section for the two-path pattern.
+</step>
+
+<step name="extract_planning_context">
+Self-extract all planning-relevant context from loaded pages:
+1. User decisions (locked, deferred, discretion) from context/research pages
+2. Phase requirements from requirements page traceability table
+3. Gap analysis context from research page
+4. TDD eligibility (using `<planning_config>` tdd_config + keywords + user decision)
+5. Frontend detection (using keywords from loaded phase text)
+6. Load reference files (TDD, frontend design) via Read tool when needed
+See `<planning_context_extraction>` section for details.
 </step>
 
 <step name="identify_phase">
-From Mosic context:
+From loaded Mosic context:
 - Get phase from task list
-- Get phase goal from phase overview page
-- Parse `<phase_requirements>` XML from prompt into requirements_list
-- Extract REQ-IDs and descriptions
-- If no XML provided, extract from requirements page traceability table
+- Get phase goal from phase description
+- Use self-extracted phase_requirements from extract_planning_context step
+- If no requirements found, derive from phase goal
 </step>
 
 <step name="mandatory_discovery">
@@ -898,21 +1113,14 @@ Apply discovery level protocol.
 Load relevant summaries from completed plan tasks in Mosic.
 </step>
 
-<step name="gather_phase_context">
-Load phase-specific pages:
-- Context page (from /gsd:discuss-phase)
-- Research page (from /gsd:research-phase)
-- Discovery page (from mandatory discovery)
-</step>
-
 <step name="enforce_context_fidelity">
-Parse context and research pages for user decisions:
-1. Extract locked decisions → these become plan constraints
-2. Extract deferred ideas → these become plan prohibitions
-3. Extract discretion areas → these inform your choices
+Using the self-extracted decisions from extract_planning_context step:
+1. locked_decisions → plan constraints (must have implementing task)
+2. deferred_ideas → plan prohibitions (no task may reference)
+3. discretion_areas → inform your choices with reasonable defaults
 
-**VERIFY:** Every locked decision maps to at least one planned task action.
-**VERIFY:** No planned task references a deferred idea.
+**VERIFY:** Every locked decision maps to at least one task action.
+**VERIFY:** No task references a deferred idea.
 </step>
 
 <step name="break_into_tasks">
@@ -932,9 +1140,9 @@ Group tasks into plans (2-3 tasks each).
 </step>
 
 <step name="verify_requirements_coverage">
-Build requirements coverage map:
+Build requirements coverage map using self-extracted phase_requirements (from extract_planning_context step):
 
-FOR each requirement in requirements_list (from phase_requirements XML):
+FOR each requirement in phase_requirements:
   Find task(s) that address this requirement
   IF no task covers it:
     Flag as GAP — must add task or extend existing task
@@ -957,7 +1165,7 @@ Coverage: N/N (100%) ✓
 ```
 
 **Do not finalize plans if any requirement is unmapped.**
-If `<phase_requirements>` is empty or says "No explicit requirements", skip this step and derive requirements from the phase goal as before.
+If no phase_requirements were found during extraction, skip this step and derive requirements from the phase goal as before.
 </step>
 
 <step name="derive_must_haves">
