@@ -285,20 +285,36 @@ IF task_context_content:
   IF gap_status_section:
     discussion_gaps_xml = """
 <discussion_gaps>
+<guidance>
+This is INPUT to your gap analysis, NOT a conclusion to accept.
+Discussion's gap scan was surface-level — done BEFORE deep research, based only on discovery findings and user intuition.
+You MUST do your own independent gap analysis after completing research.
+For remaining gaps: investigate with research depth — you may now have answers discussion didn't.
+For resolved gaps: validate technical soundness — user decided before understanding technical constraints.
+Most importantly: find NEW gaps that discussion COULDN'T have identified — architecture constraints, library limitations, integration issues, and missing specs that only become apparent after deep technical investigation.
+</guidance>
 """ + gap_status_section + """
 </discussion_gaps>
 """
-    Display: "Discussion gaps found — researcher will prioritize investigating these."
+    Display: "Discussion gaps found — researcher will independently investigate and find new gaps."
 
 IF not discussion_gaps_xml AND phase_context_content:
   gap_status_section = extract_section(phase_context_content, "## Discussion Gap Status")
   IF gap_status_section:
     discussion_gaps_xml = """
 <discussion_gaps>
+<guidance>
+This is INPUT to your gap analysis, NOT a conclusion to accept.
+Discussion's gap scan was surface-level — done BEFORE deep research, based only on discovery findings and user intuition.
+You MUST do your own independent gap analysis after completing research.
+For remaining gaps: investigate with research depth — you may now have answers discussion didn't.
+For resolved gaps: validate technical soundness — user decided before understanding technical constraints.
+Most importantly: find NEW gaps that discussion COULDN'T have identified — architecture constraints, library limitations, integration issues, and missing specs that only become apparent after deep technical investigation.
+</guidance>
 """ + gap_status_section + """
 </discussion_gaps>
 """
-    Display: "Phase discussion gaps found — researcher will prioritize investigating these."
+    Display: "Phase discussion gaps found — researcher will independently investigate and find new gaps."
 
 # Frontend detection
 frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
