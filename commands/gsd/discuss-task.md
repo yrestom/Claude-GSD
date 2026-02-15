@@ -334,8 +334,8 @@ tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorit
   "authentication", "authorization"]
 
 tdd_config = config.workflow?.tdd ?? "auto"
-is_tdd_eligible = tdd_config !== false AND
-  tdd_keywords.some(kw => task_desc_lower.includes(kw.toLowerCase()))
+is_tdd_eligible = tdd_config == true OR
+  (tdd_config !== false AND tdd_keywords.some(kw => task_desc_lower.includes(kw.toLowerCase())))
 
 IF is_tdd_eligible:
   gray_areas.push({

@@ -281,8 +281,8 @@ tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorit
   "authentication", "authorization"]
 
 tdd_config = config.workflow?.tdd ?? "auto"
-is_tdd_eligible = tdd_config !== false AND
-  tdd_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
+is_tdd_eligible = tdd_config == true OR
+  (tdd_config !== false AND tdd_keywords.some(kw => phase_text.includes(kw.toLowerCase())))
 
 IF is_tdd_eligible:
   # Add "Testing Approach" as an additional gray area
