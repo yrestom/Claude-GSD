@@ -221,6 +221,24 @@ Ask: What do we need to learn before we can plan this phase?
 - Architecture approach?
 </step>
 
+<step name="analyze_gaps">
+**For Level 2-3:** Analyze gaps between discovery findings and phase requirements.
+
+Cross-reference discovery findings against:
+- Phase goal (from task list)
+- Phase requirements (from requirements page if available)
+- Decisions from context page (if discussion happened first)
+
+Classify findings gaps:
+- BLOCKING: Discovery found conflicting information, critical unknown unresolved, no viable option identified
+- NON-BLOCKING: Multiple viable options (planner can choose), minor uncertainty with clear default
+- CLEAR: All questions answered with sufficient confidence
+
+Use "search before claiming absence" — verify gap is real before flagging.
+
+Include results in discovery page's Gap Analysis section.
+</step>
+
 <step name="create_discovery_page">
 **Create discovery page in Mosic linked to phase task list:**
 
@@ -274,11 +292,27 @@ discovery_page = mosic_create_entity_page("MTask List", phase_task_list.name, {
       },
       {
         type: "header",
-        data: { text: "Open Questions", level: 2 }
+        data: { text: "Gap Analysis", level: 2 }
       },
       {
         type: "paragraph",
-        data: { text: OPEN_QUESTIONS || "None - all questions resolved" }
+        data: { text: "**Status:** " + GAPS_STATUS }
+      },
+      {
+        type: "header",
+        data: { text: "Blocking Gaps", level: 3 }
+      },
+      {
+        type: "paragraph",
+        data: { text: BLOCKING_GAPS || "None identified." }
+      },
+      {
+        type: "header",
+        data: { text: "Non-Blocking Gaps", level: 3 }
+      },
+      {
+        type: "paragraph",
+        data: { text: NON_BLOCKING_GAPS || "None — all questions resolved." }
       }
     ]
   },
@@ -345,18 +379,23 @@ If confidence is HIGH:
 Proceed directly, just note: "Discovery complete (high confidence)."
 </step>
 
-<step name="open_questions_gate">
-If discovery has open_questions:
+<step name="gap_analysis_gate">
+After creating discovery page, check gap status.
 
-Present them inline:
-"Open questions from discovery:
+If BLOCKING gaps exist:
+Use AskUserQuestion:
+- header: "Blocking Gaps"
+- question: "Discovery found gaps that need resolution. How to proceed?"
+- options:
+  - "Discuss first" - Run /gsd:discuss-phase to make decisions on gaps
+  - "Proceed anyway" - Continue to planning, planner uses best judgment
+  - "Dig deeper" - Do more research on the blocking gaps
 
-- [Question 1]
-- [Question 2]
+If NON-BLOCKING only:
+Inline note: "Non-blocking gaps documented — planner will use defaults."
 
-These may affect implementation. Acknowledge and proceed? (yes / address first)"
-
-If "address first": Gather user input on questions, update discovery page.
+If CLEAR:
+Proceed directly.
 </step>
 
 <step name="update_config">
@@ -422,6 +461,7 @@ Confidence: [level]
 **Level 2 (Standard):**
 - Context7 consulted for all options
 - WebSearch findings cross-verified
+- Gap analysis completed with CLEAR or NON-BLOCKING status
 - Discovery page created in Mosic linked to phase task list
 - Task list updated with discovery summary
 - Discovery comment added to task list
@@ -433,6 +473,8 @@ Confidence: [level]
 - Discovery scope defined
 - Context7 exhaustively consulted
 - All WebSearch findings verified against authoritative sources
+- Gap analysis completed
+- Blocking gaps presented to user if found
 - Comprehensive discovery page created in Mosic
 - Quality report with source attribution
 - If LOW confidence findings → validation checkpoints defined

@@ -163,6 +163,50 @@ For each WebSearch finding:
 
 </source_hierarchy>
 
+<gap_analysis>
+
+## Project-Level Gap Analysis Protocol
+
+After research completes, cross-reference findings against project requirements to identify gaps.
+
+### Step 1: Enumerate Project Requirements
+
+Gather all requirements from:
+- Project description and goals
+- Requirements page (if provided by orchestrator)
+- Implicit requirements derived from project type
+  (e.g., "social app" implies auth, profiles, feeds)
+
+### Step 2: Cross-Reference Against Research Findings
+
+For each requirement/implied need:
+- Does Stack Research recommend a technology for this?
+- Does Features Research categorize this (table stakes / differentiator)?
+- Does Architecture Research address the pattern needed?
+- Does Pitfalls Research flag relevant risks?
+
+### Step 3: Classify Gaps
+
+BLOCKING — must resolve before roadmap creation:
+- Project goal is ambiguous (2+ valid product interpretations)
+- Conflicting requirements (requirement A contradicts B)
+- Core capability has no clear technology path
+- Feasibility concern for a critical requirement
+
+NON-BLOCKING — roadmap creator can handle:
+- Edge case with obvious default
+- Technology choice between equally valid options
+- Implementation detail with clear best practice
+
+### Search Before Claiming Absence
+
+Before flagging any gap, verify it's genuinely unaddressed:
+1. Re-check project description for implicit coverage
+2. Re-check research findings across ALL pages
+3. Only flag if genuinely unaddressed
+
+</gap_analysis>
+
 <create_research_pages_mosic>
 
 ## Create Research Pages in Mosic
@@ -397,9 +441,23 @@ Based on research, suggested phase structure:
 | Architecture | {level} | {reason} |
 | Pitfalls | {level} | {reason} |
 
-## Gaps to Address
+## Gap Analysis
 
-- {Areas where research was inconclusive}
+**Status:** {CLEAR | NON-BLOCKING | BLOCKING}
+
+### Blocking Gaps
+{Gaps requiring resolution before roadmap creation. If none: "None identified."}
+- **Gap:** {what's missing or ambiguous}
+- **Relates to:** {which project goal or requirement}
+- **Evidence checked:** {what was searched to confirm gap}
+- **Impact if unresolved:** {what goes wrong in roadmap}
+- **Suggested resolution:** {options}
+
+### Non-Blocking Gaps
+{Gaps roadmap creator can handle. If none: "None — all requirements actionable."}
+- **Gap:** {what's unclear}
+- **Relates to:** {which requirement}
+- **Default approach:** {what roadmap creator should assume}
 ```
 
 ### Update config.json
@@ -454,6 +512,20 @@ Run through verification protocol checklist:
 - [ ] Multiple sources for critical claims
 - [ ] Confidence levels assigned honestly
 
+## Step 4.5: Project Requirements Gap Analysis
+
+1. Enumerate all project requirements/goals from project description and requirements page
+2. Cross-reference each against research findings (stack, features, architecture, pitfalls)
+3. Classify gaps as BLOCKING or NON-BLOCKING (see <gap_analysis> protocol)
+4. Verify each gap claim (search before claiming absence)
+5. Include results in Research Summary page's Gap Analysis section
+
+```
+IF blocking gaps found → gaps_status = "BLOCKING"
+ELIF non-blocking gaps → gaps_status = "NON-BLOCKING"
+ELSE → gaps_status = "CLEAR"
+```
+
 ## Step 5: Create Pages in Mosic
 
 Create all research pages linked to project.
@@ -507,9 +579,13 @@ Return to orchestrator with structured result.
 
 {Key recommendations for phase structure}
 
-### Open Questions
+### Gaps Status
 
-{Gaps that couldn't be resolved}
+**Gaps Status:** {CLEAR | NON-BLOCKING | BLOCKING}
+
+### Blocking Gaps
+
+{If BLOCKING: list each gap with what's missing and suggested resolution. If not: "None."}
 
 ### Ready for Roadmap
 
@@ -552,11 +628,16 @@ Research is complete when:
 - [ ] Domain pitfalls catalogued
 - [ ] Source hierarchy followed
 - [ ] All findings have confidence levels
+- [ ] Gap analysis completed (requirements cross-referenced against findings)
+- [ ] Gap claims verified (search before claiming absence)
+- [ ] Gaps classified as BLOCKING, NON-BLOCKING, or CLEAR
 - [ ] Research pages created in Mosic
+- [ ] Gap Analysis section included in Research Summary page
 - [ ] Topic tags derived from stack research and applied to stack page
 - [ ] Topic tags stored in config.mosic.tags.topic_tags
 - [ ] Summary page includes roadmap implications
 - [ ] config.json updated with page IDs
+- [ ] Gaps Status included in structured return
 - [ ] Structured return provided to orchestrator
 
 Quality indicators:
