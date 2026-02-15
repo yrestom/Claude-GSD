@@ -487,10 +487,13 @@ IF tdd_config !== false:
     # Returns: "tdd" | "standard" | "planner_decides" | null
 
   # Determine effective TDD mode
+  # Priority: user decision > config setting > keyword heuristic
   IF tdd_user_decision == "tdd":
     tdd_mode = "prefer"
   ELIF tdd_user_decision == "standard":
     tdd_mode = "disabled"
+  ELIF tdd_user_decision == "planner_decides":
+    tdd_mode = "auto"
   ELIF tdd_config == true:
     tdd_mode = "prefer"
   ELIF tdd_config == "auto" AND is_tdd_eligible:
