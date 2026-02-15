@@ -324,7 +324,7 @@ Subtasks must include:
 ## Metadata
 **Wave:** {number}
 **Depends On:** {subtask titles or "None"}
-**Type:** auto
+**Type:** {auto|tdd|checkpoint:*}
 ```
 
 execute-task uses wave metadata to:

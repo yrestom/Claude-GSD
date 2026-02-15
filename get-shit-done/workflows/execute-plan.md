@@ -392,8 +392,23 @@ Skip if your prompt already contains a `<tdd_execution_context>` XML block.
 
 ```javascript
 if (!prompt.includes("<tdd_execution_context>")) {
-  has_tdd = (plan_content && plan_content.includes('tdd="true"'))
-    || (task.tags && task.tags.includes("tdd"))
+  has_tdd = false
+
+  // Check 1: Plan content for tdd="true" (phase-level plans)
+  if (plan_content && plan_content.includes('tdd="true"')) has_tdd = true
+
+  // Check 2: Plan/subtask content for **Type:** tdd (task-level subtasks)
+  if (plan_content && plan_content.includes('**Type:** tdd')) has_tdd = true
+
+  // Check 3: Task tags include "tdd" (set by planner)
+  if (task.tags && task.tags.includes("tdd")) has_tdd = true
+
+  // Check 4: Config fallback — only explicit true forces TDD without markers
+  // ("auto" requires planner classification, so no fallback for auto)
+  if (!has_tdd) {
+    tdd_config = Read("config.json").workflow?.tdd
+    if (tdd_config === true || tdd_config === "true") has_tdd = true
+  }
 
   if (has_tdd) {
     tdd_reference = Read("~/.claude/get-shit-done/references/tdd.md")

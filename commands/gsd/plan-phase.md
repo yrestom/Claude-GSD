@@ -463,11 +463,17 @@ plan_page = mosic_create_entity_page("MTask", plan_task_id, {
 })
 
 # Tag the task and page
-mosic_batch_add_tags_to_document("MTask", plan_task_id, [
+plan_tags = [
   config.mosic.tags.gsd_managed,
   config.mosic.tags.plan,
   config.mosic.tags.phase_tags[phase_key]
-])
+]
+
+# Detect TDD from planner output
+IF full_plan_content contains "Type: tdd" or full_plan_content contains 'tdd="true"':
+  plan_tags.push(config.mosic.tags.tdd or "tdd")
+
+mosic_batch_add_tags_to_document("MTask", plan_task_id, plan_tags)
 
 mosic_batch_add_tags_to_document("M Page", plan_page.name, [
   config.mosic.tags.gsd_managed,
