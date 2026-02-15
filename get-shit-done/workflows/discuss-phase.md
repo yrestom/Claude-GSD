@@ -227,6 +227,19 @@ Gray areas:
 ```
 </step>
 
+<step name="gap_scan">
+Cross-reference phase goal and requirements against discovery findings to identify gaps.
+
+Gap types:
+- REQUIREMENT_GAP: Phase goal implies behavior not specified in requirements
+- AMBIGUITY_GAP: Requirement allows multiple valid interpretations
+- CONFLICT_GAP: Requirements or findings contradict each other
+- UNKNOWN_GAP: Technical question that discovery couldn't answer
+
+Gaps inform gray area generation — blocking gaps become priority gray areas.
+Use "search before claiming absence" — verify gap is real before flagging.
+</step>
+
 <step name="present_gray_areas">
 Present the domain boundary and gray areas to user.
 
@@ -327,6 +340,18 @@ Back to [current area]: [return to current question]"
 Track deferred ideas internally.
 </step>
 
+<step name="post_discussion_gaps">
+Assess which pre-discussion gaps were resolved through user decisions.
+
+For each gap: was it covered by a discussed area with a clear decision?
+- YES → resolved_gap (document which decision resolved it)
+- NO → remaining_gap (flag for research investigation)
+
+Also detect new gaps from discussion (ambiguous answers, explicit deferrals).
+
+Gap resolution feeds into context page's Discussion Gap Status section.
+</step>
+
 <step name="create_context_page">
 Create context page in Mosic linked to the phase task list.
 
@@ -384,6 +409,33 @@ context_page = mosic_create_entity_page("MTask List", phase_task_list.name, {
       {
         type: "paragraph",
         data: { text: DEFERRED_IDEAS || "None — discussion stayed within phase scope" }
+      },
+      {
+        type: "header",
+        data: { text: "Discussion Gap Status", level: 2 }
+      },
+      {
+        type: "paragraph",
+        data: { text: "**Pre-Discussion:** " + (pre_discussion_gaps.count > 0 ? "GAPS_FOUND" : "CLEAR") +
+          "\n**Resolved:** " + resolved_gaps.length + " of " + pre_discussion_gaps.count }
+      },
+      // IF resolved_gaps.length > 0:
+      {
+        type: "header",
+        data: { text: "Resolved Gaps", level: 3 }
+      },
+      {
+        type: "list",
+        data: { style: "unordered", items: resolved_gaps.map(g => g.description + " → Resolved by: " + g.resolved_by) }
+      },
+      // IF remaining_gaps.length > 0:
+      {
+        type: "header",
+        data: { text: "Remaining Gaps (for Research)", level: 3 }
+      },
+      {
+        type: "list",
+        data: { style: "unordered", items: remaining_gaps.map(g => g.description + " — " + g.recommended_action) }
       }
     ]
   },
@@ -506,11 +558,14 @@ URL: https://mosic.pro/app/page/[context_page.name]
 <success_criteria>
 - [ ] Mosic context loaded (project, task lists)
 - [ ] Phase validated against project task lists
-- [ ] Gray areas identified through intelligent analysis (not generic questions)
+- [ ] Pre-discussion gap scan identified requirement gaps
+- [ ] Gap-informed gray areas prioritized blocking gaps
 - [ ] User selected which areas to discuss
 - [ ] Each selected area explored until user satisfied
 - [ ] Scope creep redirected to deferred ideas
+- [ ] Post-discussion gap assessment tracked resolution
 - [ ] Context page created in Mosic linked to phase task list
+- [ ] Context page includes Discussion Gap Status
 - [ ] Key decisions added to task list description
 - [ ] Discussion comment added to task list
 - [ ] config.json updated with page ID

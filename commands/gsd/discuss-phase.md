@@ -194,6 +194,45 @@ IF is_frontend:
   Display: "Frontend work detected — UI-specific gray areas will be included."
 ```
 
+## 4.6 Pre-Discussion Gap Scan
+
+Cross-reference phase goal + requirements against discovery findings to identify what's
+missing or ambiguous BEFORE generating gray areas.
+
+```
+# What we know:
+# - Phase goal (from task list description)
+# - Requirements (from requirements page, if loaded in Step 4)
+# - Discovery findings (from Step 4.5)
+
+# Cross-reference:
+1. Enumerate what the phase goal implies must be decided
+   - What behaviors need specifying?
+   - What interfaces need defining?
+   - What edge cases need handling?
+
+2. Check which of these are already answered by:
+   - Existing requirements
+   - Discovery findings (best practices found)
+   - Obvious defaults
+
+3. Remaining items = gaps
+   Classify each:
+   - REQUIREMENT_GAP: Phase goal implies X but no requirement defines it
+   - AMBIGUITY_GAP: Requirement exists but allows 2+ valid interpretations
+   - CONFLICT_GAP: Two requirements or findings contradict
+   - UNKNOWN_GAP: Technical question discovery couldn't answer
+
+4. pre_discussion_gaps = { gaps: [...], count: N }
+
+Display:
+"""
+Gap scan: {N} areas identified that need your input
+{IF N == 0: "No ambiguities detected — gray areas will cover preferences."}
+{IF N > 0: list top 3 gaps briefly}
+"""
+```
+
 ## 5. Analyze Phase and Generate Gray Areas
 
 **Discovery-informed analysis:**
@@ -212,7 +251,23 @@ Gray areas should reference discovery findings when relevant:
 - "You already have {pattern}, so the question is whether to extend it or..."
 - "Based on {best practice found}, consider..."
 
-Generate 3-4 **phase-specific** gray areas, not generic categories.
+**Gap-informed gray area priority:**
+```
+IF pre_discussion_gaps.count > 0:
+  # Convert gaps to gray areas (gaps get priority slots)
+  gap_gray_areas = pre_discussion_gaps.gaps.slice(0, 2).map(gap => ({
+    label: "⚠ " + gap.area,
+    description: gap.description + " (identified as gap in requirements)"
+  }))
+
+  # Fill remaining slots with standard gray areas
+  standard_gray_areas = generate_standard_gray_areas().slice(0, 4 - gap_gray_areas.length)
+  gray_areas = [...gap_gray_areas, ...standard_gray_areas]
+ELSE:
+  gray_areas = generate_standard_gray_areas()  # existing logic unchanged
+```
+
+Generate 3-4 **phase-specific** gray areas, not generic categories. Total still capped at 4.
 
 **If `is_frontend` is true:** Additionally generate UI-specific gray areas from the
 frontend-design reference (layout approach, interaction patterns, state visualization,
@@ -288,6 +343,38 @@ If next -> Proceed to next selected area
 - Performance concerns
 - Scope expansion
 
+## 6.5 Post-Discussion Gap Assessment
+
+```
+# Check which pre-discussion gaps were resolved through user answers
+resolved_gaps = []
+remaining_gaps = []
+
+FOR each gap in pre_discussion_gaps.gaps:
+  IF gap was covered by a discussed area AND user made a decision:
+    resolved_gaps.push({ ...gap, resolved_by: area_name })
+  ELSE:
+    remaining_gaps.push(gap)
+
+# Also check for NEW gaps surfaced during discussion
+# (e.g., user revealed conflicting preferences, or "I haven't decided yet" answers)
+FOR each discussed_area:
+  IF user response was ambiguous or explicitly deferred:
+    remaining_gaps.push({
+      type: "DEFERRED_GAP",
+      area: area_name,
+      description: "User deferred decision — researcher should investigate options"
+    })
+
+gap_resolution_status = remaining_gaps.length == 0 ? "RESOLVED" : "PARTIAL"
+
+Display:
+"""
+Gap assessment: {resolved_gaps.length} resolved, {remaining_gaps.length} remaining
+{IF remaining_gaps.length > 0: "Remaining gaps will be flagged for research investigation."}
+"""
+```
+
 ## 7. Create/Update Context Page in Mosic
 
 After all selected areas discussed:
@@ -304,6 +391,7 @@ Wait for confirmation.
 - `## Decisions` (locked choices — NON-NEGOTIABLE)
 - `## Claude's Discretion` (flexible areas — top-level heading, NOT nested under Decisions)
 - `## Deferred Ideas` (out of scope — FORBIDDEN for downstream agents)
+- `## Discussion Gap Status` (gap tracking — researcher reads this to prioritize investigation)
 
 ```
 context_content = build_context_markdown({
@@ -311,8 +399,44 @@ context_content = build_context_markdown({
   phase_title: phase.title,
   areas_discussed: selected_areas,
   decisions: collected_decisions,
-  deferred_ideas: deferred_items
+  deferred_ideas: deferred_items,
+  pre_discussion_gaps: pre_discussion_gaps,
+  resolved_gaps: resolved_gaps,
+  remaining_gaps: remaining_gaps
 })
+```
+
+**Include Discussion Gap Status section** (after Deferred Ideas, in Editor.js blocks):
+
+```javascript
+// After existing Deferred Ideas blocks...
+{
+  type: "header",
+  data: { text: "Discussion Gap Status", level: 2 }
+},
+{
+  type: "paragraph",
+  data: { text: "**Pre-Discussion:** " + (pre_discussion_gaps.count > 0 ? "GAPS_FOUND" : "CLEAR") +
+    "\n**Resolved:** " + resolved_gaps.length + " of " + pre_discussion_gaps.count }
+},
+// IF resolved_gaps.length > 0:
+{
+  type: "header",
+  data: { text: "Resolved Gaps", level: 3 }
+},
+{
+  type: "list",
+  data: { style: "unordered", items: resolved_gaps.map(g => g.description + " → Resolved by: " + g.resolved_by) }
+},
+// IF remaining_gaps.length > 0:
+{
+  type: "header",
+  data: { text: "Remaining Gaps (for Research)", level: 3 }
+},
+{
+  type: "list",
+  data: { style: "unordered", items: remaining_gaps.map(g => g.description + " — " + g.recommended_action) }
+}
 ```
 
 **Create or update context page:**
@@ -445,11 +569,14 @@ IF mosic sync fails:
 <success_criteria>
 - [ ] Phase loaded from Mosic
 - [ ] Quick discovery completed (codebase scan + web research)
-- [ ] Gray areas identified through discovery-informed analysis
+- [ ] Pre-discussion gap scan completed
+- [ ] Gray areas prioritized by gap severity
 - [ ] User chose which areas to discuss
 - [ ] Each selected area explored until satisfied
 - [ ] Scope creep redirected to deferred ideas
+- [ ] Post-discussion gap assessment completed
 - [ ] Context page created/updated in Mosic linked to phase
+- [ ] Discussion Gap Status section included in context page
 - [ ] Phase task list description updated with key decisions
 - [ ] Tags applied (gsd-managed, phase-NN)
 - [ ] config.json updated with page mapping

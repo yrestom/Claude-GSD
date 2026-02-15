@@ -55,6 +55,21 @@ Content structure for capturing implementation decisions for a phase in Mosic.
 
 [If none: "None - discussion stayed within phase scope"]
 
+## Discussion Gap Status
+
+**Pre-Discussion:** [CLEAR | GAPS_FOUND]
+**Resolved:** [X of Y]
+
+### Resolved Gaps
+[Gaps addressed through discussion decisions above. If none: "No gaps identified."]
+- [Gap description] → Resolved by: [which decision area]
+
+### Remaining Gaps (for Research)
+[Gaps that need deeper investigation. If none: "All gaps resolved through discussion."]
+- **Gap:** [What's missing or ambiguous]
+- **Relates to:** [Which requirement]
+- **Recommended action:** [What researcher should investigate]
+
 ---
 *Phase: XX-name*
 *Context gathered: [date]*
@@ -108,6 +123,17 @@ Display posts from followed users in a scrollable feed. Users can view posts and
 - Commenting on posts - Phase 5
 - Bookmarking posts - add to backlog
 
+## Discussion Gap Status
+
+**Pre-Discussion:** CLEAR
+**Resolved:** 0 of 0
+
+### Resolved Gaps
+No gaps identified.
+
+### Remaining Gaps (for Research)
+All gaps resolved through discussion.
+
 ---
 *Phase: 03-post-feed*
 *Context gathered: 2025-01-20*
@@ -158,6 +184,17 @@ CLI command to backup database to local file or S3. Supports full and incrementa
 - Scheduled backups - separate phase
 - Backup rotation/retention - add to backlog
 
+## Discussion Gap Status
+
+**Pre-Discussion:** GAPS_FOUND
+**Resolved:** 1 of 1
+
+### Resolved Gaps
+- Encryption requirement unclear → Resolved by: Flag design (--encrypt flag, optional)
+
+### Remaining Gaps (for Research)
+All gaps resolved through discussion.
+
 ---
 *Phase: 02-backup-command*
 *Context gathered: 2025-01-20*
@@ -185,8 +222,12 @@ The output should answer: "What does the researcher need to investigate? What ch
 
 **Downstream consumers:**
 - Researcher reads decisions to focus investigation
+- Researcher reads Discussion Gap Status to know which gaps need investigation
 - Planner reads decisions to create specific tasks
+- Planner reads Discussion Gap Status to understand what was resolved vs. what remains uncertain
 - Neither should need to ask user again about captured decisions
+
+**Discussion Gap Status** is populated by discuss commands. It captures which gaps were identified during pre-discussion analysis and whether they were resolved through discussion or remain for research to investigate.
 
 </guidelines>
 

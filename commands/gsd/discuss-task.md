@@ -229,16 +229,67 @@ IF is_frontend:
   Display: "Frontend work detected — UI-specific gray areas will be included."
 ```
 
+## 4.6 Pre-Discussion Gap Scan
+
+Cross-reference task goal + inherited phase requirements against discovery findings to
+identify what's missing or ambiguous BEFORE generating gray areas.
+
+```
+# What we know:
+# - Task description and goal
+# - Phase requirements (inherited from phase context)
+# - Discovery findings (from Step 4.5)
+
+# Cross-reference:
+1. Enumerate what the task goal implies must be decided
+   - What behaviors need specifying?
+   - What interfaces need defining?
+   - What edge cases need handling?
+
+2. Check which of these are already answered by:
+   - Task description details
+   - Phase context decisions (inherited)
+   - Discovery findings (existing code patterns found)
+   - Obvious defaults
+
+3. Remaining items = gaps
+   Classify each:
+   - REQUIREMENT_GAP: Task goal implies X but no requirement defines it
+   - AMBIGUITY_GAP: Requirement exists but allows 2+ valid interpretations
+   - CONFLICT_GAP: Task description or findings contradict
+   - UNKNOWN_GAP: Technical question discovery couldn't answer
+
+4. pre_discussion_gaps = { gaps: [...], count: N }
+
+Display:
+"""
+Gap scan: {N} areas identified that need your input
+{IF N == 0: "No ambiguities detected — gray areas will cover preferences."}
+{IF N > 0: list top 3 gaps briefly}
+"""
+```
+
 ## 5. Analyze Task and Generate Gray Areas
 
 ```
 # Use discovery findings + task description to generate gray areas
 task_desc_lower = task.description.toLowerCase()
 
-# Discovery-informed analysis based on task type and codebase findings
-gray_areas = []
+# Gap-informed gray area priority:
+IF pre_discussion_gaps.count > 0:
+  # Convert gaps to gray areas (gaps get priority slots)
+  gap_gray_areas = pre_discussion_gaps.gaps.slice(0, 2).map(gap => ({
+    id: String.fromCharCode(65 + gap_gray_areas.length),
+    name: "⚠ " + gap.area,
+    reason: gap.description + " (identified as gap in requirements)"
+  }))
+ELSE:
+  gap_gray_areas = []
 
-# Gray areas informed by discovery (existing patterns, best practices)
+# Discovery-informed analysis based on task type and codebase findings
+gray_areas = [...gap_gray_areas]
+
+# Standard gray areas informed by discovery (existing patterns, best practices)
 
 # If frontend detected, add UI-specific gray areas from frontend-design reference
 IF is_frontend:
@@ -307,7 +358,7 @@ gray_areas.push({
   reason: "How do we know this task is truly complete?"
 })
 
-# Limit to 4 gray areas
+# Limit to 4 gray areas (gap gray areas already have priority from being first)
 gray_areas = gray_areas.slice(0, 4)
 ```
 
@@ -383,6 +434,38 @@ FOR each selected_area in user_selection:
 - If user suggests new capabilities: "That's beyond this task's scope. I'll note it for a separate task."
 - Capture deferred ideas - don't lose them, don't act on them
 
+## 6.5 Post-Discussion Gap Assessment
+
+```
+# Check which pre-discussion gaps were resolved through user answers
+resolved_gaps = []
+remaining_gaps = []
+
+FOR each gap in pre_discussion_gaps.gaps:
+  IF gap was covered by a discussed area AND user made a decision:
+    resolved_gaps.push({ ...gap, resolved_by: area_name })
+  ELSE:
+    remaining_gaps.push(gap)
+
+# Also check for NEW gaps surfaced during discussion
+# (e.g., user revealed conflicting preferences, or "I haven't decided yet" answers)
+FOR each discussed_area:
+  IF user response was ambiguous or explicitly deferred:
+    remaining_gaps.push({
+      type: "DEFERRED_GAP",
+      area: area_name,
+      description: "User deferred decision — researcher should investigate options"
+    })
+
+gap_resolution_status = remaining_gaps.length == 0 ? "RESOLVED" : "PARTIAL"
+
+Display:
+"""
+Gap assessment: {resolved_gaps.length} resolved, {remaining_gaps.length} remaining
+{IF remaining_gaps.length > 0: "Remaining gaps will be flagged for research investigation."}
+"""
+```
+
 ## 7. Create/Update Context Page in Mosic
 
 ```
@@ -403,13 +486,16 @@ AskUserQuestion({
 IF user_selection == "Add more":
   GOTO step 5 (present gray areas again)
 
-# Build context content
+# Build context content (includes Discussion Gap Status section)
 context_content = build_context_markdown({
   task_identifier: TASK_IDENTIFIER,
   task_title: TASK_TITLE,
   areas_discussed: selected_areas,
   decisions: all_decisions,
-  deferred_ideas: deferred_items
+  deferred_ideas: deferred_items,
+  pre_discussion_gaps: pre_discussion_gaps,
+  resolved_gaps: resolved_gaps,
+  remaining_gaps: remaining_gaps
 })
 
 IF existing_context_page:
@@ -535,6 +621,17 @@ These suggestions are out of scope for this task:
 - {Idea 1} - Create separate task
 - {Idea 2} - Consider for future work
 
+## Discussion Gap Status
+
+**Pre-Discussion:** {CLEAR | GAPS_FOUND}
+**Resolved:** {resolved_gaps.length} of {pre_discussion_gaps.count}
+
+### Resolved Gaps
+{resolved_gaps.map(g => "- " + g.description + " → Resolved by: " + g.resolved_by).join("\n") || "No gaps identified."}
+
+### Remaining Gaps (for Research)
+{remaining_gaps.map(g => "- **Gap:** " + g.description + " — " + g.recommended_action).join("\n") || "All gaps resolved through discussion."}
+
 ## Summary
 
 {Brief summary of key decisions that will shape implementation}
@@ -545,11 +642,14 @@ These suggestions are out of scope for this task:
 - [ ] Task loaded from Mosic
 - [ ] Phase context loaded for inherited decisions
 - [ ] Quick discovery completed (codebase scan + web research)
-- [ ] Gray areas identified through discovery-informed analysis
+- [ ] Pre-discussion gap scan completed
+- [ ] Gray areas prioritized by gap severity
 - [ ] User chose which areas to discuss
 - [ ] Each selected area explored until satisfied
 - [ ] Scope creep redirected to deferred ideas
+- [ ] Post-discussion gap assessment completed
 - [ ] Context page created/updated in Mosic linked to task
+- [ ] Discussion Gap Status section included in context page
 - [ ] Tags applied (gsd-managed, task-context)
 - [ ] config.json updated with page mapping
 - [ ] User knows next steps with Mosic URLs
