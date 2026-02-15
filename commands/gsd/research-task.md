@@ -278,6 +278,28 @@ user_decisions_xml = """
 """
 ```
 
+# Extract discussion gap status from task context page or phase context page (if exists)
+discussion_gaps_xml = ""
+IF task_context_content:
+  gap_status_section = extract_section(task_context_content, "## Discussion Gap Status")
+  IF gap_status_section:
+    discussion_gaps_xml = """
+<discussion_gaps>
+""" + gap_status_section + """
+</discussion_gaps>
+"""
+    Display: "Discussion gaps found — researcher will prioritize investigating these."
+
+IF not discussion_gaps_xml AND phase_context_content:
+  gap_status_section = extract_section(phase_context_content, "## Discussion Gap Status")
+  IF gap_status_section:
+    discussion_gaps_xml = """
+<discussion_gaps>
+""" + gap_status_section + """
+</discussion_gaps>
+"""
+    Display: "Phase discussion gaps found — researcher will prioritize investigating these."
+
 # Frontend detection
 frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
   "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
@@ -350,6 +372,8 @@ Answer: "What do I need to know to PLAN this task well?"
 """ + (phase_research_content or "No phase research available. May need to research more broadly.") + """
 
 </context>
+
+""" + discussion_gaps_xml + """
 
 <frontend_design_context>
 """ + frontend_design_xml + """

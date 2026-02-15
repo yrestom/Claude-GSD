@@ -185,6 +185,18 @@ user_decisions_xml = """
 """
 ```
 
+# Extract discussion gap status from context page (if exists)
+discussion_gaps_xml = ""
+IF context_content:
+  gap_status_section = extract_section(context_content, "## Discussion Gap Status")
+  IF gap_status_section:
+    discussion_gaps_xml = """
+<discussion_gaps>
+""" + gap_status_section + """
+</discussion_gaps>
+"""
+    Display: "Discussion gaps found — researcher will prioritize investigating these."
+
 # Frontend detection
 frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
   "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
@@ -266,6 +278,8 @@ Mode: ecosystem
 **Context decisions:**
 {context_content}
 </context>
+
+""" + discussion_gaps_xml + """
 
 <downstream_consumer>
 Your research will be loaded by `/gsd:plan-phase` which uses specific sections:
