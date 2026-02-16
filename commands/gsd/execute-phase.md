@@ -357,30 +357,23 @@ FOR each batch in batches:
 - FOR loop = sequential (one agent finishes, then next starts)
 - Multiple Task() in single response = parallel (all agents start simultaneously)
 
-**If `use_parallel=false`: Spawn agents sequentially (one at a time)**
+**If `use_parallel=false`: Spawn agents sequentially (one at a time) with inline result handling**
 
 ```
 # Sequential execution: each plan completes before the next starts
 # This prevents concurrent file modifications and build conflicts
+# Result handling happens INLINE after each agent completes (no deferred zip)
 
 FOR each executor_prompt in executor_prompts:
-  Task(
+  agent_result = Task(
     prompt=executor_prompt.prompt,
     subagent_type="general-purpose",
     model="{executor_model}",
     description="Execute Plan " + executor_prompt.plan.number
   )
-  # Wait for completion, handle result, then continue to next
-```
 
-### 4.3 Handle Executor Results
-
-After all executors in wave complete, pair results with plans:
-
-```
-# Results correspond to executor_prompts by spawn order
-FOR each (ep, agent_result) in zip(executor_prompts, wave_results):
-  plan = ep.plan
+  # IMMEDIATELY handle this result before spawning next agent
+  plan = executor_prompt.plan
   executor_summary = parse_executor_output(agent_result)
 
   # Ensure task is marked complete (idempotent — executor already did this in normal mode)
@@ -433,7 +426,6 @@ FOR each (ep, agent_result) in zip(executor_prompts, wave_results):
   config.mosic.pages["phase-" + PHASE + "-summary-" + plan.number] = summary_page.name
 
   # Add orchestrator completion comment with commit details
-  # Complements executor's comment (which has duration/subtask count)
   # IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
     workspace: workspace_id,
@@ -445,8 +437,6 @@ FOR each (ep, agent_result) in zip(executor_prompts, wave_results):
   })
 
   # Create relation between plan page and summary page (page→page)
-  # This is NOT a duplicate: executor creates task→page relation,
-  # this creates plan_page→summary_page relation for cross-reference
   plan_page_id = config.mosic.pages["phase-" + PHASE + "-plan-" + plan.number]
   IF plan_page_id:
     mosic_create_document("M Relation", {
@@ -457,6 +447,90 @@ FOR each (ep, agent_result) in zip(executor_prompts, wave_results):
       target_name: summary_page.name,
       relation_type: "Related"
     })
+
+  # THEN continue to next plan in wave
+```
+
+### 4.3 Handle Executor Results (Parallel Mode Only)
+
+After all parallel executors in wave complete, pair results with plans:
+
+```
+# This section only applies to parallel mode — sequential results are handled inline above
+IF use_parallel:
+  # Results correspond to executor_prompts by spawn order
+  FOR each (ep, agent_result) in zip(executor_prompts, wave_results):
+    plan = ep.plan
+    executor_summary = parse_executor_output(agent_result)
+
+    # Ensure task is marked complete (idempotent — executor already did this in normal mode)
+    mosic_complete_task(plan.task.name)
+    mosic_update_document("MTask", plan.task.name, {
+      status: "Completed"
+    })
+
+    # Update checklist items based on executor's returned summary
+    task_with_checklists = mosic_get_task(plan.task.name, {
+      include_checklists: true
+    })
+
+    FOR each completed_item in executor_summary.completed_tasks:
+      matching_checklist = task_with_checklists.checklists.find(c =>
+        c.title == completed_item OR
+        c.title.toLowerCase().includes(completed_item.toLowerCase()) OR
+        completed_item.toLowerCase().includes(c.title.toLowerCase())
+      )
+      IF matching_checklist:
+        mosic_update_document("MTask CheckList", matching_checklist.name, {
+          done: true
+        })
+
+    # Find executor's summary page (already created by execute-plan.md workflow in normal mode)
+    task_pages = mosic_get_entity_pages("MTask", plan.task.name, { include_subtree: false })
+    summary_page = task_pages.find(p => p.title.includes("Execution Summary"))
+
+    IF NOT summary_page:
+      summary_page = mosic_create_entity_page("MTask", plan.task.name, {
+        workspace_id: workspace_id,
+        title: plan.task.identifier + " Execution Summary",
+        page_type: "Document",
+        icon: config.mosic.page_icons.summary,
+        status: "Published",
+        content: convert_to_editorjs(executor_summary),
+        relation_type: "Related"
+      })
+
+    # Tag summary page (idempotent — safe even if executor already tagged)
+    mosic_batch_add_tags_to_document("M Page", summary_page.name, [
+      config.mosic.tags.gsd_managed,
+      config.mosic.tags.summary,
+      config.mosic.tags.phase_tags[phase_key]
+    ])
+
+    # Store in config
+    config.mosic.pages["phase-" + PHASE + "-summary-" + plan.number] = summary_page.name
+
+    # Add orchestrator completion comment
+    mosic_create_document("M Comment", {
+      workspace: workspace_id,
+      ref_doc: "MTask",
+      ref_name: plan.task.name,
+      content: "<p><strong>Phase Orchestrator: Completed</strong></p>" +
+        "<p><strong>Commits:</strong></p>" +
+        "<ul>" + executor_summary.commits.map(c => "<li><code>" + c.hash + "</code>: " + c.message + "</li>").join("") + "</ul>"
+    })
+
+    # Create relation between plan page and summary page (page→page)
+    plan_page_id = config.mosic.pages["phase-" + PHASE + "-plan-" + plan.number]
+    IF plan_page_id:
+      mosic_create_document("M Relation", {
+        workspace: workspace_id,
+        source_doctype: "M Page",
+        source_name: plan_page_id,
+        target_doctype: "M Page",
+        target_name: summary_page.name,
+        relation_type: "Related"
+      })
 ```
 
 ### 4.4 Proceed to Next Wave

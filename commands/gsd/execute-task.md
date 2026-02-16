@@ -26,7 +26,7 @@ ToolSearch("mosic task page entity create document complete update comment relat
 Check `config.parallelization` before spawning agents. Parallel execution is conditional:
 
 - **If parallel enabled AND task_level enabled:** Spawn agents in parallel for independent subtasks within the same wave. Cap at `max_concurrent_agents`.
-- **If parallel disabled OR task_level disabled:** Spawn ONE agent for all subtasks (sequential). Prevents concurrent file modifications, test conflicts, and build race conditions.
+- **If parallel disabled OR task_level disabled:** Spawn one agent per subtask sequentially (one at a time, wait for completion before next). Prevents concurrent file modifications, test conflicts, and build race conditions.
 - **If wave has fewer subtasks than `min_subtasks_for_parallel`:** Execute sequentially (overhead not worth it).
 - **File-overlap safety:** Subtasks touching the SAME files are NEVER run in parallel, regardless of config. They are placed in separate waves by the planner.
 
@@ -45,7 +45,7 @@ Execute a planned task by implementing all subtasks with atomic commits.
 
 **Supports two execution strategies (determined by formula in step 5 — never by subjective judgment):**
 - **Parallel** (when config enables it AND conditions met): Independent subtasks in the same wave run in parallel via separate agents, orchestrator handles commits. This is the PREFERRED mode when the formula evaluates to true.
-- **Sequential** (when few subtasks OR parallelization disabled): Single agent executes all subtasks with per-subtask commits
+- **Sequential** (when few subtasks OR parallelization disabled): One agent per subtask, executed one at a time with per-subtask commits
 
 **Key differences from execute-phase:**
 - Executes subtasks of a single parent task (not plan tasks)
@@ -54,7 +54,7 @@ Execute a planned task by implementing all subtasks with atomic commits.
 - Returns to phase execution context after completion
 - Parallelism is at subtask level (finer grained than execute-phase's plan level)
 
-**Spawns:** gsd-executor for implementation work (one per subtask in parallel mode, or one for all in sequential mode)
+**Spawns:** gsd-executor for implementation work (one per subtask in both modes — parallel controls timing, not agent count)
 **Output:** Summary Page + completed task with commit history
 </objective>
 
@@ -351,19 +351,19 @@ all_failures = []       # Track failures across all waves
 
 ### 6a. Sequential Execution (when `use_parallel = false`)
 
+**One agent per subtask, executed one at a time.** Each agent uses normal mode (self-commits) since there's no concurrent file access concern in sequential execution.
+
 ```
 IF NOT use_parallel:
-  # Build subtask IDs list for single agent
-  subtask_ids = ""
   FOR each subtask in incomplete_subtasks:
     st = subtask_details_map[subtask.name]
-    subtask_ids += "- **" + st.identifier + "** (" + st.name + "): " + st.title + "\n"
 
-  executor_prompt = """
+    Display: "Executing subtask " + st.identifier + ": " + st.title
+
+    # Build single-subtask prompt (same structure as parallel's single-wave path)
+    subtask_prompt = """
 <objective>
-Execute task """ + TASK_IDENTIFIER + """: """ + TASK_TITLE + """
-
-Implement all subtasks and then ask for user permission to create commits. Create summary when complete.
+Execute subtask """ + st.identifier + """: """ + st.title + """
 </objective>
 
 <execution_context>
@@ -372,72 +372,72 @@ Implement all subtasks and then ask for user permission to create commits. Creat
 
 """ + mosic_refs + """
 
-**Subtasks to Execute (load details from Mosic):**
-""" + subtask_ids + """
-
-<commit_rules>
-**Per-Subtask Commits:**
-After each subtask completes:
-1. Stage only files modified by that subtask
-2. Commit with format: `{type}(""" + TASK_IDENTIFIER + """): {subtask-name}`
-3. Types: feat, fix, test, refactor, perf, chore
-4. Record commit hash for summary
-5. Always ask for user permission before you commit
-
-**Never use:**
-- `git add .`
-- `git add -A`
-- `git add src/` or any broad directory
-- Never auto commit the changes
-
-**Always stage files individually.**
-</commit_rules>
-
-<success_criteria>
-For each subtask:
-- [ ] Implementation matches description
-- [ ] Verification criteria pass
-- [ ] Commit created with proper format
-- [ ] Subtask marked complete in Mosic
-
-Overall:
-- [ ] All subtasks executed
-- [ ] Commits recorded for summary
-- [ ] No regressions introduced
-</success_criteria>
-
-<output_format>
-After execution, return:
-
-## EXECUTION COMPLETE
-
-**Task:** {TASK_IDENTIFIER}
-**Subtasks Completed:** N/N
-
-### Commits
-| Hash | Message |
-|------|---------|
-| abc123 | feat(AUTH-5): implement login form |
-| def456 | test(AUTH-5): add login tests |
-
-### Summary
-{What was accomplished}
-
-### Files Changed
-- path/to/file1.ts
-- path/to/file2.ts
-
-### Verification Results
-{What was verified and how}
-</output_format>
+**Subtask to Execute (ONLY THIS ONE):**
+- **""" + st.identifier + """** (""" + st.name + """): """ + st.title + """
 """
 
-  Task(
-    prompt="First, read ./.claude/agents/gsd-executor.md for your role.\n\n" + executor_prompt,
-    subagent_type="general-purpose",
-    model="{executor_model}",
-    description="Execute: " + TASK_TITLE.substring(0, 30)
-  )
+    # Spawn ONE agent for THIS subtask (normal mode — agent self-commits)
+    Task(
+      prompt="First, read ./.claude/agents/gsd-executor.md for your role.\n\n" + subtask_prompt,
+      subagent_type="general-purpose",
+      model="{executor_model}",
+      description="Subtask: " + st.identifier
+    )
+
+    # IMMEDIATELY process result before spawning next agent
+    IF agent_result contains "EXECUTION COMPLETE" or agent_result contains "SUBTASK COMPLETE":
+      commits = extract_commits(agent_result)
+      files = parse_file_list(extract_file_list(agent_result))
+      all_commits.push(...commits)
+      all_files_changed.push(...files)
+      all_results.push(agent_result)
+
+      # Mark subtask complete
+      mosic_complete_task(subtask.name)
+      mosic_create_document("M Comment", {
+        workspace: workspace_id,
+        ref_doc: "MTask",
+        ref_name: subtask.name,
+        content: "<p><strong>Completed</strong></p>" +
+          (commits.length > 0 ? "<p>Commit: <code>" + commits[0].hash + "</code></p>" : "")
+      })
+
+      Display: "Subtask " + st.identifier + " complete."
+
+    ELIF agent_result contains "SUBTASK FAILED" or agent_result contains "EXECUTION FAILED":
+      all_failures.push({ subtask: subtask, result: agent_result })
+      Display: "Subtask " + st.identifier + " FAILED."
+      Display: agent_result
+
+      AskUserQuestion({
+        questions: [{
+          question: "Subtask " + st.identifier + " failed. How should we proceed?",
+          header: "Failed",
+          options: [
+            { label: "Continue", description: "Skip this subtask, continue with remaining" },
+            { label: "Retry", description: "Re-run this subtask" },
+            { label: "Stop execution", description: "Abort remaining subtasks" }
+          ],
+          multiSelect: false
+        }]
+      })
+
+      IF user_selection == "Stop execution":
+        GOTO step 7  # Create partial summary with what completed so far
+      IF user_selection == "Retry":
+        # Re-run same subtask (loop iteration doesn't advance)
+        REDO current iteration
+
+    ELSE:
+      # Unexpected output — treat as potential success, extract what we can
+      commits = extract_commits(agent_result)
+      files = parse_file_list(extract_file_list(agent_result))
+      all_commits.push(...commits)
+      all_files_changed.push(...files)
+      all_results.push(agent_result)
+      mosic_complete_task(subtask.name)
+
+    # Continue to next subtask
 ```
 
 ### 6b. Parallel Wave Execution (when `use_parallel = true`)
@@ -677,34 +677,8 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
 ## 7. Handle Results and Create Summary
 
 ```
-# --- Sequential mode: parse single executor return ---
-IF NOT use_parallel:
-  IF executor_output contains "## EXECUTION COMPLETE":
-    commits = extract_commits(executor_output)
-    summary_text = extract_section(executor_output, "### Summary")
-    files_changed = extract_section(executor_output, "### Files Changed")
-    verification_results = extract_section(executor_output, "### Verification Results")
-
-    # Mark subtasks complete
-    FOR each subtask in incomplete_subtasks:
-      mosic_complete_task(subtask.name)
-
-      subtask_commit = commits.find(c => c.message.includes(subtask.title.substring(0, 20)))
-      mosic_create_document("M Comment", {
-        workspace: workspace_id,
-        ref_doc: "MTask",
-        ref_name: subtask.name,
-        content: "<p><strong>Completed</strong></p>" +
-          (subtask_commit ? "<p>Commit: <code>" + subtask_commit.hash + "</code></p>" : "")
-      })
-
-    all_commits = commits
-    all_files_changed = parse_file_list(files_changed)
-  ELSE:
-    ERROR: "Executor did not return structured completion. Check output."
-
-# --- Parallel mode: results already collected in wave loop (step 6b) ---
-# all_commits, all_files_changed, all_results already populated
+# --- Both modes: results already collected in execution loops (steps 6a/6b) ---
+# all_commits, all_files_changed, all_results, all_failures already populated
 
 # Calculate completion stats
 completed_count = all_commits.length
@@ -917,7 +891,7 @@ IF mosic operation fails:
 - [ ] File-overlap safety enforced (overlapping subtasks never parallel)
 - [ ] Phase and task context loaded for executor(s)
 - [ ] Execution strategy determined (sequential vs parallel)
-- [ ] Sequential mode: single agent executes all subtasks with per-subtask commits
+- [ ] Sequential mode: one agent per subtask, executed one at a time with per-subtask commits
 - [ ] Parallel mode: wave-based execution with orchestrator-managed commits
 - [ ] Parallel mode: post-wave test verification catches cross-subtask regressions
 - [ ] Failed subtasks handled (continue/retry/stop options)
