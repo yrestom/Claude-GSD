@@ -136,8 +136,9 @@ research_page_id = research_page ? research_page.name : null
 context_page_id = context_page ? context_page.name : null
 requirements_page_id = config.mosic.pages.requirements or null
 
-# Filter to plan tasks only
-plan_tasks = phase.tasks.filter(t => t.title starts with "Plan")
+# Filter to plan tasks only (tag-based, consistent with gsd-planner.md and gsd-plan-checker.md)
+plan_tag = config.mosic.tags.plan
+plan_tasks = phase.tasks.filter(t => t.tags.includes(plan_tag))
 
 IF plan_tasks.length == 0:
   ERROR: No plans found for Phase {PHASE}. Run /gsd:plan-phase first.
@@ -458,7 +459,7 @@ FOR each executor_prompt in executor_prompts:
     })
 
     IF review_loop_result.status == "abort":
-      GOTO step 7  # Update phase status with partial results
+      GOTO step 7  # Update phase status as PARTIAL (not Completed)
     IF review_loop_result.status == "skipped":
       CONTINUE  # Skip to next plan
 
@@ -576,7 +577,7 @@ IF use_parallel:
       })
 
       IF review_loop_result.status == "abort":
-        GOTO step 7  # Update phase status with partial results
+        GOTO step 7  # Update phase status as PARTIAL (not Completed)
       IF review_loop_result.status == "skipped":
         CONTINUE  # Skip to next plan
 
@@ -791,11 +792,34 @@ config.mosic.pages["phase-" + PHASE + "-verification"] = verification_page.name
 ## 7. Update Phase Status
 
 ```
-# Mark phase task list as complete
-mosic_update_document("MTask List", task_list_id, {
-  status: "Completed",
-  done: true
-})
+# Determine if arriving from an abort (partial completion) or normal completion
+# Abort arrives here when review_loop_result.status == "abort" in steps 4.2/4.3
+# Normal completion arrives here after all plans executed and phase goal verified
+
+# Check if all plan tasks are actually complete
+all_plans_done = plan_tasks.every(t => t.done or t.status == "Completed")
+
+IF all_plans_done:
+  # Normal completion — all plans executed successfully
+  mosic_update_document("MTask List", task_list_id, {
+    status: "Completed",
+    done: true
+  })
+ELSE:
+  # Partial completion (abort) — do NOT mark as Completed
+  completed_count = plan_tasks.filter(t => t.done or t.status == "Completed").length
+  mosic_update_document("MTask List", task_list_id, {
+    status: "In Progress"
+  })
+  # Add comment explaining partial state
+  mosic_create_document("M Comment", {
+    workspace: workspace_id,
+    ref_doc: "MTask List",
+    ref_name: task_list_id,
+    content: "<p><strong>Partial Execution</strong></p>" +
+      "<p>Completed " + completed_count + "/" + plan_tasks.length + " plans. " +
+      "Execution aborted after review loop failure.</p>"
+  })
 
 # Update config session
 config.mosic.session.last_action = "execute-phase"
@@ -839,7 +863,8 @@ Use AskUserQuestion to confirm:
 
 **If user approves:**
 ```bash
-git add -u && git commit -m "fix({phase}): orchestrator corrections"
+git add config.json  # Stage only the specific files modified by orchestrator corrections
+git commit -m "fix({phase}): orchestrator corrections"
 ```
 
 ## 10. Offer Next Steps

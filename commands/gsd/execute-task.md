@@ -247,6 +247,8 @@ FOR each subtask in incomplete_subtasks:
   waves[wave_num].push(subtask)
 
 # File-overlap safety check: verify no subtasks in the same wave share files
+# Collect overlap moves FIRST, then apply after scan (avoid mutating waves during iteration)
+overlap_moves = []
 FOR each wave_num in waves:
   wave_subtasks = waves[wave_num]
   IF wave_subtasks.length > 1:
@@ -256,15 +258,17 @@ FOR each wave_num in waves:
       subtask_files = extract_files_from_description(st.description)
       FOR each file in subtask_files:
         IF all_files[file]:
-          # File overlap detected! Move this subtask to next wave
-          overlap_subtask = subtask
-          next_wave = wave_num + 1
-          IF (!waves[next_wave]) waves[next_wave] = []
-          waves[next_wave].push(overlap_subtask)
-          waves[wave_num] = waves[wave_num].filter(s => s.name != overlap_subtask.name)
-          Display: "File overlap detected: " + file + " — moved " + subtask.identifier + " to wave " + next_wave
+          # File overlap detected! Schedule move to next wave
+          overlap_moves.push({ from: wave_num, subtask: subtask, to: wave_num + 1 })
+          Display: "File overlap detected: " + file + " — will move " + subtask.identifier + " to wave " + (wave_num + 1)
         ELSE:
           all_files[file] = subtask.name
+
+# Apply moves after scan completes
+FOR each move in overlap_moves:
+  waves[move.from] = waves[move.from].filter(s => s.name != move.subtask.name)
+  IF (!waves[move.to]) waves[move.to] = []
+  waves[move.to].push(move.subtask)
 ```
 
 ## 5. Determine Execution Strategy
@@ -477,8 +481,8 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
       IF user_selection == "Stop execution":
         GOTO step 7  # Create partial summary with what completed so far
       IF user_selection == "Retry":
-        # Re-run same subtask (loop iteration doesn't advance)
-        REDO current iteration
+        # Retry: re-execute the same subtask with fix applied
+        CONTINUE to next iteration of the loop with the same subtask
 
     ELSE:
       # Unexpected output — treat as potential success, extract what we can
@@ -690,7 +694,7 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
       })
 
       IF user_selection == "Stop execution":
-        GOTO step_7_handle_executor_return  # Create partial summary
+        GOTO step 7  # Create partial summary
       IF user_selection == "Retry failed":
         # Re-run failed subtasks (in next wave iteration)
         retry_wave = max(wave_nums) + 1
@@ -719,7 +723,7 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
           })
 
           IF review_loop_result.status == "abort":
-            GOTO step_7_handle_executor_return  # Create partial summary
+            GOTO step 7  # Create partial summary
           IF review_loop_result.status == "skipped":
             all_failures.push({ subtask: subtask, result: "Skipped after failed review" })
             CONTINUE
