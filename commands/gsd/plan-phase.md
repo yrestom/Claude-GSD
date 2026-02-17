@@ -2,7 +2,6 @@
 name: gsd:plan-phase
 description: Create detailed execution plans for a phase in Mosic (Mosic-native)
 argument-hint: "[phase] [--research] [--skip-research] [--gaps] [--skip-verify]"
-agent: gsd-planner
 allowed-tools:
   - Read
   - Write
@@ -11,6 +10,7 @@ allowed-tools:
   - Grep
   - Task
   - WebFetch
+  - AskUserQuestion
   - ToolSearch
   - mcp__mosic_pro__*
   - mcp__context7__*
@@ -194,8 +194,6 @@ discretion_areas = ""
 
 IF context_content:
   locked_decisions = extract_section(context_content, "## Decisions")
-  IF not locked_decisions:
-    locked_decisions = extract_section(context_content, "## Implementation Decisions")
   deferred_ideas = extract_section(context_content, "## Deferred Ideas")
   discretion_areas = extract_section(context_content, "## Claude's Discretion")
 
@@ -239,7 +237,7 @@ Answer: "What do I need to know to PLAN this phase well?"
 </context>
 
 <output>
-Return research findings as structured markdown. The orchestrator will create the Mosic page.
+Create the research page directly in Mosic using mosic_create_entity_page. Return the created page ID and a brief summary of findings. The orchestrator will validate the page was created successfully.
 </output>
 ```
 
@@ -252,36 +250,30 @@ Task(
 )
 ```
 
-### Create Research Page in Mosic
+### Validate Research Page in Mosic
 
 After researcher returns with `## RESEARCH COMPLETE`:
 
 ```
-# Create or update research page
-IF research_page:
-  mosic_update_document("M Page", research_page.name, {
-    content: convert_to_editorjs(research_findings),
-    status: "Published"
-  })
-  research_page_id = research_page.name
-ELSE:
-  new_research_page = mosic_create_entity_page("MTask List", task_list_id, {
-    workspace_id: workspace_id,
-    title: "Phase " + PHASE + " Research",
-    page_type: "Document",
-    icon: config.mosic.page_icons.research,
-    status: "Published",
-    content: convert_to_editorjs(research_findings),
-    relation_type: "Related"
-  })
-  research_page_id = new_research_page.name
+# Extract page ID from agent output
+research_page_id = extract_field(research_findings, "Research Page ID:") or
+                   extract_page_id_from_url(research_findings)
 
-  # Tag research page
-  mosic_batch_add_tags_to_document("M Page", research_page_id, [
-    config.mosic.tags.gsd_managed,
-    config.mosic.tags.research,
-    config.mosic.tags.phase_tags[phase_key]
-  ])
+# Validate the agent created/updated the research page in Mosic
+IF research_page_id:
+  validated_page = mosic_get_page(research_page_id, { content_format: "plain" })
+  IF NOT validated_page OR NOT validated_page.content:
+    ERROR: "Agent reported page ID {research_page_id} but page not found or empty in Mosic"
+ELSE:
+  # Fallback: check entity pages for newly created research page
+  phase_pages_updated = mosic_get_entity_pages("MTask List", task_list_id, {
+    include_subtree: false
+  })
+  research_page_found = phase_pages_updated.find(p => p.title contains "Research")
+  IF research_page_found:
+    research_page_id = research_page_found.name
+  ELSE:
+    ERROR: "Agent did not create research page. Check agent output."
 
 # Update config
 config.mosic.pages["phase-" + PHASE + "-research"] = research_page_id
@@ -443,16 +435,7 @@ Plans must include:
 </downstream_consumer>
 
 <output_format>
-Return plans as structured markdown with:
-- Plan number (01, 02, etc.)
-- Objective
-- Wave assignment
-- Dependencies (depends_on)
-- Tasks with specific actions
-- Verification criteria
-- must_haves list
-
-The orchestrator will create MTasks and M Pages in Mosic.
+Create all plan MTasks, M Pages, and subtasks directly in Mosic using MCP tools. Return the created task IDs, page IDs, and a structured summary. The orchestrator will validate the entities were created correctly.
 </output_format>
 """
 
@@ -464,7 +447,7 @@ The orchestrator will create MTasks and M Pages in Mosic.
   )
 ```
 
-## 9. Handle Planner Return and Create Mosic Entities
+## 9. Handle Planner Return and Validate Mosic Entities
 
 ```
 IF use_distributed:
@@ -472,11 +455,11 @@ IF use_distributed:
 
   # 1. Follow <coverage_verification> with:
   #    all_plan_results, phase_requirements, PHASE
-  #    Stores entity IDs in config, checks coverage completeness
+  #    Validates entity IDs in config, checks coverage completeness
 
   # 2. Follow <cross_group_relations> with:
   #    all_plan_results, workspace_id
-  #    Creates M Relations for cross-group dependencies
+  #    Validates M Relations for cross-group dependencies
 
   # Config storage pattern:
   #   config.mosic.tasks["phase-" + PHASE + "-plan-" + plan_number] = task_id
@@ -485,125 +468,66 @@ IF use_distributed:
   # Output: created_plan_tasks[] (sequential numbering for verification step)
 
 ELSE:
-  # --- SINGLE PLANNER (existing behavior, unchanged) ---
+  # --- SINGLE PLANNER (validate agent-created entities) ---
 
   Parse planner output for `## PLANNING COMPLETE`:
 
-  **For each plan in output:**
+  # Extract task IDs and page IDs from planner output
+  plan_task_ids = extract_field(planner_output, "Task IDs:")
+  plan_page_ids = extract_field(planner_output, "Page IDs:")
 
-  # Determine plan number
+  # Validate entities exist in Mosic
+  # 1. Check tasks are in the correct phase task list
+  phase_tasks = mosic_get_task_list(task_list_id, { include_tasks: true })
+  created_plan_tasks = phase_tasks.tasks.filter(t => t.title starts with "Plan")
+
+  IF created_plan_tasks.length == 0:
+    ERROR: "Planner did not create any plan tasks in Mosic. Check agent output."
+
+  **For each plan task found:**
+
   plan_number = printf("%02d", plan_index + 1)
 
-  # Create MTask for this plan
-  # IMPORTANT: Task descriptions must use Editor.js format
-  plan_task = mosic_create_document("MTask", {
-    workspace: workspace_id,
-    task_list: task_list_id,
-    title: "Plan " + plan_number + ": " + plan_objective.substring(0, 100),
-    description: {
-      blocks: [
-        {
-          type: "paragraph",
-          data: { text: plan_objective }
-        },
-        {
-          type: "header",
-          data: { text: "Wave", level: 2 }
-        },
-        {
-          type: "paragraph",
-          data: { text: "Wave " + wave + (dependencies.length > 0 ? " (depends on: " + dependencies.join(", ") + ")" : "") }
-        },
-        {
-          type: "header",
-          data: { text: "Tasks", level: 2 }
-        },
-        {
-          type: "list",
-          data: {
-            style: "ordered",
-            items: plan_tasks.map(t => t.name + ": " + t.description)
-          }
-        },
-        {
-          type: "header",
-          data: { text: "Verification", level: 2 }
-        },
-        {
-          type: "list",
-          data: {
-            style: "unordered",
-            items: verification_criteria
-          }
-        }
-      ]
-    },
-    icon: "lucide:file-code",
-    status: "ToDo",
-    priority: (wave == 1) ? "High" : "Normal"
+  # Verify task exists and has content
+  plan_task = mosic_get_task(created_plan_tasks[plan_index].name, {
+    description_format: "plain"
   })
-  # Note: Wave info is stored in the linked Plan page's "## Metadata" section,
-  # which execute-phase extracts using extract_wave(plan_content)
+  IF NOT plan_task:
+    ERROR: "Plan task {plan_number} not found in Mosic"
 
   plan_task_id = plan_task.name
 
-  # Create Plan page linked to task
-  plan_page = mosic_create_entity_page("MTask", plan_task_id, {
-    workspace_id: workspace_id,
-    title: "Execution Plan",
-    page_type: "Spec",
-    icon: config.mosic.page_icons.plan,
-    status: "Published",
-    content: convert_to_editorjs(full_plan_content),
-    relation_type: "Related"
+  # Verify linked plan page exists
+  task_pages = mosic_get_entity_pages("MTask", plan_task_id, {
+    include_subtree: false
   })
+  plan_page = task_pages.find(p => p.title contains "Plan" OR p.page_type == "Spec")
+  IF NOT plan_page:
+    WARN: "Plan task {plan_number} has no linked plan page"
 
-  # Tag the task and page
-  plan_tags = [
-    config.mosic.tags.gsd_managed,
-    config.mosic.tags.plan,
-    config.mosic.tags.phase_tags[phase_key]
-  ]
-
-  # Detect TDD from planner output
-  IF full_plan_content contains "Type: tdd" or full_plan_content contains 'tdd="true"':
-    plan_tags.push(config.mosic.tags.tdd or "tdd")
-
-  mosic_batch_add_tags_to_document("MTask", plan_task_id, plan_tags)
-
-  mosic_batch_add_tags_to_document("M Page", plan_page.name, [
-    config.mosic.tags.gsd_managed,
-    config.mosic.tags.plan,
-    config.mosic.tags.phase_tags[phase_key]
-  ])
-
-  # Create checklist items for plan tasks
-  FOR each task_item in plan.tasks:
-    mosic_create_document("MTask CheckList", {
-      workspace: workspace_id,
-      task: plan_task_id,
-      title: task_item.name,
-      done: false
-    })
+  # Verify tags are applied
+  task_tags = mosic_get_document_tags("MTask", plan_task_id)
+  IF NOT task_tags.find(t => t.tag == config.mosic.tags.gsd_managed):
+    WARN: "Plan task {plan_number} missing gsd-managed tag"
 
   # Store in config
   config.mosic.tasks["phase-" + PHASE + "-plan-" + plan_number] = plan_task_id
-  config.mosic.pages["phase-" + PHASE + "-plan-" + plan_number] = plan_page.name
+  IF plan_page:
+    config.mosic.pages["phase-" + PHASE + "-plan-" + plan_number] = plan_page.name
 
-  **Create task dependencies:**
+  # Verify task dependencies (M Relations) exist
+  FOR each plan_task with expected depends_on:
+    relations = mosic_get_document_relations("MTask", plan_task_id)
+    FOR each expected_dep in depends_on:
+      dep_task_id = config.mosic.tasks["phase-" + PHASE + "-plan-" + expected_dep]
+      IF dep_task_id AND NOT relations.find(r => r.target_name == dep_task_id):
+        WARN: "Missing dependency relation: Plan {plan_number} -> Plan {expected_dep}"
 
-  FOR each plan with depends_on:
-    FOR each dependency in depends_on:
-      dep_task_id = config.mosic.tasks["phase-" + PHASE + "-plan-" + dependency]
-      IF dep_task_id:
-        mosic_create_document("M Relation", {
-          workspace: workspace_id,
-          source_doctype: "MTask",
-          source_name: plan_task_id,
-          target_doctype: "MTask",
-          target_name: dep_task_id,
-          relation_type: "Depends"
-        })
+  Display:
+  """
+  Validated {created_plan_tasks.length} plan(s) in Mosic
+  Task List: https://mosic.pro/app/MTask%20List/{task_list_id}
+  """
 ```
 
 ## 10. Verification Loop (unless --skip-verify)
@@ -782,27 +706,27 @@ Mosic Links:
 
 <error_handling>
 ```
-IF mosic operation fails during plan creation:
+IF mosic validation fails during plan verification:
   - Log warning with error message
   - Store partial state in config.mosic.pending_sync
-  - Continue with remaining plans
-  - Display: "Some plans may need manual sync. Check /gsd:progress"
+  - Continue validating remaining plans
+  - Display: "Some plans may not have been created correctly. Check /gsd:progress"
 ```
 </error_handling>
 
 <success_criteria>
 - [ ] Phase loaded from Mosic
-- [ ] Research completed (unless skipped) and page created/updated
+- [ ] Research completed (unless skipped) and page validated (created by agent)
 - [ ] Distributed threshold evaluated (decomposition reused or computed fresh)
 - [ ] If distributed: planners spawned sequentially in dependency order with prior plan page IDs
 - [ ] If distributed: each planner receives assigned requirements + prior plans XML
 - [ ] If distributed: subtasks created by planners (3-8 per plan task)
 - [ ] If single: gsd-planner spawned with page IDs (planner self-loads content)
-- [ ] Plans created as MTasks linked to phase task list
-- [ ] Plan pages created and linked to plan tasks
-- [ ] Checklist items created for each plan task
-- [ ] Task dependencies created as M Relations
-- [ ] Tags applied (gsd-managed, plan, phase-NN)
+- [ ] Plans validated as MTasks linked to phase task list (created by agent)
+- [ ] Plan pages validated and linked to plan tasks (created by agent)
+- [ ] Checklist items validated for each plan task (created by agent)
+- [ ] Task dependencies validated as M Relations (created by agent)
+- [ ] Tags validated (gsd-managed, plan, phase-NN) (applied by agent)
 - [ ] If distributed: group-scoped verification (parallel) + cross-group verification
 - [ ] If single: verification passed (unless skipped)
 - [ ] config.json updated with all entity IDs

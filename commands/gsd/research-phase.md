@@ -6,9 +6,15 @@ allowed-tools:
   - Read
   - Write
   - Bash
+  - Glob
+  - Grep
   - Task
+  - WebSearch
+  - WebFetch
+  - AskUserQuestion
   - ToolSearch
   - mcp__mosic_pro__*
+  - mcp__context7__*
 ---
 
 <execution_context>
@@ -261,7 +267,7 @@ Before declaring complete, verify:
 </quality_gate>
 
 <output>
-Return research findings as structured markdown. The orchestrator will create the Mosic page.
+Create the research page directly in Mosic using mosic_create_entity_page. Return the created page ID and a brief summary of findings. The orchestrator will validate the page was created successfully.
 </output>
 """
 
@@ -273,12 +279,12 @@ Return research findings as structured markdown. The orchestrator will create th
   )
 ```
 
-## 6. Handle Agent Return and Create Research Page(s)
+## 6. Handle Agent Return and Validate Research Page(s)
 
 ```
 IF use_distributed:
   # Follow @~/.claude/get-shit-done/workflows/distributed-research.md:
-  # 1. <handle_research_returns> — create Mosic pages, collect gaps
+  # 1. <handle_research_returns> — validate Mosic pages, collect gaps
   #    entity_type="MTask List", entity_id=task_list_id
   #    page_title_prefix="Phase " + PHASE
   #    config_page_key_prefix="phase-" + PHASE
@@ -297,38 +303,33 @@ ELSE:
   gaps_status = "CLEAR"
 
   IF researcher_output contains "## RESEARCH COMPLETE":
-    # Create or update research page in Mosic
-    IF existing_research_page:
-      mosic_update_document("M Page", existing_research_page.name, {
-        content: convert_to_editorjs(researcher_output),
-        status: "Published"
-      })
-      research_page_id = existing_research_page.name
-    ELSE:
-      research_page = mosic_create_entity_page("MTask List", task_list_id, {
-        workspace_id: workspace_id,
-        title: "Phase " + PHASE + " Research",
-        page_type: "Document",
-        icon: config.mosic.page_icons.research,
-        status: "Published",
-        content: convert_to_editorjs(researcher_output),
-        relation_type: "Related"
-      })
-      research_page_id = research_page.name
+    # Extract page ID from agent output
+    research_page_id = extract_field(researcher_output, "Research Page ID:") or
+                       extract_page_id_from_url(researcher_output)
 
-    # Tag research page
-    mosic_batch_add_tags_to_document("M Page", research_page_id, [
-      config.mosic.tags.gsd_managed,
-      config.mosic.tags.research,
-      config.mosic.tags.phase_tags[phase_key]
-    ])
+    # Validate the agent created the research page in Mosic
+    IF research_page_id:
+      # Verify page exists and has content
+      validated_page = mosic_get_page(research_page_id, { content_format: "plain" })
+      IF NOT validated_page OR NOT validated_page.content:
+        ERROR: "Agent reported page ID {research_page_id} but page not found or empty in Mosic"
+    ELSE:
+      # Fallback: check entity pages for newly created research page
+      phase_pages_updated = mosic_get_entity_pages("MTask List", task_list_id, {
+        include_subtree: false
+      })
+      research_page_found = phase_pages_updated.find(p => p.title contains "Research")
+      IF research_page_found:
+        research_page_id = research_page_found.name
+      ELSE:
+        ERROR: "Agent did not create research page. Check agent output."
 
     config.mosic.pages["phase-" + PHASE + "-research"] = research_page_id
     gaps_status = extract_field(researcher_output, "Gaps Status:") or "CLEAR"
 
     Display:
     """
-    Research synced to Mosic
+    Research validated in Mosic
     Page: https://mosic.pro/app/page/{research_page_id}
     """
 ```
@@ -510,8 +511,8 @@ IF mosic operation fails:
 - [ ] If distributed: decomposition stored in config.mosic.session.decomposition
 - [ ] If single: gsd-phase-researcher spawned with full context
 - [ ] Checkpoints handled correctly
-- [ ] Research page(s) created/updated in Mosic linked to phase
-- [ ] Tags applied (gsd-managed, research, phase-NN)
+- [ ] Research page(s) validated in Mosic (created by agent, verified by orchestrator)
+- [ ] Tags applied by agent (gsd-managed, research, phase-NN)
 - [ ] config.json updated with page mapping(s)
 - [ ] User knows next steps with Mosic URLs
 </success_criteria>
