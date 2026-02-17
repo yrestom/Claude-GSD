@@ -320,6 +320,13 @@ Output: `has_tdd` boolean + `tdd_execution_context` string.
 subtask_mode = prompt.includes("**Execution Mode:** subtask")
 commit_deferred = prompt.includes("**Commit Mode:** deferred")
 
+// Review mode: orchestrator forces deferred commits for review gate
+review_enabled = prompt.includes("**Review Mode:** enabled")
+if (review_enabled && !commit_deferred) {
+  // Normal mode but review is on — defer commits to orchestrator
+  commit_deferred = true
+}
+
 if (subtask_mode) {
   // Execute ONLY the single specified subtask
   // DO NOT commit — record modified files for orchestrator
@@ -354,11 +361,11 @@ Execute subtask(s) in the plan. **Deviations are normal** - handle them automati
    - Continue implementing, applying rules as needed
    - Run the verification
    - Confirm done criteria met
-   - **If normal mode:** Commit the subtask (see `<task_commit>` below)
-   - **If subtask mode:** Record modified files via `git status --short` (NO commit)
+   - **If normal mode AND NOT commit_deferred:** Commit the subtask (see `<task_commit>` below)
+   - **If subtask mode OR commit_deferred:** Record modified files via `git status --short` (NO commit)
    - Track subtask completion for summary/return
-   - **If normal mode:** Continue to next subtask
-   - **If subtask mode:** Skip to structured return
+   - **If normal mode (regardless of commit_deferred):** Continue to next subtask
+   - **If subtask mode:** Skip to structured return (single subtask only)
 
    **If `type="checkpoint:*"`:**
 
@@ -414,9 +421,9 @@ See ~/.claude/get-shit-done/references/deviation-rules.md for full details.
 <task_commit>
 ## Task Commit Protocol
 
-**If subtask mode:** Skip this entire protocol. Instead, run `git status --short` to record modified files and include them in your SUBTASK COMPLETE return. The orchestrator handles all git operations.
+**If subtask mode OR commit_deferred:** Skip this entire protocol. Instead, run `git status --short` to record modified files and include them in your SUBTASK COMPLETE return. The orchestrator handles all git operations (including review gate when review mode is enabled).
 
-**If normal mode:** After each subtask completes (verification passed, done criteria met), commit immediately:
+**If normal mode (and NOT commit_deferred):** After each subtask completes (verification passed, done criteria met), commit immediately:
 
 **1. Identify modified files:**
 ```bash
@@ -499,7 +506,7 @@ DURATION_MIN=$(( DURATION_SEC / 60 ))
 </step>
 
 <step name="subtask_mode_return">
-**If in subtask mode, return structured result and STOP here. Skip all remaining steps.**
+**If in subtask mode OR commit_deferred, return structured result and STOP here. Skip all remaining steps.**
 
 ```markdown
 ## SUBTASK COMPLETE

@@ -52,6 +52,7 @@ Orchestrator stays lean: load plans from Mosic, analyze dependencies, group into
 <execution_context>
 @~/.claude/get-shit-done/references/ui-brand.md
 @~/.claude/get-shit-done/workflows/execute-phase.md
+@~/.claude/get-shit-done/workflows/execution-review.md
 </execution_context>
 
 <context>
@@ -94,7 +95,12 @@ Model lookup:
 | Agent | quality | balanced | budget |
 |-------|---------|----------|--------|
 | gsd-executor | opus | sonnet | sonnet |
+| gsd-execution-reviewer | opus | sonnet | haiku |
 | gsd-verifier | sonnet | sonnet | haiku |
+
+# Resolve execution review config
+review_config = config.workflow?.execution_review ?? { enabled: false }
+review_enabled = review_config.enabled === true
 ```
 
 ## 1. Validate and Load Phase from Mosic
@@ -295,20 +301,8 @@ The executor's `execute-plan.md` workflow loads all content from Mosic using the
 executor_prompts = []
 
 FOR each plan in wave:
-  IF plan.has_subtasks:
-    # Route to subtask-aware execution
-    prompt = """
-<objective>
-Execute task {plan.task.identifier}: {plan.task.title}
-
-This task has {plan.subtask_count} subtasks. Execute them using wave-based
-coordination. Commit each subtask atomically.
-</objective>
-
-<execution_context>
-@~/.claude/get-shit-done/workflows/execute-plan.md
-</execution_context>
-
+  # Build mosic_refs block — IDs only, reused in both prompt and review loop
+  plan_mosic_refs = """
 <mosic_references>
 <task id="{plan.task.name}" identifier="{plan.task.identifier}" title="{plan.task.title}" />
 <phase id="{task_list_id}" title="{phase.title}" number="{PHASE}" />
@@ -318,6 +312,29 @@ coordination. Commit each subtask atomically.
 <context_page id="{context_page_id}" />
 <requirements_page id="{requirements_page_id}" />
 </mosic_references>
+"""
+
+  IF plan.has_subtasks:
+    # Route to subtask-aware execution
+    prompt = """
+<objective>
+Execute task {plan.task.identifier}: {plan.task.title}
+
+This task has {plan.subtask_count} subtasks. Execute them using wave-based
+coordination. Commit each subtask atomically.
+</objective>
+"""
+    IF review_enabled:
+      prompt += """
+**Review Mode:** enabled
+**Commit Mode:** deferred
+"""
+    prompt += """
+<execution_context>
+@~/.claude/get-shit-done/workflows/execute-plan.md
+</execution_context>
+
+""" + plan_mosic_refs + """
 
 <execution_mode>subtask-aware</execution_mode>
 
@@ -336,20 +353,18 @@ Execute task {plan.task.identifier}: {plan.task.title}
 
 Commit each subtask atomically. Create summary page. Update task status.
 </objective>
-
+"""
+    IF review_enabled:
+      prompt += """
+**Review Mode:** enabled
+**Commit Mode:** deferred
+"""
+    prompt += """
 <execution_context>
 @~/.claude/get-shit-done/workflows/execute-plan.md
 </execution_context>
 
-<mosic_references>
-<task id="{plan.task.name}" identifier="{plan.task.identifier}" title="{plan.task.title}" />
-<phase id="{task_list_id}" title="{phase.title}" number="{PHASE}" />
-<workspace id="{workspace_id}" />
-<plan_page id="{plan.page.name}" />
-<research_page id="{research_page_id}" />
-<context_page id="{context_page_id}" />
-<requirements_page id="{requirements_page_id}" />
-</mosic_references>
+""" + plan_mosic_refs + """
 
 <success_criteria>
 - [ ] All subtasks executed
@@ -361,7 +376,8 @@ Commit each subtask atomically. Create summary page. Update task status.
 
   executor_prompts.push({
     prompt: "First, read ~/.claude/agents/gsd-executor.md for your role.\n\n" + prompt,
-    plan: plan
+    plan: plan,
+    mosic_refs: plan_mosic_refs
   })
 ```
 
@@ -426,6 +442,37 @@ FOR each executor_prompt in executor_prompts:
   plan = executor_prompt.plan
   executor_summary = parse_executor_output(agent_result)
 
+  # --- EXECUTION REVIEW LOOP (when enabled, from @execution-review.md) ---
+  IF review_enabled:
+    files = parse_file_list(extract_file_list(agent_result))
+    review_loop_result = execution_review_loop({
+      entity_type: "plan",
+      entity_identifier: plan.task.identifier,
+      entity_title: plan.task.title,
+      done_criteria: extract_done_criteria(plan.content),
+      executor_result: agent_result,
+      files_modified: files,
+      mosic_refs: executor_prompt.mosic_refs,
+      config: review_config,
+      model_profile: model_profile
+    })
+
+    IF review_loop_result.status == "abort":
+      GOTO step 7  # Update phase status with partial results
+    IF review_loop_result.status == "skipped":
+      CONTINUE  # Skip to next plan
+
+    # Re-parse summary from final executor result (may include fix iterations)
+    IF review_loop_result.executor_result:
+      executor_summary = parse_executor_output(review_loop_result.executor_result)
+
+    # Commit reviewed changes (orchestrator-managed since executor deferred)
+    reviewed_files = review_loop_result.files
+    FOR each file in reviewed_files:
+      git add {file}
+    commit_type = infer_commit_type(review_loop_result.executor_result or agent_result)
+    git commit -m "{commit_type}({plan.task.identifier}): {plan.task.title}"
+
   # Ensure task is marked complete (idempotent — executor already did this in normal mode)
   mosic_complete_task(plan.task.name)
   mosic_update_document("MTask", plan.task.name, {
@@ -448,13 +495,13 @@ FOR each executor_prompt in executor_prompts:
         done: true
       })
 
-  # Find executor's summary page (already created by execute-plan.md workflow in normal mode)
-  # Do NOT create a duplicate — the executor's page has richer content from execution context
+  # Find executor's summary page (already created by execute-plan.md workflow in normal mode when review disabled)
+  # When review enabled, executor deferred everything — may not have created summary page
   task_pages = mosic_get_entity_pages("MTask", plan.task.name, { include_subtree: false })
   summary_page = task_pages.find(p => p.title.includes("Execution Summary"))
 
   IF NOT summary_page:
-    # Fallback: create summary if executor didn't (unexpected but recoverable)
+    # Create summary (expected when review enabled since executor deferred; fallback otherwise)
     summary_page = mosic_create_entity_page("MTask", plan.task.name, {
       workspace_id: workspace_id,
       title: plan.task.identifier + " Execution Summary",
@@ -513,6 +560,37 @@ IF use_parallel:
     plan = ep.plan
     executor_summary = parse_executor_output(agent_result)
 
+    # --- EXECUTION REVIEW LOOP (when enabled, from @execution-review.md) ---
+    IF review_enabled:
+      files = parse_file_list(extract_file_list(agent_result))
+      review_loop_result = execution_review_loop({
+        entity_type: "plan",
+        entity_identifier: plan.task.identifier,
+        entity_title: plan.task.title,
+        done_criteria: extract_done_criteria(plan.content),
+        executor_result: agent_result,
+        files_modified: files,
+        mosic_refs: ep.mosic_refs,
+        config: review_config,
+        model_profile: model_profile
+      })
+
+      IF review_loop_result.status == "abort":
+        GOTO step 7  # Update phase status with partial results
+      IF review_loop_result.status == "skipped":
+        CONTINUE  # Skip to next plan
+
+      # Re-parse summary from final executor result (may include fix iterations)
+      IF review_loop_result.executor_result:
+        executor_summary = parse_executor_output(review_loop_result.executor_result)
+
+      # Commit reviewed changes (orchestrator-managed since executor deferred)
+      reviewed_files = review_loop_result.files
+      FOR each file in reviewed_files:
+        git add {file}
+      commit_type = infer_commit_type(review_loop_result.executor_result or agent_result)
+      git commit -m "{commit_type}({plan.task.identifier}): {plan.task.title}"
+
     # Ensure task is marked complete (idempotent — executor already did this in normal mode)
     mosic_complete_task(plan.task.name)
     mosic_update_document("MTask", plan.task.name, {
@@ -535,11 +613,13 @@ IF use_parallel:
           done: true
         })
 
-    # Find executor's summary page (already created by execute-plan.md workflow in normal mode)
+    # Find executor's summary page
+    # When review enabled, executor deferred everything — may not have created summary page
     task_pages = mosic_get_entity_pages("MTask", plan.task.name, { include_subtree: false })
     summary_page = task_pages.find(p => p.title.includes("Execution Summary"))
 
     IF NOT summary_page:
+      # Create summary (expected when review enabled; fallback otherwise)
       summary_page = mosic_create_entity_page("MTask", plan.task.name, {
         workspace_id: workspace_id,
         title: plan.task.identifier + " Execution Summary",

@@ -61,6 +61,7 @@ Execute a planned task by implementing all subtasks with atomic commits.
 <execution_context>
 @./.claude/get-shit-done/references/ui-brand.md
 @./.claude/get-shit-done/workflows/execute-plan.md
+@./.claude/get-shit-done/workflows/execution-review.md
 </execution_context>
 
 <context>
@@ -110,6 +111,7 @@ Model lookup:
 | Agent | quality | balanced | budget |
 |-------|---------|----------|--------|
 | gsd-executor | opus | sonnet | sonnet |
+| gsd-execution-reviewer | opus | sonnet | haiku |
 ```
 
 ## 1. Load Task and Validate
@@ -327,6 +329,10 @@ Mode: {execution_mode_label}
 ## 6. Execute Subtasks
 
 ```
+# Resolve execution review config
+review_config = config.workflow?.execution_review ?? { enabled: false }
+review_enabled = review_config.enabled === true
+
 # Build <mosic_references> block — IDs only, no content embedding.
 # Executor self-loads all content from Mosic via execute-plan.md workflow.
 mosic_refs = """
@@ -351,7 +357,7 @@ all_failures = []       # Track failures across all waves
 
 ### 6a. Sequential Execution (when `use_parallel = false`)
 
-**One agent per subtask, executed one at a time.** Each agent uses normal mode (self-commits) since there's no concurrent file access concern in sequential execution.
+**One agent per subtask, executed one at a time.** When review is disabled, each agent uses normal mode (self-commits). When review is enabled, agents use deferred commits and the orchestrator runs the review loop before committing.
 
 ```
 IF NOT use_parallel:
@@ -360,12 +366,22 @@ IF NOT use_parallel:
 
     Display: "Executing subtask " + st.identifier + ": " + st.title
 
-    # Build single-subtask prompt (same structure as parallel's single-wave path)
+    # Build single-subtask prompt
+    # When review enabled: force deferred commits so orchestrator can review before committing
     subtask_prompt = """
 <objective>
 Execute subtask """ + st.identifier + """: """ + st.title + """
 </objective>
+"""
 
+    IF review_enabled:
+      subtask_prompt += """
+**Execution Mode:** subtask
+**Review Mode:** enabled
+**Commit Mode:** deferred
+"""
+
+    subtask_prompt += """
 <execution_context>
 @./.claude/get-shit-done/workflows/execute-plan.md
 </execution_context>
@@ -376,7 +392,7 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
 - **""" + st.identifier + """** (""" + st.name + """): """ + st.title + """
 """
 
-    # Spawn ONE agent for THIS subtask (normal mode — agent self-commits)
+    # Spawn ONE agent for THIS subtask
     Task(
       prompt="First, read ./.claude/agents/gsd-executor.md for your role.\n\n" + subtask_prompt,
       subagent_type="general-purpose",
@@ -386,11 +402,47 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
 
     # IMMEDIATELY process result before spawning next agent
     IF agent_result contains "EXECUTION COMPLETE" or agent_result contains "SUBTASK COMPLETE":
-      commits = extract_commits(agent_result)
       files = parse_file_list(extract_file_list(agent_result))
-      all_commits.push(...commits)
       all_files_changed.push(...files)
       all_results.push(agent_result)
+
+      IF review_enabled:
+        # --- EXECUTION REVIEW LOOP (from @execution-review.md) ---
+        review_loop_result = execution_review_loop({
+          entity_type: "subtask",
+          entity_identifier: st.identifier,
+          entity_title: st.title,
+          done_criteria: extract_done_criteria(st.description),
+          executor_result: agent_result,
+          files_modified: files,
+          mosic_refs: mosic_refs,
+          config: review_config,
+          model_profile: model_profile
+        })
+
+        IF review_loop_result.status == "abort":
+          GOTO step 7  # Create partial summary
+        IF review_loop_result.status == "skipped":
+          all_failures.push({ subtask: subtask, result: "Skipped after failed review" })
+          CONTINUE  # Next subtask
+
+        # Update file list from review (fix iterations may change files)
+        reviewed_files = review_loop_result.files
+        all_files_changed = all_files_changed.filter(f => !files.includes(f))  # Remove initial
+        all_files_changed.push(...reviewed_files)  # Add final
+
+        # Commit changes (orchestrator-managed since executor deferred)
+        FOR each file in reviewed_files:
+          git add {file}
+        commit_type = infer_commit_type(review_loop_result.executor_result or agent_result)
+        git commit -m "{commit_type}({TASK_IDENTIFIER}): {st.title}"
+        commit_hash = git rev-parse --short HEAD
+        all_commits.push({ hash: commit_hash, message: commit_type + "(" + TASK_IDENTIFIER + "): " + st.title })
+
+      ELSE:
+        # No review — executor already committed in normal mode
+        commits = extract_commits(agent_result)
+        all_commits.push(...commits)
 
       # Mark subtask complete
       mosic_complete_task(subtask.name)
@@ -399,7 +451,7 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
         ref_doc: "MTask",
         ref_name: subtask.name,
         content: "<p><strong>Completed</strong></p>" +
-          (commits.length > 0 ? "<p>Commit: <code>" + commits[0].hash + "</code></p>" : "")
+          (all_commits.length > 0 ? "<p>Commit: <code>" + all_commits[all_commits.length - 1].hash + "</code></p>" : "")
       })
 
       Display: "Subtask " + st.identifier + " complete."
@@ -518,13 +570,22 @@ Return:
 """
 
       ELSE:
-        # Single subtask in wave — use NORMAL mode (preserves checkpoints, self-commits)
-        # No concurrency concern since this subtask runs alone in its wave
+        # Single subtask in wave — normally uses NORMAL mode (self-commits)
+        # When review enabled: force deferred mode for review gate
         subtask_prompt = """
 <objective>
 Execute subtask """ + st.identifier + """: """ + st.title + """
 </objective>
+"""
 
+        IF review_enabled:
+          subtask_prompt += """
+**Execution Mode:** subtask
+**Review Mode:** enabled
+**Commit Mode:** deferred
+"""
+
+        subtask_prompt += """
 <execution_context>
 @./.claude/get-shit-done/workflows/execute-plan.md
 </execution_context>
@@ -584,7 +645,7 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
         all_files_changed.push(...files)
         all_results.push(agent_result)
 
-        IF NOT wave_parallel:
+        IF NOT wave_parallel AND NOT review_enabled:
           # Normal-mode agent committed on its own — extract commit info
           commits = extract_commits(agent_result)
           all_commits.push(...commits)
@@ -597,9 +658,10 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
               (commits.length > 0 ? "<p>Commit: <code>" + commits[0].hash + "</code></p>" : "")
           })
         ELSE:
-          # Parallel mode — collect for orchestrator-managed commits (section 6)
+          # Deferred mode (parallel OR review enabled) — collect for orchestrator-managed review + commits
           wave_results_passed.push({
             subtask: wp.subtask,
+            st: wp.st,
             files_modified: files,
             result_text: agent_result
           })
@@ -634,15 +696,36 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
         retry_wave = max(wave_nums) + 1
         waves[retry_wave] = wave_current_failures.map(f => f.subtask)
 
-    # 6. Orchestrator-managed commits (parallel waves only)
-    # Single-subtask waves use normal mode — agent already committed
-    IF wave_parallel:
-      # Commit each subtask's changes sequentially to prevent git conflicts
-      Display: "Committing wave " + wave_num + " results..."
+    # 6. Orchestrator-managed review + commits (when deferred: parallel OR review enabled)
+    IF wave_results_passed.length > 0:
+      Display: "Processing wave " + wave_num + " results..."
 
       FOR each result in wave_results_passed:
         subtask = result.subtask
         files = result.files_modified
+
+        # --- EXECUTION REVIEW LOOP (when enabled, from @execution-review.md) ---
+        IF review_enabled:
+          review_loop_result = execution_review_loop({
+            entity_type: "subtask",
+            entity_identifier: result.st.identifier,
+            entity_title: result.st.title,
+            done_criteria: extract_done_criteria(result.st.description),
+            executor_result: result.result_text,
+            files_modified: files,
+            mosic_refs: mosic_refs,
+            config: review_config,
+            model_profile: model_profile
+          })
+
+          IF review_loop_result.status == "abort":
+            GOTO step_7_handle_executor_return  # Create partial summary
+          IF review_loop_result.status == "skipped":
+            all_failures.push({ subtask: subtask, result: "Skipped after failed review" })
+            CONTINUE
+
+          # Use potentially updated files from fix iterations
+          files = review_loop_result.files
 
         # Stage files individually
         FOR each file in files:
