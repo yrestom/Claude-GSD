@@ -183,7 +183,7 @@ IF phase_context_page:
   phase_context_content = mosic_get_page(phase_context_page.name, {
     content_format: "markdown"
   }).content
-  phase_locked = extract_list_items(phase_context_content, "Implementation Decisions")
+  phase_locked = extract_list_items(phase_context_content, "Decisions")
   locked_decisions = locked_decisions.concat(phase_locked)
 
 # Detect TDD task

@@ -787,7 +787,6 @@ IF mosic operation fails during subtask creation:
 - [ ] Checklist items added for acceptance criteria
 - [ ] Plan page tagged (gsd-managed, plan)
 - [ ] Verification passed (unless skipped)
-- [ ] BUG FIX: checker uses subagent_type="general-purpose" (not "gsd-plan-checker")
 - [ ] config.json updated with page ID(s)
 - [ ] User sees Mosic URLs and next steps
 </success_criteria>

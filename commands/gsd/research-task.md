@@ -4,6 +4,7 @@ description: Research implementation approach for a specific task
 argument-hint: "[task-identifier]"
 allowed-tools:
   - Read
+  - Write
   - Bash
   - Glob
   - Grep
@@ -140,8 +141,8 @@ dependency_order = []
 
 # Extract task requirements from parent plan page's ## Requirements Coverage table
 task_requirements = []
-IF existing_plan_page or task_pages.find(p => p.page_type == "Spec"):
-  plan_page = existing_plan_page or task_pages.find(p => p.page_type == "Spec")
+IF task_pages.find(p => p.page_type == "Plan") or task_pages.find(p => p.page_type == "Spec"):
+  plan_page = task_pages.find(p => p.page_type == "Plan") or task_pages.find(p => p.page_type == "Spec")
   plan_content = mosic_get_page(plan_page.name, { content_format: "markdown" }).content
   coverage_section = extract_section(plan_content, "## Requirements Coverage")
   IF coverage_section:

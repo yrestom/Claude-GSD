@@ -389,7 +389,7 @@ IF failed == 0:
   # Add success comment
   # IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
-    workspace_id: WORKSPACE_ID,
+    workspace: WORKSPACE_ID,
     ref_doc: "MTask List",
     ref_name: PHASE_ID,
     content: "<p><strong>UAT Complete</strong></p><p>All " + total + " tests passed.</p><p>UAT Report: <a href=\"https://mosic.pro/app/page/" + UAT_PAGE_ID + "\">View</a></p>"
@@ -402,7 +402,7 @@ ELSE:
   # Add issues comment
   # IMPORTANT: Comments must use HTML format
   mosic_create_document("M Comment", {
-    workspace_id: WORKSPACE_ID,
+    workspace: WORKSPACE_ID,
     ref_doc: "MTask List",
     ref_name: PHASE_ID,
     content: "<p><strong>UAT Found Issues</strong></p><p>" + failed + "/" + total + " tests failed.</p><p>Run <code>/gsd:execute-phase " + PHASE_IDENTIFIER + " --gaps-only</code> after fix plans are ready.</p><p>UAT Report: <a href=\"https://mosic.pro/app/page/" + UAT_PAGE_ID + "\">View</a></p>"
@@ -426,7 +426,7 @@ IF failed > 0:
   FOR each result in results.filter(r => r.status == "failed"):
     # Create MTask for the issue fix
     issue_task = mosic_create_document("MTask", {
-      workspace_id: WORKSPACE_ID,
+      workspace: WORKSPACE_ID,
       task_list: PHASE_ID,
       title: "Fix: " + result.test.test.substring(0, 80),
       description: build_issue_description(result),
@@ -444,7 +444,7 @@ IF failed > 0:
     # Create Blocker relation to original task
     IF result.test.task_id:
       mosic_create_document("M Relation", {
-        workspace_id: WORKSPACE_ID,
+        workspace: WORKSPACE_ID,
         source_doctype: "MTask",
         source_name: issue_task.name,
         target_doctype: "MTask",
@@ -454,7 +454,7 @@ IF failed > 0:
 
     # Create Related relation to UAT page
     mosic_create_document("M Relation", {
-      workspace_id: WORKSPACE_ID,
+      workspace: WORKSPACE_ID,
       source_doctype: "M Page",
       source_name: UAT_PAGE_ID,
       target_doctype: "MTask",
@@ -476,7 +476,7 @@ IF failed > 0:
   # Spawn gsd-debugger for each unique issue
   FOR each issue_task in issue_tasks:
     Task(
-      prompt="
+      prompt="First, read ./.claude/agents/gsd-debugger.md for your complete role definition and instructions.\n\n
         <objective>
         Diagnose root cause for UAT failure.
 
