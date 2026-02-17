@@ -502,7 +502,7 @@ Each task should take Claude **10-30 minutes** to execute (ideal), up to 60 minu
 | 30-60 min | Acceptable but prefer splitting               |
 | > 60 min  | Too large — MUST split into smaller tasks     |
 
-**Subtask Target:** Each plan task SHOULD have 3-8 subtasks.
+**Subtask Target:** Each plan task SHOULD have 3-15 subtasks.
 **Anti-pattern:** A plan task with 0-1 subtasks is likely too coarse.
 Split requirements into many small, verifiable units. Each subtask
 should modify 1-3 files and be independently testable.
