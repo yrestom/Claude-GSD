@@ -32,9 +32,11 @@ FOR each req in phase_requirements:
   groups_by_prefix[prefix] = groups_by_prefix[prefix] or []
   groups_by_prefix[prefix].push(req)
 
-# Merge small groups (< min_per_group) into nearest group
-# Split large groups (> max_per_group) into balanced sub-groups
-# Cap total groups at max_groups
+# merge_and_split_groups algorithm:
+# 1. Merge groups with < min_per_group requirements into adjacent groups or MISC
+# 2. Split groups with > max_per_group requirements by sub-category or alphabetically
+# 3. Target: each group has min_per_group to max_per_group requirements for optimal agent focus
+# 4. Cap total groups at max_groups (merge smallest groups if over cap)
 requirement_groups = merge_and_split_groups(groups_by_prefix, {
   min_per_group, max_per_group, max_groups
 })

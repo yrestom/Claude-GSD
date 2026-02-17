@@ -202,6 +202,11 @@ IF critical > 0: verdict = "CRITICAL ISSUES"
 ELIF warnings > 0: verdict = "NEEDS ATTENTION"
 ELIF met < total: verdict = "GAPS FOUND"
 
+# Flag files changed but not traced to any criterion
+unrequested_files = changed_files.filter(f =>
+  !traceability.any(t => t.evidence.any(e => e.includes(f)))
+)
+
 Display:
 """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -243,15 +248,6 @@ Files changed but not traced to any requirement:
 
 Proceeding to manual testing/verification...
 """
-```
-
-### Scope Check — Unrequested Files
-
-```
-# Flag files changed but not traced to any criterion
-unrequested_files = changed_files.filter(f =>
-  !traceability.any(t => t.evidence.any(e => e.includes(f)))
-)
 ```
 
 ### Augment Test/Verification Items

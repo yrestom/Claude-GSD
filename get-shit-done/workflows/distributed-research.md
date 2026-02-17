@@ -106,7 +106,14 @@ After all researchers return, extract interface contracts for dependency orderin
 ```
 all_interfaces = []
 
-FOR each (group, researcher_output) in zip(requirement_groups, researcher_results):
+# NOTE: Parallel Task results may return in any order.
+# Each researcher prompt includes <my_group>{group.number}</my_group>,
+# so match by group identifier extracted from researcher output.
+FOR each researcher_output in researcher_results:
+  group_number = extract_field(researcher_output, "my_group") or
+    extract_from_heading(researcher_output, "Group (\\d+)")
+  group = requirement_groups.find(g => g.number == group_number)
+
   # Extract ## Proposed Interfaces from researcher output
   interfaces_section = extract_section(researcher_output, "## Proposed Interfaces")
   IF interfaces_section:
@@ -162,7 +169,12 @@ Process researcher outputs: create Mosic pages, collect gaps, store decompositio
 group_research_pages = []
 aggregate_gaps_status = "CLEAR"
 
-FOR each (group, researcher_output) in zip(requirement_groups, researcher_results):
+# NOTE: Match researcher outputs to groups by group identifier, not position.
+FOR each researcher_output in researcher_results:
+  group_number = extract_field(researcher_output, "my_group") or
+    extract_from_heading(researcher_output, "Group (\\d+)")
+  group = requirement_groups.find(g => g.number == group_number)
+
   # Create group-specific research page
   research_page = mosic_create_entity_page(entity_type, entity_id, {
     workspace_id: workspace_id,

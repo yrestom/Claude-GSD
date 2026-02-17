@@ -42,8 +42,6 @@ IF task_context_content:
 # Phase-level context (merge with task-level)
 IF phase_context_content:
   phase_locked = extract_section(phase_context_content, "## Decisions")
-  IF not phase_locked:
-    phase_locked = extract_section(phase_context_content, "## Implementation Decisions")
   IF phase_locked:
     locked_decisions = locked_decisions
       ? locked_decisions + "\n\n**Inherited from phase:**\n" + phase_locked
@@ -136,11 +134,8 @@ Keyword-based detection using canonical list from `@detection-constants.md`.
 **Input:** Scope text (phase/task title + description + requirements)
 
 ```
-# Canonical keyword list — see get-shit-done/references/detection-constants.md
-frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
-  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
-  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
-  "UX", "interface", "widget"]
+# Load frontend keywords from @~/.claude/get-shit-done/references/detection-constants.md
+frontend_keywords = FRONTEND_KEYWORDS  # defined in detection-constants.md
 
 scope_text = (title + " " + (description or "") + " " + (requirements_content or "")).toLowerCase()
 is_frontend = frontend_keywords.some(kw => scope_text.includes(kw.toLowerCase()))
@@ -177,11 +172,8 @@ IF tdd_config !== false AND tdd_config !== "false":
   IF task_context_content:
     tdd_user_decision = extract_decision(task_context_content, "Testing Approach") or tdd_user_decision
 
-  # Canonical keyword list — see get-shit-done/references/detection-constants.md
-  tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
-    "state machine", "workflow engine", "utility", "helper", "business logic",
-    "data model", "schema", "converter", "calculator", "formatter", "serializer",
-    "authentication", "authorization"]
+  # Load TDD keywords from @~/.claude/get-shit-done/references/detection-constants.md
+  tdd_keywords = TDD_KEYWORDS  # defined in detection-constants.md
   is_tdd_eligible = tdd_keywords.some(kw => scope_text.includes(kw.toLowerCase()))
 
   # Resolve mode (priority: user decision > config setting > keyword heuristic)
@@ -204,7 +196,7 @@ IF tdd_config !== false AND tdd_config !== "false":
   IF task_context_content:
     tdd_user_decision = extract_decision(task_context_content, "Testing Approach") or tdd_user_decision
 
-  # Same keyword list as above
+  # TDD_KEYWORDS loaded from @~/.claude/get-shit-done/references/detection-constants.md
   is_tdd_eligible = tdd_keywords.some(kw => scope_text.includes(kw.toLowerCase()))
 
   IF tdd_user_decision == "tdd": tdd_mode = "prefer"
