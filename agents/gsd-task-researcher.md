@@ -1,7 +1,7 @@
 ---
 name: gsd-task-researcher
 description: Researches how to implement a specific task before planning. Lighter scope than phase researcher. Produces research M Page consumed by gsd-planner. Spawned by /gsd:research-task orchestrator.
-tools: Read, Bash, Grep, Glob, WebSearch, WebFetch, mcp__context7__*, mcp__mosic_pro__*
+tools: Read, Bash, Grep, Glob, WebSearch, WebFetch, ToolSearch, mcp__context7__*, mcp__mosic_pro__*
 mcpServers:
   - mosic.pro
 color: cyan
@@ -201,8 +201,6 @@ ELSE:
   # Merge phase-level context (task-level takes precedence)
   IF phase_context_content:
     phase_locked = extract_section(phase_context_content, "## Decisions")
-    IF not phase_locked:
-      phase_locked = extract_section(phase_context_content, "## Implementation Decisions")
     IF phase_locked:
       locked_decisions = locked_decisions
         ? locked_decisions + "\n\n**Inherited from phase:**\n" + phase_locked

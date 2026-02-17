@@ -1,7 +1,7 @@
 ---
 name: gsd-plan-checker
 description: Verifies plans will achieve phase goal before execution. Goal-backward analysis of plan quality. Reads plans from Mosic and returns structured issues.
-tools: Read, Bash, Glob, Grep, mcp__mosic_pro__*
+tools: Read, Bash, Glob, Grep, ToolSearch, mcp__mosic_pro__*
 mcpServers:
   - mosic.pro
 color: green
@@ -54,6 +54,13 @@ Same methodology (goal-backward), different timing, different subject matter.
 <mosic_context_loading>
 
 ## Load Project and Phase Context from Mosic
+
+**CRITICAL PREREQUISITE -- Before using ANY Mosic MCP tool**, you MUST first load them via ToolSearch:
+```
+ToolSearch("mosic task create document entity page tag relation")
+```
+
+This is a BLOCKING REQUIREMENT -- Mosic tools are deferred and will fail if not loaded first.
 
 Before verifying plans, load context:
 

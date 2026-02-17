@@ -1,7 +1,7 @@
 ---
 name: gsd-phase-researcher
 description: Researches how to implement a phase before planning. Produces research M Page consumed by gsd-planner. Spawned by /gsd:plan-phase orchestrator.
-tools: Read, Bash, Grep, Glob, WebSearch, WebFetch, mcp__context7__*, mcp__mosic_pro__*
+tools: Read, Bash, Grep, Glob, WebSearch, WebFetch, ToolSearch, mcp__context7__*, mcp__mosic_pro__*
 mcpServers:
   - mosic.pro
 color: cyan
@@ -493,8 +493,6 @@ IF prompt contains <user_decisions>:
 # Otherwise self-extract from loaded context_content
 ELIF context_content:
   locked_decisions = extract_section(context_content, "## Decisions")
-  IF not locked_decisions:
-    locked_decisions = extract_section(context_content, "## Implementation Decisions")
   deferred_ideas = extract_section(context_content, "## Deferred Ideas")
   discretion_areas = extract_section(context_content, "## Claude's Discretion")
 ```
