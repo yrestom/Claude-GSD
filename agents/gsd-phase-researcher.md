@@ -306,6 +306,9 @@ Gather all requirements and decisions from:
 - **Requirements page** — explicit requirements mapped to this phase (if provided)
 - **Implicit requirements** — requirements logically derived from the phase goal (e.g., "build auth" implies session management, password hashing, etc.)
 
+**If `research_scope == "focused"` (distributed research):**
+Filter requirements to only those matching `assigned_ids`. Skip requirements not in the assigned set — another researcher handles them.
+
 ### Step 2: Cross-Reference Against Findings (Three Categories)
 
 For each requirement/decision, check research provides sufficient guidance. Then look for gaps in THREE categories:
@@ -462,6 +465,20 @@ else {
 
 After loading pages from Mosic, extract all research-relevant context yourself.
 
+### 0. Check for Assigned Requirements (Distributed Research)
+
+```
+IF prompt.includes("<assigned_requirements>"):
+  assigned_ids = parse xml list of <req id="..."/> from <assigned_requirements>
+  research_scope = "focused"
+  # Focus research scope to assigned requirements only
+  # Still load full context page for locked decisions (global)
+  # Still detect frontend/TDD, but only for assigned requirement domain
+ELSE:
+  assigned_ids = null
+  research_scope = "full"
+```
+
 ### 1. Extract User Decisions
 
 Parse from loaded context pages:
@@ -563,6 +580,7 @@ Create M Page in Mosic with this content:
 **Researched:** {date}
 **Domain:** {primary technology/problem domain}
 **Confidence:** {HIGH/MEDIUM/LOW}
+**Scope:** {research_scope == "focused" ? "Group: {group_title} ({assigned_ids.length} requirements)" : "Full phase"}
 
 ## User Constraints (from Context Page)
 
@@ -711,6 +729,21 @@ Verified patterns from official sources:
 // Source: {Context7/official docs URL}
 {code}
 ```
+
+## Proposed Interfaces (if `research_scope == "focused"`)
+
+*Include this section only when `<assigned_requirements>` is present (distributed research mode).*
+
+### Exposes (other groups can depend on these)
+- `POST /api/auth/login` → `{ token: string, user: { id, email, name } }`
+- `User` model: `{ id: UUID, email: string, name: string }`
+- `authMiddleware(req, res, next)` — validates JWT token
+
+### Consumes (depends on other groups)
+- None (foundational group)
+- OR: `POST /api/auth/login` from Authentication group
+
+*List every API endpoint, data model, component, service, or utility this group's requirements will create (Exposes) or need from other groups (Consumes). The orchestrator uses this to determine dependency order between groups.*
 
 ## State of the Art
 
@@ -925,7 +958,9 @@ Create page linked to phase task list:
 ```
 research_page = mosic_create_entity_page("MTask List", phase_task_list_id, {
   workspace_id: workspace_id,
-  title: "Phase {N} Research: {domain}",
+  title: research_scope == "focused"
+    ? "Phase {N} Research: {group_title}"   # e.g. "Phase 1 Research: Authentication"
+    : "Phase {N} Research: {domain}",       # e.g. "Phase 1 Research: Email Notifications"
   page_type: "Document",
   icon: "lucide:search",
   status: "Published",
@@ -1036,6 +1071,7 @@ When research finishes successfully:
 
 **Phase:** {phase_number} - {phase_name}
 **Confidence:** {HIGH/MEDIUM/LOW}
+**Scope:** {research_scope == "focused" ? "Group: {group_title}" : "Full phase"}
 
 ### Key Findings
 
@@ -1060,6 +1096,14 @@ https://mosic.pro/app/Page/{research_page_id}
 ### Blocking Gaps
 
 {If BLOCKING: list each gap with what's missing and suggested resolution. If not BLOCKING: "None."}
+
+### Proposed Interfaces (if research_scope == "focused")
+
+**Exposes:**
+{list of APIs, models, services this group creates}
+
+**Consumes:**
+{list of APIs, models, services this group needs from others}
 
 ### Ready for Planning
 
@@ -1097,12 +1141,14 @@ When research cannot proceed:
 Research is complete when:
 
 - [ ] `<mosic_references>` parsed (if present) or config.json read for Mosic IDs
+- [ ] `<assigned_requirements>` checked — if present, set `research_scope = "focused"`
 - [ ] Context pages loaded from Mosic (via direct ID or discovery)
 - [ ] User decisions self-extracted from context pages (or from legacy `<user_decisions>` XML)
 - [ ] Discussion gap status self-extracted (if present in context)
 - [ ] Frontend detection performed (keyword match against phase + requirements)
 - [ ] TDD eligibility resolved (from `<research_config>` + keyword match + user decision)
 - [ ] User Constraints section is FIRST in research output (copied verbatim from Context page)
+- [ ] If focused scope: requirements filtered to assigned IDs only
 - [ ] Phase domain understood
 - [ ] Standard stack identified with versions
 - [ ] Architecture patterns documented
@@ -1123,6 +1169,8 @@ Research is complete when:
 - [ ] Topic tags stored in config.mosic.tags.topic_tags and phase_topic_tags
 - [ ] config.json updated with page ID
 - [ ] Structured return provided to orchestrator
+- [ ] If focused scope: `## Proposed Interfaces` section included (Exposes + Consumes)
+- [ ] If focused scope: Interfaces included in structured return
 
 Research quality indicators:
 

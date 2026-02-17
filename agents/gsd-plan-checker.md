@@ -104,6 +104,53 @@ roadmap = mosic_get_page(roadmap_page_id, {
 
 </mosic_context_loading>
 
+<verification_modes>
+
+## Verification Mode Detection
+
+The checker operates in one of three modes based on prompt content:
+
+### Standard Mode (default)
+No special XML tags. Verifies all plans against all phase requirements.
+
+### Group-Scoped Mode
+Triggered by `<assigned_requirements>` in prompt. Verifies only this group's plans
+against the assigned requirement IDs. Reduces context per checker = better quality.
+
+```
+IF prompt.includes("<assigned_requirements>"):
+  assigned_ids = parse xml list of <req id="..."/> from <assigned_requirements>
+  verification_mode = "group-scoped"
+  # Only verify plans against assigned_ids
+  # Skip requirements not in assigned set — another checker handles them
+```
+
+### Cross-Group Mode
+Triggered by `<verification_mode>cross-group</verification_mode>` in prompt.
+Performs lightweight global validation after all group checkers pass.
+
+```
+IF prompt.includes("<verification_mode>cross-group</verification_mode>"):
+  verification_mode = "cross-group"
+  # Build global coverage matrix from ALL plan coverage tables
+  # Verify:
+  # 1. Every requirement is covered somewhere (no gaps)
+  # 2. No conflicting double-coverage (same req, different implementations)
+  # 3. Cross-group dependency graph is acyclic
+  # 4. Interface consistency (APIs consumed match APIs exposed)
+```
+
+**Cross-group checks:**
+
+| Check | What | How |
+|-------|------|-----|
+| Total coverage | Every phase requirement mapped to a plan | Build matrix from coverage tables |
+| No conflicts | No requirement covered by 2+ groups with different approaches | Compare coverage tables |
+| Acyclic deps | Cross-group dependency graph has no cycles | Parse "Cross-Group Dependencies" tables |
+| Interface match | Consumed interfaces match exposed interfaces | Compare Proposed Interfaces sections |
+
+</verification_modes>
+
 <verification_dimensions>
 
 ## Dimension 1: Requirement Coverage
@@ -311,6 +358,24 @@ issue:
 
 <verification_process>
 
+## Step 0: Detect Verification Mode
+
+```
+IF prompt.includes("<assigned_requirements>"):
+  verification_mode = "group-scoped"
+  assigned_ids = parse <req id="..."/> from <assigned_requirements>
+ELIF prompt.includes("<verification_mode>cross-group</verification_mode>"):
+  verification_mode = "cross-group"
+ELSE:
+  verification_mode = "standard"
+```
+
+**If cross-group mode:** Skip Steps 1-9 and go directly to cross-group verification:
+- Parse all coverage tables from prompt
+- Build global coverage matrix
+- Check for gaps, conflicts, cycles
+- Return PASSED or ISSUES FOUND
+
 ## Step 1: Load Context from Mosic
 
 Load all plans and context from Mosic (see mosic_context_loading).
@@ -360,7 +425,10 @@ FOR each plan_task in phase.tasks:
 
 Map phase requirements to tasks.
 
-**For each requirement from phase goal:**
+**If group-scoped mode:** Only check requirements in `assigned_ids`. Skip all others.
+**If standard mode:** Check all phase requirements.
+
+**For each requirement (in scope):**
 1. Find task(s) that address it
 2. Verify task action is specific enough
 3. Flag uncovered requirements
@@ -629,6 +697,7 @@ issues:
 
 Plan verification complete when:
 
+**Standard mode:**
 - [ ] config.json read for Mosic IDs
 - [ ] Phase goal extracted from roadmap page in Mosic
 - [ ] All plan tasks loaded from phase task list
@@ -642,6 +711,17 @@ Plan verification complete when:
 - [ ] must_haves derivation verified (user-observable truths)
 - [ ] Overall status determined (passed | issues_found)
 - [ ] Structured issues returned (if any found)
+- [ ] Result returned to orchestrator
+
+**Group-scoped mode (additional):**
+- [ ] Only assigned requirements checked (others ignored)
+- [ ] Plans verified against group scope only
+
+**Cross-group mode:**
+- [ ] Global coverage matrix built from all coverage tables
+- [ ] Every requirement covered somewhere
+- [ ] No conflicting double-coverage detected
+- [ ] Cross-group dependency graph is acyclic
 - [ ] Result returned to orchestrator
 
 </success_criteria>

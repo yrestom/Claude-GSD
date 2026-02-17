@@ -5,7 +5,14 @@
     "research": true,
     "plan_check": true,
     "verifier": true,
-    "tdd": "auto"
+    "tdd": "auto",
+    "distributed": {
+      "enabled": true,
+      "threshold": 6,
+      "max_groups": 8,
+      "max_requirements_per_group": 5,
+      "min_requirements_per_group": 2
+    }
   },
   "parallelization": {
     "enabled": true,

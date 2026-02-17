@@ -301,6 +301,14 @@ IF requirements_content:
       IF requirements_section:
         FOR each line matching "- {REQ-ID}: {description}" or "- **{REQ-ID}**: {description}":
           phase_requirements.append({ id: REQ-ID, description: description })
+
+# Filter to assigned requirements (distributed planning mode)
+IF prompt.includes("<assigned_requirements>"):
+  assigned_ids = parse xml list of <req id="..."/> from <assigned_requirements>
+  phase_requirements = phase_requirements.filter(req => assigned_ids.includes(req.id))
+  distributed_mode = true
+ELSE:
+  distributed_mode = false
 ```
 
 ### 3. Extract Gap Context from Research
@@ -361,6 +369,33 @@ is_frontend = frontend_keywords.some(kw => phase_text.includes(kw.toLowerCase())
 IF is_frontend:
   frontend_design_ref = Read("~/.claude/get-shit-done/references/frontend-design.md")
   frontend_design_context = extract_section(frontend_design_ref, "## For Planners")
+```
+
+### 6. Load Prior Group Plans (Sequential Distributed Planning)
+
+```
+prior_plan_context = []
+
+IF prompt.includes("<prior_plans>"):
+  prior_plan_pages = parse xml list of <plan_page id="..." group="..." title="..."/> from <prior_plans>
+
+  # Load each prior plan to understand what was already planned
+  FOR each prior_page in prior_plan_pages:
+    plan_content = mosic_get_page(prior_page.id, { content_format: "markdown" }).content
+    prior_plan_context.push({
+      group: prior_page.group,
+      title: prior_page.title,
+      content: plan_content
+    })
+
+  # Extract what prior groups create:
+  # - API endpoints, data models, services, components
+  # - Task structure and wave assignments
+  # - Cross-group dependencies declared
+  # Use this to:
+  # - Reference existing APIs in my tasks ("call POST /api/auth/login")
+  # - Declare dependencies on prior group tasks
+  # - Avoid duplicating work already planned
 ```
 
 </planning_context_extraction>
@@ -476,13 +511,23 @@ Every task has four required fields:
 
 ## Task Sizing
 
-Each task should take Claude **15-60 minutes** to execute.
+Each task should take Claude **10-30 minutes** to execute (ideal), up to 60 minutes max.
 
 | Duration | Action |
 |----------|--------|
-| < 15 min | Too small — combine with related task |
-| 15-60 min | Right size — single focused unit of work |
-| > 60 min | Too large — split into smaller tasks |
+| < 10 min | Too small — combine with closely related task |
+| 10-30 min | Ideal size — single focused unit of work |
+| 30-60 min | Acceptable but prefer splitting |
+| > 60 min | Too large — MUST split into smaller tasks |
+
+**Subtask Target:** Each plan task SHOULD have 3-8 subtasks.
+**Anti-pattern:** A plan task with 0-1 subtasks is likely too coarse.
+Split requirements into many small, verifiable units. Each subtask
+should modify 1-3 files and be independently testable.
+
+**Why:** More subtasks = better verification granularity, clearer
+progress tracking, easier parallel execution, and more focused
+executor context windows.
 
 ## TDD Detection Heuristic
 
@@ -655,9 +700,13 @@ IF plan.depends_on:
 
 <task_mode_subtask_creation>
 
-## Creating Subtasks (Task-Mode Planning)
+## Creating Subtasks (Task-Mode and Distributed Phase Planning)
 
-When spawned by `/gsd:plan-task` (your prompt will have `**Mode:** task-planning` or `**Mode:** task-quick`), you create **subtasks** under a parent task, not phase plans.
+**Activation conditions (either triggers subtask creation):**
+1. **Task-mode:** Spawned by `/gsd:plan-task` (prompt has `**Mode:** task-planning` or `**Mode:** task-quick`)
+2. **Distributed phase planning:** Prompt has `<assigned_requirements>` (spawned by `/gsd:plan-phase` in distributed mode)
+
+In both cases, you create **subtasks** under parent tasks. In distributed mode, each plan task gets subtasks.
 
 **CRITICAL: You MUST use Mosic MCP tools. DO NOT create local files.**
 
@@ -876,11 +925,12 @@ The plan page content follows this structure (in markdown, converted to Editor.j
 
 ## Requirements Coverage
 
-| REQ-ID | Description | Covered By | Status |
-|--------|-------------|------------|--------|
-| {req-id} | {description} | Task {N} | Covered |
+| REQ-ID | Covered By | Status |
+|--------|------------|--------|
+| {req-id} | Task {N} | Covered |
 
 Coverage: {N}/{N} (100%)
+*Full descriptions: @mosic:page:{requirements_page_id}*
 
 *Omit this section if no `<phase_requirements>` were provided.*
 
@@ -1109,10 +1159,12 @@ See `<mosic_context_loading>` section for the two-path pattern.
 Self-extract all planning-relevant context from loaded pages:
 1. User decisions (locked, deferred, discretion) from context/research pages
 2. Phase requirements from requirements page traceability table
+   - If `<assigned_requirements>` present: filter to assigned IDs only (distributed mode)
 3. Gap analysis context from research page
 4. TDD eligibility (using `<planning_config>` tdd_config + keywords + user decision)
 5. Frontend detection (using keywords from loaded phase text)
-6. Load reference files (TDD, frontend design) via Read tool when needed
+6. Load prior group plans if `<prior_plans>` present (distributed sequential planning)
+7. Load reference files (TDD, frontend design) via Read tool when needed
 See `<planning_context_extraction>` section for details.
 </step>
 
@@ -1170,17 +1222,18 @@ IF any GAPs exist:
   Add tasks to cover gaps before finalizing plans
   Repeat until coverage = 100%
 
-Include `## Requirements Coverage` table in EACH plan page:
+Include `## Requirements Coverage` table in EACH plan page (lean format — no descriptions):
 
 ```markdown
 ## Requirements Coverage
 
-| REQ-ID | Description | Covered By | Status |
-|--------|-------------|------------|--------|
-| AUTH-01 | Sign up with email | Task 1.1 | Covered |
-| AUTH-02 | Email verification | Task 1.2 | Covered |
+| REQ-ID | Covered By | Status |
+|--------|------------|--------|
+| AUTH-01 | Task 1.1 | Covered |
+| AUTH-02 | Task 1.2 | Covered |
 
-Coverage: N/N (100%) ✓
+Coverage: N/N (100%)
+*Full descriptions: @mosic:page:{requirements_page_id}*
 ```
 
 **Do not finalize plans if any requirement is unmapped.**
@@ -1194,6 +1247,11 @@ Apply goal-backward methodology.
 <step name="create_plans_in_mosic">
 Create MTask and M Page for each plan.
 Update config.json with IDs.
+
+**If distributed_mode:** Also create subtasks under each plan task using the
+`<task_mode_subtask_creation>` pattern (Steps 2-5). Each plan task should have
+3-8 subtasks with wave metadata, file lists, action, verify, done fields.
+This gives executors granular work items instead of coarse plan tasks.
 </step>
 
 <step name="update_roadmap_page">
@@ -1250,10 +1308,16 @@ Return structured planning outcome to orchestrator.
 
 ### Plans Created
 
-| Plan | Objective | Tasks | Mosic |
-|------|-----------|-------|-------|
-| {N}-01 | [brief] | 2 | https://mosic.pro/app/Task/{id} |
-| {N}-02 | [brief] | 3 | https://mosic.pro/app/Task/{id} |
+| # | Title | Plan Task ID | Plan Page ID | Subtasks |
+|---|-------|-------------|-------------|----------|
+| 01 | {name} | {task_id} | {page_id} | 5 |
+| 02 | {name} | {task_id} | {page_id} | 4 |
+
+### Cross-Group Dependencies (if distributed_mode)
+
+| My Plan | Depends On | Reason |
+|---------|-----------|--------|
+| 01 | Group 1, Plan 02 | Needs User model + auth API |
 
 ### Next Steps
 
@@ -1261,6 +1325,8 @@ Execute: `/gsd:execute-phase {phase}`
 
 <sub>`/clear` first - fresh context window</sub>
 ```
+
+**CRITICAL:** The return MUST include plan page IDs in the `Plans Created` table. In distributed mode, the orchestrator collects these to pass to the NEXT planner as `<prior_plans>`.
 
 ## Gap Closure Plans Created
 

@@ -270,7 +270,21 @@ FOR each plan in wave:
   })
 ```
 
-### 4.2 Build Lean Prompts and Spawn Executors
+### 4.2 Detect Subtasks and Build Lean Prompts
+
+**Check each plan task for existing subtasks (created by distributed planners):**
+
+```
+FOR each plan in wave:
+  subtasks = mosic_search_tasks({
+    workspace_id: workspace_id,
+    filters: { parent_task: plan.task.name },
+    status__not_in: ["Completed", "Cancelled"]
+  })
+
+  plan.has_subtasks = subtasks.results && subtasks.results.length > 0
+  plan.subtask_count = subtasks.results ? subtasks.results.length : 0
+```
 
 **Build prompts with `<mosic_references>` — IDs only, no content embedding.**
 
@@ -281,7 +295,42 @@ The executor's `execute-plan.md` workflow loads all content from Mosic using the
 executor_prompts = []
 
 FOR each plan in wave:
-  prompt = """
+  IF plan.has_subtasks:
+    # Route to subtask-aware execution
+    prompt = """
+<objective>
+Execute task {plan.task.identifier}: {plan.task.title}
+
+This task has {plan.subtask_count} subtasks. Execute them using wave-based
+coordination. Commit each subtask atomically.
+</objective>
+
+<execution_context>
+@~/.claude/get-shit-done/workflows/execute-plan.md
+</execution_context>
+
+<mosic_references>
+<task id="{plan.task.name}" identifier="{plan.task.identifier}" title="{plan.task.title}" />
+<phase id="{task_list_id}" title="{phase.title}" number="{PHASE}" />
+<workspace id="{workspace_id}" />
+<plan_page id="{plan.page.name}" />
+<research_page id="{research_page_id}" />
+<context_page id="{context_page_id}" />
+<requirements_page id="{requirements_page_id}" />
+</mosic_references>
+
+<execution_mode>subtask-aware</execution_mode>
+
+<success_criteria>
+- [ ] All {plan.subtask_count} subtasks executed
+- [ ] Each subtask committed individually
+- [ ] Summary page created in Mosic linked to task
+- [ ] Task marked complete in Mosic
+</success_criteria>
+"""
+  ELSE:
+    # Standard execution (no pre-existing subtasks)
+    prompt = """
 <objective>
 Execute task {plan.task.identifier}: {plan.task.title}
 
@@ -309,6 +358,7 @@ Commit each subtask atomically. Create summary page. Update task status.
 - [ ] Task marked complete in Mosic
 </success_criteria>
 """
+
   executor_prompts.push({
     prompt: "First, read ~/.claude/agents/gsd-executor.md for your role.\n\n" + prompt,
     plan: plan

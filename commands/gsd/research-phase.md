@@ -132,20 +132,154 @@ Context loaded:
 Proceeding to research...
 ```
 
-## 5. Spawn gsd-phase-researcher Agent with Lean Prompt
+## 4.5. Decompose Phase for Distributed Research
 
-Display:
 ```
--------------------------------------------
- GSD > RESEARCHING PHASE {PHASE}
--------------------------------------------
+distributed_config = config.workflow?.distributed ?? {}
+threshold = distributed_config.threshold ?? 6
+use_distributed = false
+requirement_groups = []
 
-Spawning researcher...
+IF requirements_page_id AND distributed_config.enabled !== false:
+  requirements_content = mosic_get_page(requirements_page_id, {
+    content_format: "markdown"
+  }).content
+
+  # Extract phase-specific requirements from traceability table
+  phase_requirements = []
+  traceability_section = extract_section(requirements_content, "## Traceability")
+  IF NOT traceability_section:
+    traceability_section = extract_section(requirements_content, "## Requirements Traceability")
+  IF traceability_section:
+    FOR each row in parse_markdown_table(traceability_section):
+      IF row.phase matches current phase (PHASE or phase.title):
+        phase_requirements.append({ id: row.req_id, description: row.description })
+
+  use_distributed = phase_requirements.length >= threshold
+
+  IF use_distributed:
+    # Group by category prefix: AUTH-*, UI-*, CONT-*, etc.
+    groups_by_prefix = {}
+    FOR each req in phase_requirements:
+      prefix = req.id.match(/^([A-Z]+)/)?.[1] or "MISC"
+      groups_by_prefix[prefix] = groups_by_prefix[prefix] or []
+      groups_by_prefix[prefix].push(req)
+
+    # Merge small groups (< min_per_group) into nearest group
+    min_per_group = distributed_config.min_requirements_per_group ?? 2
+    max_per_group = distributed_config.max_requirements_per_group ?? 5
+    max_groups = distributed_config.max_groups ?? 8
+
+    requirement_groups = merge_and_split_groups(groups_by_prefix, {
+      min_per_group, max_per_group, max_groups
+    })
+    # Each group: { number: N, title: "Authentication (AUTH)", prefix: "AUTH",
+    #   requirement_ids: ["AUTH-01", "AUTH-02"], requirements: [...] }
+
+    Display:
+    """
+    Distributed research: {phase_requirements.length} requirements in {requirement_groups.length} groups
+    {requirement_groups.map(g => "  " + g.number + ". " + g.title + " (" + g.requirement_ids.length + " reqs)").join("\n")}
+    """
 ```
 
-Research modes: ecosystem (default), feasibility, implementation, comparison.
+## 5. Spawn gsd-phase-researcher Agent(s)
 
-```markdown
+```
+IF use_distributed:
+  Display:
+  """
+  -------------------------------------------
+   GSD > RESEARCHING PHASE {PHASE} (DISTRIBUTED)
+  -------------------------------------------
+
+  {requirement_groups.length} researchers spawning in parallel...
+  """
+
+  # Create group-specific research page placeholders (so we have IDs for config)
+  # Then spawn ALL researchers in ONE response (parallel)
+
+  FOR each group in requirement_groups:
+    assigned_reqs_xml = "<assigned_requirements>\n"
+    FOR each req_id in group.requirement_ids:
+      assigned_reqs_xml += '<req id="' + req_id + '" />\n'
+    assigned_reqs_xml += "</assigned_requirements>"
+
+    group_prompt = """
+<mosic_references>
+<phase id="{task_list_id}" title="{phase.title}" number="{PHASE}" />
+<workspace id="{workspace_id}" />
+<project id="{project_id}" />
+<context_page id="{context_page_id}" />
+<requirements_page id="{requirements_page_id}" />
+<roadmap_page id="{roadmap_page_id}" />
+</mosic_references>
+
+<research_config>
+<tdd_config>{config.workflow?.tdd ?? "auto"}</tdd_config>
+<mode>ecosystem</mode>
+</research_config>
+
+""" + assigned_reqs_xml + """
+
+<decomposition_context>
+<my_group>{group.number}</my_group>
+<total_groups>{requirement_groups.length}</total_groups>
+<group_title>{group.title}</group_title>
+</decomposition_context>
+
+<research_type>
+Distributed Phase Research — investigating HOW to implement the {group.title} requirements.
+Focus on your assigned requirements only. Produce a ## Proposed Interfaces section listing
+what your group Exposes (APIs, models, services) and what it Consumes from other groups.
+</research_type>
+
+<key_insight>
+Focus on your {group.requirement_ids.length} assigned requirements.
+Discover: architecture patterns, standard stack, common pitfalls, and don't-hand-roll items
+relevant to this group's domain.
+</key_insight>
+
+<objective>
+Research implementation approach for Phase {PHASE}: {phase.title}
+Group {group.number}: {group.title}
+Requirements: {group.requirement_ids.join(", ")}
+</objective>
+
+<downstream_consumer>
+Your research will be loaded by a group-specific planner agent.
+CRITICAL: Include a ## Proposed Interfaces section with Exposes and Consumes lists.
+The orchestrator collects these to determine dependency order between groups.
+</downstream_consumer>
+
+<output>
+Return research findings as structured markdown. The orchestrator will create the Mosic page.
+</output>
+"""
+
+    # Spawn ALL in one response (parallel execution)
+    Task(
+      prompt="First, read ~/.claude/agents/gsd-phase-researcher.md for your role.\n\n" + group_prompt,
+      subagent_type="general-purpose",
+      model="{researcher_model}",
+      description="Research Group " + group.number + ": " + group.title.substring(0, 20)
+    )
+
+ELSE:
+  # --- SINGLE RESEARCHER (existing behavior, unchanged) ---
+
+  Display:
+  """
+  -------------------------------------------
+   GSD > RESEARCHING PHASE {PHASE}
+  -------------------------------------------
+
+  Spawning researcher...
+  """
+
+  Research modes: ecosystem (default), feasibility, implementation, comparison.
+
+  single_prompt = """
 <mosic_references>
 <phase id="{task_list_id}" title="{phase.title}" number="{PHASE}" />
 <workspace id="{workspace_id}" />
@@ -205,81 +339,162 @@ Before declaring complete, verify:
 <output>
 Return research findings as structured markdown. The orchestrator will create the Mosic page.
 </output>
+"""
+
+  Task(
+    prompt="First, read ~/.claude/agents/gsd-phase-researcher.md for your role.\n\n" + single_prompt,
+    subagent_type="general-purpose",
+    model="{researcher_model}",
+    description="Research Phase {PHASE}"
+  )
 ```
 
-```
-Task(
-  prompt="First, read ~/.claude/agents/gsd-phase-researcher.md for your role.\n\n" + research_prompt,
-  subagent_type="general-purpose",
-  model="{researcher_model}",
-  description="Research Phase {PHASE}"
-)
-```
-
-## 6. Handle Agent Return and Create Research Page
-
-**If `## RESEARCH COMPLETE`:**
+## 6. Handle Agent Return and Create Research Page(s)
 
 ```
-# Create or update research page in Mosic
-IF existing_research_page:
-  mosic_update_document("M Page", existing_research_page.name, {
-    content: convert_to_editorjs(research_findings),
-    status: "Published"
-  })
-  research_page_id = existing_research_page.name
+IF use_distributed:
+  # --- DISTRIBUTED: Handle multiple researcher returns ---
+
+  group_research_pages = []
+  all_interfaces = []
+  aggregate_gaps_status = "CLEAR"
+
+  FOR each (group, researcher_output) in zip(requirement_groups, researcher_results):
+    # Create group-specific research page
+    research_page = mosic_create_entity_page("MTask List", task_list_id, {
+      workspace_id: workspace_id,
+      title: "Phase " + PHASE + " Research: " + group.title,
+      page_type: "Document",
+      icon: config.mosic.page_icons.research,
+      status: "Published",
+      content: convert_to_editorjs(researcher_output),
+      relation_type: "Related"
+    })
+
+    # Tag research page
+    mosic_batch_add_tags_to_document("M Page", research_page.name, [
+      config.mosic.tags.gsd_managed,
+      config.mosic.tags.research,
+      config.mosic.tags.phase_tags[phase_key]
+    ])
+
+    group.research_page_id = research_page.name
+    group_research_pages.push({ group: group, page_id: research_page.name })
+
+    # Store in config
+    config.mosic.pages["phase-" + PHASE + "-research-group-" + group.number] = research_page.name
+
+    # Extract ## Proposed Interfaces from researcher output
+    interfaces_section = extract_section(researcher_output, "## Proposed Interfaces")
+    IF interfaces_section:
+      exposes = extract_subsection(interfaces_section, "### Exposes")
+      consumes = extract_subsection(interfaces_section, "### Consumes")
+      all_interfaces.push({
+        group_number: group.number,
+        title: group.title,
+        exposes: exposes or "",
+        consumes: consumes or ""
+      })
+
+    # Track worst gap status across groups
+    group_gaps = extract_field(researcher_output, "Gaps Status:")
+    IF group_gaps == "BLOCKING": aggregate_gaps_status = "BLOCKING"
+    ELIF group_gaps == "NON-BLOCKING" AND aggregate_gaps_status != "BLOCKING":
+      aggregate_gaps_status = "NON-BLOCKING"
+
+  # Determine dependency order from interfaces (Consumes → Exposes matching)
+  # Groups whose Consumes is empty or "None" → foundational → go first
+  # Groups that consume from foundational → go second
+  # If circular: break tie by group number
+  dependency_order = topological_sort_by_interfaces(all_interfaces)
+
+  # Store decomposition in config for plan-phase to reuse
+  config.mosic.session.decomposition = {
+    phase: PHASE,
+    groups: requirement_groups.map(g => ({
+      number: g.number,
+      title: g.title,
+      prefix: g.prefix,
+      requirement_ids: g.requirement_ids,
+      research_page_id: g.research_page_id
+    })),
+    interface_contracts: all_interfaces,
+    dependency_order: dependency_order
+  }
+
+  # Set primary research page to first group's page (for backward compat)
+  config.mosic.pages["phase-" + PHASE + "-research"] = group_research_pages[0].page_id
+  gaps_status = aggregate_gaps_status
+
+  Display:
+  """
+  Distributed research complete: {requirement_groups.length} groups
+  Dependency order: {dependency_order.map(g => g.title).join(" → ")}
+  Research pages synced to Mosic
+  """
+
 ELSE:
-  research_page = mosic_create_entity_page("MTask List", task_list_id, {
-    workspace_id: workspace_id,
-    title: "Phase " + PHASE + " Research",
-    page_type: "Document",
-    icon: config.mosic.page_icons.research,
-    status: "Published",
-    content: convert_to_editorjs(research_findings),
-    relation_type: "Related"
-  })
-  research_page_id = research_page.name
-```
+  # --- SINGLE RESEARCHER (existing behavior) ---
+  gaps_status = "CLEAR"
 
-**Tag research page:**
+  IF researcher_output contains "## RESEARCH COMPLETE":
+    # Create or update research page in Mosic
+    IF existing_research_page:
+      mosic_update_document("M Page", existing_research_page.name, {
+        content: convert_to_editorjs(researcher_output),
+        status: "Published"
+      })
+      research_page_id = existing_research_page.name
+    ELSE:
+      research_page = mosic_create_entity_page("MTask List", task_list_id, {
+        workspace_id: workspace_id,
+        title: "Phase " + PHASE + " Research",
+        page_type: "Document",
+        icon: config.mosic.page_icons.research,
+        status: "Published",
+        content: convert_to_editorjs(researcher_output),
+        relation_type: "Related"
+      })
+      research_page_id = research_page.name
 
-```
-mosic_batch_add_tags_to_document("M Page", research_page_id, [
-  config.mosic.tags.gsd_managed,
-  config.mosic.tags.research,
-  config.mosic.tags.phase_tags[phase_key]
-])
+    # Tag research page
+    mosic_batch_add_tags_to_document("M Page", research_page_id, [
+      config.mosic.tags.gsd_managed,
+      config.mosic.tags.research,
+      config.mosic.tags.phase_tags[phase_key]
+    ])
+
+    config.mosic.pages["phase-" + PHASE + "-research"] = research_page_id
+    gaps_status = extract_field(researcher_output, "Gaps Status:") or "CLEAR"
+
+    Display:
+    """
+    Research synced to Mosic
+    Page: https://mosic.pro/app/page/{research_page_id}
+    """
 ```
 
 **Update config:**
 
 ```
-config.mosic.pages["phase-" + PHASE + "-research"] = research_page_id
 config.mosic.session.last_action = "research-phase"
 config.mosic.session.last_updated = "[ISO timestamp]"
 
 write config.json
 ```
 
-Display:
-```
-Research synced to Mosic
-Page: https://mosic.pro/app/page/{research_page_id}
-```
-
 ### Handle Gap Status
 
 ```
-# Parse gaps_status from researcher return
-gaps_status = extract_field(researcher_output, "Gaps Status:")
-
 IF gaps_status == "BLOCKING":
-  blocking_gaps = extract_section(researcher_output, "### Blocking Gaps")
+  blocking_gaps = use_distributed
+    ? "Multiple groups reported blocking gaps. Check individual research pages."
+    : extract_section(researcher_output, "### Blocking Gaps")
 
   Display:
   """
   -------------------------------------------
-   ⚠ BLOCKING GAPS DETECTED
+   BLOCKING GAPS DETECTED
   -------------------------------------------
 
   Research found gaps that need your input before planning:
@@ -308,15 +523,18 @@ IF gaps_status == "BLOCKING":
     To resolve these gaps:
     1. `/gsd:discuss-phase {PHASE}` — make decisions on the blocking gaps
     2. `/gsd:research-phase {PHASE}` — re-research with updated context
-
-    Research page saved: https://mosic.pro/app/page/{research_page_id}
     """
     EXIT
 
   IF user_selection == "View research":
-    research_full = mosic_get_page(research_page_id, { content_format: "markdown" })
-    Display: research_full.content
-    # Return to gap handling menu
+    IF use_distributed:
+      FOR each grp in group_research_pages:
+        Display: "### Group " + grp.group.number + ": " + grp.group.title
+        research_full = mosic_get_page(grp.page_id, { content_format: "markdown" })
+        Display: research_full.content
+    ELSE:
+      research_full = mosic_get_page(research_page_id, { content_format: "markdown" })
+      Display: research_full.content
     GOTO "Handle Gap Status"
 ```
 
@@ -365,7 +583,15 @@ Task(
 
 **Phase {PHASE}: {phase.title}**
 
-Research: https://mosic.pro/app/page/{research_page_id}
+IF use_distributed:
+  Mode: Distributed ({requirement_groups.length} groups)
+  Dependency order: {dependency_order.map(g => g.title).join(" → ")}
+  Research pages:
+  {group_research_pages.map(grp =>
+    "  - Group " + grp.group.number + ": https://mosic.pro/app/page/" + grp.page_id
+  ).join("\n")}
+ELSE:
+  Research: https://mosic.pro/app/page/{research_page_id}
 
 Key findings:
 - {summary_point_1}
@@ -374,7 +600,7 @@ Key findings:
 
 Gap Status: {gaps_status or "Not assessed"}
 {IF gaps_status == "NON-BLOCKING": "Non-blocking gaps documented — planner will use defaults."}
-{IF gaps_status == "BLOCKING": "⚠ Blocking gaps overridden — planner will use best judgment."}
+{IF gaps_status == "BLOCKING": "Blocking gaps overridden — planner will use best judgment."}
 
 ---
 
@@ -419,10 +645,14 @@ IF mosic operation fails:
 - [ ] Phase loaded from Mosic
 - [ ] Existing research checked
 - [ ] Context loaded from Mosic (context page, requirements)
-- [ ] gsd-phase-researcher spawned with full context
+- [ ] Distributed threshold evaluated (phase requirements count vs config threshold)
+- [ ] If distributed: requirements grouped by category prefix, researchers spawned in parallel
+- [ ] If distributed: interface contracts collected, dependency order computed (topological sort)
+- [ ] If distributed: decomposition stored in config.mosic.session.decomposition
+- [ ] If single: gsd-phase-researcher spawned with full context
 - [ ] Checkpoints handled correctly
-- [ ] Research page created/updated in Mosic linked to phase
+- [ ] Research page(s) created/updated in Mosic linked to phase
 - [ ] Tags applied (gsd-managed, research, phase-NN)
-- [ ] config.json updated with page mapping
+- [ ] config.json updated with page mapping(s)
 - [ ] User knows next steps with Mosic URLs
 </success_criteria>
