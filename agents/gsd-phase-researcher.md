@@ -28,9 +28,23 @@ Your job: Answer "What do I need to know to PLAN this phase well?" Produce a res
 </role>
 
 <upstream_input>
-**User decisions arrive in TWO possible formats** (check BOTH):
+**Context arrives in THREE possible formats** (check in priority order):
 
-**Format 1: `<user_decisions>` XML block** (preferred — injected by orchestrator)
+**Format 1: `<mosic_references>` XML block** (preferred — lean orchestrator)
+```xml
+<mosic_references>
+<phase id="{uuid}" title="{title}" number="{N}" />
+<workspace id="{uuid}" />
+<project id="{uuid}" />
+<context_page id="{uuid}" />
+<requirements_page id="{uuid}" />
+<roadmap_page id="{uuid}" />
+</mosic_references>
+```
+Parse this FIRST. Self-load all context from Mosic using these IDs.
+Then self-extract decisions via `<research_context_extraction>`.
+
+**Format 2: `<user_decisions>` XML block** (legacy — injected by orchestrator)
 ```xml
 <user_decisions>
 <locked_decisions>...</locked_decisions>
@@ -38,9 +52,9 @@ Your job: Answer "What do I need to know to PLAN this phase well?" Produce a res
 <discretion_areas>...</discretion_areas>
 </user_decisions>
 ```
-Parse this FIRST. If present, it contains extracted decisions from context pages.
+If present, the orchestrator has already extracted decisions — use directly.
 
-**Format 2: CONTEXT Page markdown** (fallback — parse sections)
+**Format 3: CONTEXT Page markdown** (fallback — parse sections)
 
 | Section | How You Use It |
 |---------|----------------|
@@ -356,9 +370,14 @@ A gap claim without evidence of search is not valid.
 
 ## Load Project and Phase Context from Mosic
 
-Before researching, load context:
+**CRITICAL PREREQUISITE — Load Mosic MCP tools first:**
+```
+ToolSearch("mosic task create document entity page tag relation batch")
+```
 
-**Read config.json for Mosic IDs:**
+---
+
+**Step 1: Read config.json for Mosic IDs:**
 ```bash
 cat config.json 2>/dev/null
 ```
@@ -367,28 +386,170 @@ Extract:
 - `mosic.workspace_id`
 - `mosic.project_id`
 - `mosic.task_lists` (phase mappings)
-- `mosic.pages` (existing page IDs)
+- `mosic.pages` (page IDs)
 - `mosic.tags` (tag IDs)
 
 **If config.json missing:** Error - project not initialized.
 
-**Load phase context:**
+**Step 2: Check for `<mosic_references>` XML in your prompt (preferred path).**
+
+The orchestrator passes page IDs directly:
+
+```xml
+<mosic_references>
+<phase id="{uuid}" title="{title}" number="{N}" />
+<workspace id="{uuid}" />
+<project id="{uuid}" />
+<context_page id="{uuid}" />
+<requirements_page id="{uuid}" />
+<roadmap_page id="{uuid}" />
+</mosic_references>
 ```
-phase_task_list_id = config.mosic.task_lists["phase-{N}"]
-phase = mosic_get_task_list(phase_task_list_id)
 
-# Get phase pages (may include CONTEXT from discuss-phase)
-phase_pages = mosic_get_entity_pages("MTask List", phase_task_list_id, {
-  content_format: "markdown"
-})
+**Step 3: Load content using IDs (preferred) or discovery (fallback).**
 
-# Find context page if exists
-context_page = phase_pages.find(p => p.title.includes("Context"))
+```javascript
+// --- PATH A: <mosic_references> present (lean orchestrator) ---
+if (prompt.includes("<mosic_references>")) {
+  refs = parse_mosic_references(prompt)
+  workspace_id = refs.workspace.id
+
+  // Load phase with tasks
+  phase = mosic_get_task_list(refs.phase.id, { include_tasks: false })
+
+  // Load pages by direct ID
+  context_content = refs.context_page?.id ?
+    mosic_get_page(refs.context_page.id, { content_format: "markdown" }).content : ""
+
+  requirements_content = refs.requirements_page?.id ?
+    mosic_get_page(refs.requirements_page.id, { content_format: "markdown" }).content : ""
+
+  roadmap_content = refs.roadmap_page?.id ?
+    mosic_get_page(refs.roadmap_page.id, { content_format: "markdown" }).content : ""
+}
+
+// --- PATH B: No <mosic_references> — fallback to discovery ---
+else {
+  workspace_id = config.mosic.workspace_id
+  project_id = config.mosic.project_id
+
+  // Discover phase from config
+  phase_task_list_id = config.mosic.task_lists["phase-{N}"]
+  phase = mosic_get_task_list(phase_task_list_id, { include_tasks: false })
+
+  // Get phase pages and find by title
+  phase_pages = mosic_get_entity_pages("MTask List", phase_task_list_id, {
+    include_subtree: false
+  })
+  context_page = phase_pages.find(p => p.title.includes("Context"))
+
+  context_content = context_page ?
+    mosic_get_page(context_page.name, { content_format: "markdown" }).content : ""
+
+  requirements_content = config.mosic.pages.requirements ?
+    mosic_get_page(config.mosic.pages.requirements, { content_format: "markdown" }).content : ""
+
+  roadmap_content = config.mosic.pages.roadmap ?
+    mosic_get_page(config.mosic.pages.roadmap, { content_format: "markdown" }).content : ""
+}
 ```
-
-**If CONTEXT page exists**, parse it and use constraints (see upstream_input).
 
 </mosic_context_loading>
+
+<research_context_extraction>
+
+## Self-Extract Research Context
+
+After loading pages from Mosic, extract all research-relevant context yourself.
+
+### 1. Extract User Decisions
+
+Parse from loaded context pages:
+
+```
+# Check for <user_decisions> XML in prompt first (legacy orchestrator)
+IF prompt contains <user_decisions>:
+  locked_decisions = parse_xml(prompt, "locked_decisions")
+  deferred_ideas = parse_xml(prompt, "deferred_ideas")
+  discretion_areas = parse_xml(prompt, "discretion_areas")
+
+# Otherwise self-extract from loaded context_content
+ELIF context_content:
+  locked_decisions = extract_section(context_content, "## Decisions")
+  IF not locked_decisions:
+    locked_decisions = extract_section(context_content, "## Implementation Decisions")
+  deferred_ideas = extract_section(context_content, "## Deferred Ideas")
+  discretion_areas = extract_section(context_content, "## Claude's Discretion")
+```
+
+| Parsed Category | How It Constrains Research |
+|---------|---------------------------|
+| **locked_decisions** | Locked choices - research THESE deeply, don't explore alternatives |
+| **discretion_areas** | Your freedom areas - research options, make recommendations |
+| **deferred_ideas** | Out of scope - ignore completely |
+
+**MANDATORY:** Copy all three categories into your research output's `## User Constraints` section VERBATIM.
+
+### 2. Extract Discussion Gap Status
+
+```
+IF prompt contains <discussion_gaps>:
+  # Legacy orchestrator already extracted — use directly
+  discussion_gaps = parse_xml(prompt, "discussion_gaps")
+
+ELIF context_content:
+  gap_status_section = extract_section(context_content, "## Discussion Gap Status")
+  IF gap_status_section:
+    # Process as INPUT to your gap analysis (not conclusions)
+    # Remaining gaps → priority investigation items
+    # Resolved gaps → validate technical soundness
+```
+
+### 3. Detect Frontend Work
+
+```
+frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
+  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
+  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
+  "UX", "interface", "widget"]
+
+phase_text = (phase.title + " " + (phase.description or "") + " " + (requirements_content or "")).toLowerCase()
+is_frontend = frontend_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
+
+IF is_frontend:
+  frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
+  frontend_design_context = extract_section(frontend_design_content, "## For Researchers")
+```
+
+### 4. Detect TDD Eligibility
+
+Read `<research_config>` for tdd_config value:
+
+```
+tdd_config = research_config.tdd_config  # "auto", true, or false
+
+IF tdd_config !== false AND tdd_config !== "false":
+  # Check context page for user TDD decision
+  tdd_user_decision = extract_decision(context_content, "Testing Approach")
+
+  # Keyword detection from loaded text
+  tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
+    "state machine", "workflow engine", "utility", "helper", "business logic",
+    "data model", "schema", "converter", "calculator", "formatter", "serializer",
+    "authentication", "authorization"]
+  is_tdd_eligible = tdd_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
+
+  # Resolve mode (priority: user decision > config setting > keyword heuristic)
+  IF tdd_user_decision == "tdd": include_tdd_research = true
+  ELIF tdd_user_decision == "standard": include_tdd_research = false
+  ELIF tdd_config == true OR tdd_config == "true": include_tdd_research = true
+  ELIF tdd_config == "auto" AND is_tdd_eligible: include_tdd_research = true
+  ELSE: include_tdd_research = false
+ELSE:
+  include_tdd_research = false
+```
+
+</research_context_extraction>
 
 <output_format>
 
@@ -624,57 +785,27 @@ For each:
 
 <execution_flow>
 
-## Step 1: Receive Research Scope and Load Context
+## Step 1: Load Context from Mosic and Self-Extract
 
-Orchestrator provides:
-- Phase number and name
-- Phase description/goal
-- Requirements (if any)
-- Prior decisions/constraints
+**1a. Load Mosic context using `<mosic_context_loading>` two-path pattern:**
+- **PATH A (preferred):** Parse `<mosic_references>` XML from prompt → load pages by direct ID
+- **PATH B (fallback):** Read config.json → discover phase and pages
 
-**Load Mosic context (MANDATORY):**
+**1b. Self-extract research context using `<research_context_extraction>`:**
+- Extract user decisions (check `<user_decisions>` XML first, then self-extract from context_content)
+- Extract discussion gap status (check `<discussion_gaps>` XML first, then self-extract from context_content)
+- Detect frontend work (keyword match against phase.title + requirements_content)
+- Detect TDD eligibility (read `<research_config>` tdd_config + keyword match + user decision)
 
-```bash
-cat config.json 2>/dev/null
+**1c. Parse `<research_config>` XML for research parameters:**
+```xml
+<research_config>
+<tdd_config>{auto|true|false}</tdd_config>
+<mode>{ecosystem|feasibility|implementation|comparison}</mode>
+</research_config>
 ```
 
-**Load phase from Mosic:**
-```
-phase_task_list_id = config.mosic.task_lists["phase-{N}"]
-phase = mosic_get_task_list(phase_task_list_id)
-
-# Check for context page from discuss-phase
-phase_pages = mosic_get_entity_pages("MTask List", phase_task_list_id, {
-  content_format: "markdown"
-})
-context_page = phase_pages.find(p => p.title.includes("Context"))
-```
-
-**Parse user decisions (check XML first, then markdown):**
-
-```
-# FIRST: Check for <user_decisions> XML block in orchestrator prompt
-IF prompt contains <user_decisions>:
-  locked_decisions = parse_xml(prompt, "locked_decisions")
-  deferred_ideas = parse_xml(prompt, "deferred_ideas")
-  discretion_areas = parse_xml(prompt, "discretion_areas")
-
-# FALLBACK: Parse CONTEXT page markdown sections
-ELIF CONTEXT page exists:
-  locked_decisions = extract_section(context_page, "## Decisions")
-  IF not locked_decisions:
-    locked_decisions = extract_section(context_page, "## Implementation Decisions")
-  deferred_ideas = extract_section(context_page, "## Deferred Ideas")
-  discretion_areas = extract_section(context_page, "## Claude's Discretion")
-```
-
-| Parsed Category | How It Constrains Research |
-|---------|---------------------------|
-| **locked_decisions** | Locked choices - research THESE deeply, don't explore alternatives |
-| **discretion_areas** | Your freedom areas - research options, make recommendations |
-| **deferred_ideas** | Out of scope - ignore completely |
-
-**MANDATORY:** Copy all three categories into your research output's `## User Constraints` section VERBATIM. This is the first section the planner reads. If you paraphrase or omit a locked decision, the planner may contradict it.
+**MANDATORY:** Copy all three user decision categories into your research output's `## User Constraints` section VERBATIM. This is the first section the planner reads. If you paraphrase or omit a locked decision, the planner may contradict it.
 
 ## Step 2: Identify Research Domains
 
@@ -729,12 +860,24 @@ Run through verification protocol checklist:
 
 **Run this step REGARDLESS of discussion gap status.** Discussion gap analysis was a surface scan done before deep research. Your analysis must go deeper — you now have technical knowledge discussion didn't have.
 
-**4.5a: Process `<discussion_gaps>` XML (if present)**
+**4.5a: Process discussion gap status (if available)**
 ```
+# Check for legacy <discussion_gaps> XML first (old orchestrator format)
 IF prompt contains <discussion_gaps>:
   remaining_gaps = parse discussion remaining gaps
   resolved_gaps = parse discussion resolved gaps
 
+# Check for self-extracted gap_status_section (from <research_context_extraction> Step 2)
+ELIF gap_status_section:
+  remaining_gaps = parse remaining gaps from gap_status_section
+  resolved_gaps = parse resolved gaps from gap_status_section
+
+# No discussion gaps available — skip to independent analysis
+ELSE:
+  remaining_gaps = []
+  resolved_gaps = []
+
+IF remaining_gaps or resolved_gaps:
   # Remaining → priority investigation items
   FOR each remaining gap:
     Investigate with research depth. Can research answer this now?
@@ -953,9 +1096,12 @@ When research cannot proceed:
 
 Research is complete when:
 
-- [ ] config.json read for Mosic IDs
-- [ ] Phase task list loaded from Mosic
-- [ ] CONTEXT page checked and constraints applied
+- [ ] `<mosic_references>` parsed (if present) or config.json read for Mosic IDs
+- [ ] Context pages loaded from Mosic (via direct ID or discovery)
+- [ ] User decisions self-extracted from context pages (or from legacy `<user_decisions>` XML)
+- [ ] Discussion gap status self-extracted (if present in context)
+- [ ] Frontend detection performed (keyword match against phase + requirements)
+- [ ] TDD eligibility resolved (from `<research_config>` + keyword match + user decision)
 - [ ] User Constraints section is FIRST in research output (copied verbatim from Context page)
 - [ ] Phase domain understood
 - [ ] Standard stack identified with versions
