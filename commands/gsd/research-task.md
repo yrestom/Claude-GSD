@@ -93,7 +93,7 @@ Display:
 {TASK_IDENTIFIER}: {TASK_TITLE}
 ```
 
-## 3. Load Context
+## 3. Discover Page IDs
 
 ```
 # Get task pages
@@ -106,29 +106,24 @@ existing_research_page = task_pages.find(p => p.title.includes("Research"))
 
 # Check for context page (from discuss-task)
 task_context_page = task_pages.find(p => p.title.includes("Context"))
-
-task_context_content = ""
-IF task_context_page:
-  task_context_content = mosic_get_page(task_context_page.name, {
-    content_format: "markdown"
-  }).content
+task_context_page_id = task_context_page ? task_context_page.name : null
 
 # Get parent phase
 phase_id = task.task_list
 phase = mosic_get_task_list(phase_id, { include_tasks: false })
 
-# Get phase research (to inherit, not repeat)
+# Get phase pages and find IDs
 phase_pages = mosic_get_entity_pages("MTask List", phase_id, {
   include_subtree: false
 })
 
 phase_research_page = phase_pages.find(p => p.title.includes("Research"))
+phase_research_page_id = phase_research_page ? phase_research_page.name : null
 
-phase_research_content = ""
-IF phase_research_page:
-  phase_research_content = mosic_get_page(phase_research_page.name, {
-    content_format: "markdown"
-  }).content
+phase_context_page = phase_pages.find(p => p.title.includes("Context"))
+phase_context_page_id = phase_context_page ? phase_context_page.name : null
+
+requirements_page_id = config.mosic.pages.requirements or null
 ```
 
 ## 4. Check for Existing Research
@@ -207,7 +202,7 @@ ELSE:
 Display: "Research page: https://mosic.pro/app/page/" + RESEARCH_PAGE_ID
 ```
 
-## 6. Extract Decisions and Spawn Task Researcher Agent
+## 6. Spawn Task Researcher Agent with Lean Prompt
 
 Display:
 ```
@@ -218,187 +213,30 @@ Display:
 Investigating implementation approach...
 ```
 
-**Extract user decisions from context pages (task-level and phase-level):**
-```
-locked_decisions = ""
-deferred_ideas = ""
-discretion_areas = ""
-
-# Extract from task context page first
-IF task_context_content:
-  locked_decisions = extract_section(task_context_content, "## Decisions")
-  deferred_ideas = extract_section(task_context_content, "## Deferred Ideas")
-  discretion_areas = extract_section(task_context_content, "## Claude's Discretion")
-
-# Also load phase context for inherited decisions
-phase_context_page = phase_pages.find(p => p.title.includes("Context"))
-phase_context_content = ""
-IF phase_context_page:
-  phase_context_content = mosic_get_page(phase_context_page.name, {
-    content_format: "markdown"
-  }).content
-
-  # Merge phase-level decisions (task-level takes precedence)
-  IF not locked_decisions:
-    locked_decisions = extract_section(phase_context_content, "## Decisions")
-    IF not locked_decisions:
-      locked_decisions = extract_section(phase_context_content, "## Implementation Decisions")
-  ELSE:
-    phase_decisions = extract_section(phase_context_content, "## Decisions")
-    IF phase_decisions:
-      locked_decisions = locked_decisions + "\n\n**Inherited from phase:**\n" + phase_decisions
-
-  IF not deferred_ideas:
-    deferred_ideas = extract_section(phase_context_content, "## Deferred Ideas")
-  IF not discretion_areas:
-    discretion_areas = extract_section(phase_context_content, "## Claude's Discretion")
-
-# Also check research page for User Constraints
-IF phase_research_content AND not locked_decisions:
-  user_constraints = extract_section(phase_research_content, "## User Constraints")
-  IF user_constraints:
-    locked_decisions = extract_subsection(user_constraints, "### Locked Decisions")
-    deferred_ideas = extract_subsection(user_constraints, "### Deferred Ideas")
-    discretion_areas = extract_subsection(user_constraints, "### Claude's Discretion")
-
-user_decisions_xml = """
-<user_decisions>
-<locked_decisions>
-""" + (locked_decisions or "No locked decisions — all at Claude's discretion.") + """
-</locked_decisions>
-
-<deferred_ideas>
-""" + (deferred_ideas or "No deferred ideas.") + """
-</deferred_ideas>
-
-<discretion_areas>
-""" + (discretion_areas or "All areas at Claude's discretion.") + """
-</discretion_areas>
-</user_decisions>
-"""
-```
-
-# Extract discussion gap status from task context page or phase context page (if exists)
-discussion_gaps_xml = ""
-IF task_context_content:
-  gap_status_section = extract_section(task_context_content, "## Discussion Gap Status")
-  IF gap_status_section:
-    discussion_gaps_xml = """
-<discussion_gaps>
-<guidance>
-This is INPUT to your gap analysis, NOT a conclusion to accept.
-Discussion's gap scan was surface-level — done BEFORE deep research, based only on discovery findings and user intuition.
-You MUST do your own independent gap analysis after completing research.
-For remaining gaps: investigate with research depth — you may now have answers discussion didn't.
-For resolved gaps: validate technical soundness — user decided before understanding technical constraints.
-Most importantly: find NEW gaps that discussion COULDN'T have identified — architecture constraints, library limitations, integration issues, and missing specs that only become apparent after deep technical investigation.
-</guidance>
-""" + gap_status_section + """
-</discussion_gaps>
-"""
-    Display: "Discussion gaps found — researcher will independently investigate and find new gaps."
-
-IF not discussion_gaps_xml AND phase_context_content:
-  gap_status_section = extract_section(phase_context_content, "## Discussion Gap Status")
-  IF gap_status_section:
-    discussion_gaps_xml = """
-<discussion_gaps>
-<guidance>
-This is INPUT to your gap analysis, NOT a conclusion to accept.
-Discussion's gap scan was surface-level — done BEFORE deep research, based only on discovery findings and user intuition.
-You MUST do your own independent gap analysis after completing research.
-For remaining gaps: investigate with research depth — you may now have answers discussion didn't.
-For resolved gaps: validate technical soundness — user decided before understanding technical constraints.
-Most importantly: find NEW gaps that discussion COULDN'T have identified — architecture constraints, library limitations, integration issues, and missing specs that only become apparent after deep technical investigation.
-</guidance>
-""" + gap_status_section + """
-</discussion_gaps>
-"""
-    Display: "Phase discussion gaps found — researcher will independently investigate and find new gaps."
-
-# Frontend detection
-frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
-  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
-  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
-  "UX", "interface", "widget"]
-
-task_text = (task.title + " " + (task.description or "")).toLowerCase()
-is_frontend = frontend_keywords.some(kw => task_text.includes(kw.toLowerCase()))
-
-frontend_design_xml = ""
-IF is_frontend:
-  frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
-  frontend_design_xml = extract_section(frontend_design_content, "## For Researchers")
-  Display: "Frontend work detected — design system inventory will be included in research."
-
-# TDD detection for task research
-tdd_config = config.workflow?.tdd ?? "auto"
-tdd_research_xml = ""
-
-IF tdd_config !== false:
-  tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
-    "state machine", "workflow engine", "utility", "helper", "business logic",
-    "data model", "schema", "converter", "calculator", "formatter", "serializer",
-    "authentication", "authorization"]
-
-  task_text_lower = (task.title + " " + (task.description or "")).toLowerCase()
-  is_tdd_eligible = tdd_keywords.some(kw => task_text_lower.includes(kw.toLowerCase()))
-
-  # Check task context page AND phase context page for TDD decision
-  tdd_user_decision = extract_decision(task_context_content, "Testing Approach")
-  IF not tdd_user_decision:
-    tdd_user_decision = extract_decision(phase_context_content, "Testing Approach")
-
-  IF tdd_user_decision == "standard":
-    # User explicitly chose standard testing — skip TDD research
-    tdd_research_xml = ""
-  ELIF tdd_user_decision == "tdd" OR tdd_config == true OR (tdd_config == "auto" AND is_tdd_eligible):
-    tdd_research_xml = """
-<tdd_research_context>
-This task may use TDD. Research should include:
-- Test framework and runner already in project
-- Test patterns for this specific task domain
-- Examples of test-first approach for similar functionality
-- Test infrastructure gaps or setup needed
-Include a "## Testing Approach" section in research output.
-</tdd_research_context>
-"""
-    Display: "TDD-eligible task — researcher will include testing approach."
-
 ```
 researcher_prompt = """
-""" + user_decisions_xml + """
+<mosic_references>
+<task id="{TASK_ID}" identifier="{TASK_IDENTIFIER}" title="{TASK_TITLE}" />
+<phase id="{phase_id}" title="{phase.title}" />
+<workspace id="{workspace_id}" />
+<project id="{project_id}" />
+<research_page id="{RESEARCH_PAGE_ID}" />
+<phase_research_page id="{phase_research_page_id}" />
+<phase_context_page id="{phase_context_page_id}" />
+<task_context_page id="{task_context_page_id}" />
+<requirements_page id="{requirements_page_id}" />
+</mosic_references>
+
+<research_config>
+<tdd_config>{config.workflow?.tdd ?? "auto"}</tdd_config>
+<supplement_mode>{supplement_mode ? "true" : "false"}</supplement_mode>
+</research_config>
 
 <objective>
 Research how to implement task """ + TASK_IDENTIFIER + """: """ + TASK_TITLE + """
 
 Answer: "What do I need to know to PLAN this task well?"
 </objective>
-
-<context>
-**Task:** """ + TASK_IDENTIFIER + """ - """ + TASK_TITLE + """
-**Task ID:** """ + TASK_ID + """
-**Research Page:** """ + RESEARCH_PAGE_ID + """
-**Workspace:** """ + workspace_id + """
-
-**Task Description:**
-""" + task.description + """
-
-**Task Context (from discussion, if available):**
-""" + (task_context_content or "No task-specific context available.") + """
-
-**Phase Research (inherit, don't repeat):**
-""" + (phase_research_content or "No phase research available. May need to research more broadly.") + """
-
-</context>
-
-""" + discussion_gaps_xml + """
-
-<frontend_design_context>
-""" + frontend_design_xml + """
-</frontend_design_context>
-
-""" + tdd_research_xml + """
 
 <constraints>
 - Focus on this SPECIFIC task, not general phase topics
@@ -412,55 +250,7 @@ Answer: "What do I need to know to PLAN this task well?"
 </constraints>
 
 <output>
-Update research page """ + RESEARCH_PAGE_ID + """ with:
-
-# """ + TASK_IDENTIFIER + """ Research
-
-**Task:** """ + TASK_TITLE + """
-**Researched:** {date}
-**Confidence:** HIGH/MEDIUM/LOW
-
-## User Constraints
-### Locked Decisions
-[Copy from task context AND phase context verbatim - NON-NEGOTIABLE]
-### Claude's Discretion
-[Areas where planner can choose]
-### Deferred Ideas (OUT OF SCOPE)
-[Do NOT plan these]
-
-If no context: "No user constraints — all decisions at Claude's discretion"
-
-## Summary
-{2-3 sentence summary of key findings}
-
-## Implementation Approach
-**Recommended approach:** {specific recommendation}
-**Why:** {justification}
-
-## Code Patterns
-### Pattern 1: {Name}
-```{language}
-// Source: {Context7/official docs}
-{code example}
-```
-
-## Gotchas
-- **{Gotcha 1}:** {what goes wrong, how to avoid}
-
-## Dependencies
-- {Library}: {version} - {why needed}
-
-## Gap Analysis
-
-**Status:** {CLEAR | NON-BLOCKING | BLOCKING}
-
-### Blocking Gaps
-{If any: list gap, what it relates to, impact, suggested resolution. If none: "None identified."}
-
-### Non-Blocking Gaps
-{If any: list gap, what it relates to, default approach. If none: "None — all requirements are actionable."}
-
----
+Update research page """ + RESEARCH_PAGE_ID + """ with findings.
 
 Return:
 ## RESEARCH COMPLETE

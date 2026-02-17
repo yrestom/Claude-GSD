@@ -108,43 +108,31 @@ IF existing_research_page:
   IF skip: Exit with next steps
 ```
 
-## 4. Gather Phase Context from Mosic
+## 4. Discover Phase Page IDs
 
 ```
-# Load context page if exists
+# Find context page ID (if exists from discuss-phase)
 context_page = phase_pages.find(p => p.title contains "Context")
-context_content = ""
-IF context_page:
-  context_content = mosic_get_page(context_page.name, {
-    content_format: "markdown"
-  }).content
+context_page_id = context_page ? context_page.name : null
 
-# Load requirements
-requirements_content = ""
-IF config.mosic.pages.requirements:
-  requirements_content = mosic_get_page(config.mosic.pages.requirements, {
-    content_format: "markdown"
-  }).content
+# Get requirements page ID
+requirements_page_id = config.mosic.pages.requirements or null
 
-# Load roadmap for phase description
-roadmap_content = ""
-IF config.mosic.pages.roadmap:
-  roadmap_content = mosic_get_page(config.mosic.pages.roadmap, {
-    content_format: "markdown"
-  }).content
+# Get roadmap page ID
+roadmap_page_id = config.mosic.pages.roadmap or null
 ```
 
 Display:
 ```
 Context loaded:
 - Phase goal: {phase.description}
-- Context decisions: {context_page ? "Yes" : "None"}
-- Requirements: {requirements_content ? "Yes" : "None"}
+- Context page: {context_page_id ? "Found" : "None"}
+- Requirements page: {requirements_page_id ? "Found" : "None"}
 
 Proceeding to research...
 ```
 
-## 5. Extract Decisions and Spawn gsd-phase-researcher Agent
+## 5. Spawn gsd-phase-researcher Agent with Lean Prompt
 
 Display:
 ```
@@ -155,106 +143,23 @@ Display:
 Spawning researcher...
 ```
 
-**Extract user decisions from context page (if exists):**
-```
-locked_decisions = ""
-deferred_ideas = ""
-discretion_areas = ""
-
-IF context_content:
-  locked_decisions = extract_section(context_content, "## Decisions")
-  IF not locked_decisions:
-    locked_decisions = extract_section(context_content, "## Implementation Decisions")
-  deferred_ideas = extract_section(context_content, "## Deferred Ideas")
-  discretion_areas = extract_section(context_content, "## Claude's Discretion")
-
-user_decisions_xml = """
-<user_decisions>
-<locked_decisions>
-""" + (locked_decisions or "No locked decisions — all at Claude's discretion.") + """
-</locked_decisions>
-
-<deferred_ideas>
-""" + (deferred_ideas or "No deferred ideas.") + """
-</deferred_ideas>
-
-<discretion_areas>
-""" + (discretion_areas or "All areas at Claude's discretion.") + """
-</discretion_areas>
-</user_decisions>
-"""
-```
-
-# Extract discussion gap status from context page (if exists)
-discussion_gaps_xml = ""
-IF context_content:
-  gap_status_section = extract_section(context_content, "## Discussion Gap Status")
-  IF gap_status_section:
-    discussion_gaps_xml = """
-<discussion_gaps>
-<guidance>
-This is INPUT to your gap analysis, NOT a conclusion to accept.
-Discussion's gap scan was surface-level — done BEFORE deep research, based only on discovery findings and user intuition.
-You MUST do your own independent gap analysis after completing research.
-For remaining gaps: investigate with research depth — you may now have answers discussion didn't.
-For resolved gaps: validate technical soundness — user decided before understanding technical constraints.
-Most importantly: find NEW gaps that discussion COULDN'T have identified — architecture constraints, library limitations, integration issues, and missing specs that only become apparent after deep technical investigation.
-</guidance>
-""" + gap_status_section + """
-</discussion_gaps>
-"""
-    Display: "Discussion gaps found — researcher will independently investigate and find new gaps."
-
-# Frontend detection
-frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
-  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
-  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
-  "UX", "interface", "widget"]
-
-phase_text = (phase.title + " " + (phase.description or "") + " " + requirements_content).toLowerCase()
-is_frontend = frontend_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
-
-frontend_design_xml = ""
-IF is_frontend:
-  frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
-  # Extract "For Researchers" section
-  frontend_design_xml = extract_section(frontend_design_content, "## For Researchers")
-  Display: "Frontend work detected — design system inventory will be included in research."
-
-# TDD detection for research
-tdd_config = config.workflow?.tdd ?? "auto"
-tdd_research_xml = ""
-
-IF tdd_config !== false:
-  tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
-    "state machine", "workflow engine", "utility", "helper", "business logic",
-    "data model", "schema", "converter", "calculator", "formatter", "serializer",
-    "authentication", "authorization"]
-
-  is_tdd_eligible = tdd_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
-
-  # Check context page for user TDD decision
-  tdd_user_decision = extract_decision(context_content, "Testing Approach")
-
-  IF tdd_user_decision == "standard":
-    # User explicitly chose standard testing — skip TDD research
-    tdd_research_xml = ""
-  ELIF tdd_user_decision == "tdd" OR tdd_config == true OR (tdd_config == "auto" AND is_tdd_eligible):
-    tdd_research_xml = """
-<tdd_research_context>
-This phase may use TDD. Research should include:
-- Identify existing test framework and configuration in the project
-- Recommend test patterns specific to this domain (unit, integration, contract)
-- Find examples of test-first patterns for the core logic
-- Note any testing gotchas or infrastructure gaps
-Include a "## Testing Approach" section in research output.
-</tdd_research_context>
-"""
-    Display: "TDD-eligible phase — researcher will include testing approach."
-
 Research modes: ecosystem (default), feasibility, implementation, comparison.
 
 ```markdown
+<mosic_references>
+<phase id="{task_list_id}" title="{phase.title}" number="{PHASE}" />
+<workspace id="{workspace_id}" />
+<project id="{project_id}" />
+<context_page id="{context_page_id}" />
+<requirements_page id="{requirements_page_id}" />
+<roadmap_page id="{roadmap_page_id}" />
+</mosic_references>
+
+<research_config>
+<tdd_config>{config.workflow?.tdd ?? "auto"}</tdd_config>
+<mode>ecosystem</mode>
+</research_config>
+
 <research_type>
 Phase Research - investigating HOW to implement a specific phase well.
 </research_type>
@@ -272,25 +177,10 @@ For this phase, discover:
 - What should NOT be hand-rolled?
 </key_insight>
 
-""" + user_decisions_xml + """
-
 <objective>
 Research implementation approach for Phase {PHASE}: {phase.title}
 Mode: ecosystem
 </objective>
-
-<context>
-**Phase goal:**
-{phase.description}
-
-**Requirements:**
-{requirements_content}
-
-**Context decisions:**
-{context_content}
-</context>
-
-""" + discussion_gaps_xml + """
 
 <downstream_consumer>
 Your research will be loaded by `/gsd:plan-phase` which uses specific sections:
@@ -311,12 +201,6 @@ Before declaring complete, verify:
 - [ ] Confidence levels assigned honestly
 - [ ] Section names match what plan-phase expects
 </quality_gate>
-
-<frontend_design_context>
-""" + frontend_design_xml + """
-</frontend_design_context>
-
-""" + tdd_research_xml + """
 
 <output>
 Return research findings as structured markdown. The orchestrator will create the Mosic page.
