@@ -33,6 +33,9 @@ Research how to implement a specific task well, producing findings that directly
 
 <execution_context>
 @~/.claude/get-shit-done/references/ui-brand.md
+@~/.claude/get-shit-done/workflows/context-extraction.md
+@~/.claude/get-shit-done/workflows/decompose-requirements.md
+@~/.claude/get-shit-done/workflows/distributed-research.md
 </execution_context>
 
 <context>
@@ -126,6 +129,43 @@ phase_context_page_id = phase_context_page ? phase_context_page.name : null
 requirements_page_id = config.mosic.pages.requirements or null
 ```
 
+## 3.5. Decompose Task for Distributed Research
+
+Follow `@~/.claude/get-shit-done/workflows/decompose-requirements.md`:
+
+```
+use_distributed = false
+requirement_groups = []
+dependency_order = []
+
+# Extract task requirements from parent plan page's ## Requirements Coverage table
+task_requirements = []
+IF existing_plan_page or task_pages.find(p => p.page_type == "Spec"):
+  plan_page = existing_plan_page or task_pages.find(p => p.page_type == "Spec")
+  plan_content = mosic_get_page(plan_page.name, { content_format: "markdown" }).content
+  coverage_section = extract_section(plan_content, "## Requirements Coverage")
+  IF coverage_section:
+    FOR each row in parse_markdown_table(coverage_section):
+      task_requirements.append({ id: row.req_id, description: row.description })
+
+distributed_config = config.workflow?.distributed ?? {}
+threshold = distributed_config.threshold ?? 6
+
+IF task_requirements.length >= threshold AND (distributed_config.enabled !== false):
+  # Decompose using @decompose-requirements.md <decompose>
+  result = decompose(task_requirements, config)
+  use_distributed = result.use_distributed
+  requirement_groups = result.requirement_groups
+  dependency_order = result.dependency_order
+
+  IF use_distributed:
+    Display:
+    """
+    Distributed research: {task_requirements.length} requirements in {requirement_groups.length} groups
+    {requirement_groups.map(g => "  " + g.number + ". " + g.title + " (" + g.requirement_ids.length + " reqs)").join("\n")}
+    """
+```
+
 ## 4. Check for Existing Research
 
 ```
@@ -202,19 +242,56 @@ ELSE:
 Display: "Research page: https://mosic.pro/app/page/" + RESEARCH_PAGE_ID
 ```
 
-## 6. Spawn Task Researcher Agent with Lean Prompt
-
-Display:
-```
--------------------------------------------
- GSD > SPAWNING RESEARCHER
--------------------------------------------
-
-Investigating implementation approach...
-```
+## 6. Spawn Task Researcher Agent(s)
 
 ```
-researcher_prompt = """
+IF use_distributed:
+  # --- DISTRIBUTED: Follow @~/.claude/get-shit-done/workflows/distributed-research.md ---
+  # Follow <parallel_researcher_spawning> with these scope-specific inputs:
+
+  Display:
+  """
+  -------------------------------------------
+   GSD > RESEARCHING TASK (DISTRIBUTED)
+  -------------------------------------------
+
+  {TASK_IDENTIFIER}: {TASK_TITLE}
+  {requirement_groups.length} groups, spawning parallel researchers...
+  """
+
+  # Command provides scope-specific parameters to workflow:
+  mosic_references_base = """
+<mosic_references>
+<task id="{TASK_ID}" identifier="{TASK_IDENTIFIER}" title="{TASK_TITLE}" />
+<phase id="{phase_id}" title="{phase.title}" />
+<workspace id="{workspace_id}" />
+<project id="{project_id}" />
+<phase_research_page id="{phase_research_page_id}" />
+<phase_context_page id="{phase_context_page_id}" />
+<task_context_page id="{task_context_page_id}" />
+<requirements_page id="{requirements_page_id}" />
+</mosic_references>
+"""
+  researcher_agent_path = "~/.claude/agents/gsd-task-researcher.md"
+  tdd_config = config.workflow?.tdd ?? "auto"
+  scope_label = TASK_IDENTIFIER
+
+  # Spawn parallel researchers per @distributed-research.md
+  # All Task() calls in ONE response for parallel execution
+
+ELSE:
+  # --- SINGLE RESEARCHER (existing behavior, unchanged) ---
+
+  Display:
+  """
+  -------------------------------------------
+   GSD > SPAWNING RESEARCHER
+  -------------------------------------------
+
+  Investigating implementation approach...
+  """
+
+  researcher_prompt = """
 <mosic_references>
 <task id="{TASK_ID}" identifier="{TASK_IDENTIFIER}" title="{TASK_TITLE}" />
 <phase id="{phase_id}" title="{phase.title}" />
@@ -262,18 +339,34 @@ Return:
 </output>
 """
 
-Task(
-  prompt="First, read ~/.claude/agents/gsd-task-researcher.md for your role.\n\n" + researcher_prompt,
-  subagent_type="general-purpose",
-  model="{researcher_model}",
-  description="Research: " + TASK_TITLE.substring(0, 30)
-)
+  Task(
+    prompt="First, read ~/.claude/agents/gsd-task-researcher.md for your role.\n\n" + researcher_prompt,
+    subagent_type="general-purpose",
+    model="{researcher_model}",
+    description="Research: " + TASK_TITLE.substring(0, 30)
+  )
 ```
 
 ## 7. Handle Researcher Return
 
 ```
-IF researcher_output contains "## RESEARCH COMPLETE":
+IF use_distributed:
+  # Follow @~/.claude/get-shit-done/workflows/distributed-research.md:
+  # 1. <handle_research_returns> — create per-group Mosic pages, collect gaps
+  #    entity_type="MTask", entity_id=TASK_ID
+  #    page_title_prefix=TASK_IDENTIFIER
+  #    config_page_key_prefix="task-" + TASK_IDENTIFIER
+  #
+  # 2. <interface_collection> — extract Proposed Interfaces from each researcher output
+  #
+  # 3. <dependency_ordering> — topological sort or tier heuristic fallback
+  #
+  # 4. <store_decomposition_after_research> — store in config.mosic.session.task_decomposition
+  #
+  # Output: group_research_pages[], aggregate_gaps_status, dependency_order[]
+  gaps_status = aggregate_gaps_status
+
+ELIF researcher_output contains "## RESEARCH COMPLETE":
   # Extract confidence and key finding
   confidence = extract_field(researcher_output, "Confidence:")
   key_finding = extract_field(researcher_output, "Key Finding:")
@@ -342,7 +435,12 @@ ELSE:
 ## 8. Update Config
 
 ```
-config.mosic.pages["task-" + TASK_IDENTIFIER + "-research"] = RESEARCH_PAGE_ID
+IF NOT use_distributed:
+  config.mosic.pages["task-" + TASK_IDENTIFIER + "-research"] = RESEARCH_PAGE_ID
+
+# Distributed mode stores per-group page IDs via <store_decomposition_after_research>
+# which writes config.mosic.session.task_decomposition with groups[] and dependency_order[]
+
 config.mosic.session.active_task = TASK_ID
 config.mosic.session.last_action = "research-task"
 config.mosic.session.last_updated = new Date().toISOString()
@@ -361,13 +459,21 @@ Display:
 
 **{TASK_IDENTIFIER}:** {TASK_TITLE}
 
-Confidence: {confidence}
-Key Finding: {key_finding}
+IF use_distributed:
+  Mode: Distributed ({requirement_groups.length} groups)
+  Dependency order: {dependency_order.map(g => g.title).join(" → ")}
+  Research pages:
+  {group_research_pages.map(grp =>
+    "  - Group " + grp.group.number + ": https://mosic.pro/app/page/" + grp.page_id
+  ).join("\n")}
+ELSE:
+  Confidence: {confidence}
+  Key Finding: {key_finding}
+  Research: https://mosic.pro/app/page/{RESEARCH_PAGE_ID}
+
 Gap Status: {gaps_status or "Not assessed"}
 {IF gaps_status == "NON-BLOCKING": "Non-blocking gaps documented — planner will use defaults."}
-{IF gaps_status == "BLOCKING": "⚠ Blocking gaps overridden — planner will use best judgment."}
-
-Research: https://mosic.pro/app/page/{RESEARCH_PAGE_ID}
+{IF gaps_status == "BLOCKING": "Blocking gaps overridden — planner will use best judgment."}
 
 ---
 
@@ -419,11 +525,14 @@ IF mosic operation fails:
 - [ ] Task loaded from Mosic
 - [ ] Phase research loaded (to inherit, not repeat)
 - [ ] Task context loaded (from discuss-task if exists)
-- [ ] Research page created/updated
-- [ ] gsd-task-researcher spawned with full context
-- [ ] Research page updated with findings
-- [ ] Page tagged (gsd-managed, task-research)
+- [ ] Distributed threshold evaluated (task requirements count vs config threshold)
+- [ ] If distributed: requirements grouped by category prefix, researchers spawned in parallel
+- [ ] If distributed: interface contracts collected, dependency order computed
+- [ ] If distributed: task_decomposition stored in config.mosic.session
+- [ ] If single: gsd-task-researcher spawned with full context
+- [ ] Research page(s) created/updated
+- [ ] Page(s) tagged (gsd-managed, task-research)
 - [ ] Comment added to task
-- [ ] config.json updated with page ID
+- [ ] config.json updated with page ID(s)
 - [ ] User knows next steps with Mosic URLs
 </success_criteria>

@@ -11,6 +11,12 @@ allowed-tools:
   - mcp__mosic_pro__*
 ---
 
+<execution_context>
+@~/.claude/get-shit-done/workflows/context-extraction.md
+@~/.claude/get-shit-done/workflows/decompose-requirements.md
+@~/.claude/get-shit-done/workflows/distributed-research.md
+</execution_context>
+
 <objective>
 Research how to implement a phase. Spawns gsd-phase-researcher agent with phase context from Mosic.
 
@@ -134,78 +140,39 @@ Proceeding to research...
 
 ## 4.5. Decompose Phase for Distributed Research
 
-```
-distributed_config = config.workflow?.distributed ?? {}
-threshold = distributed_config.threshold ?? 6
-use_distributed = false
-requirement_groups = []
+Follow `@~/.claude/get-shit-done/workflows/decompose-requirements.md`:
 
-IF requirements_page_id AND distributed_config.enabled !== false:
+```
+IF requirements_page_id AND (config.workflow?.distributed?.enabled !== false):
+  # 1. Extract phase requirements using @context-extraction.md <requirements_extraction>
   requirements_content = mosic_get_page(requirements_page_id, {
     content_format: "markdown"
   }).content
+  phase_requirements = extract_phase_requirements(requirements_content, PHASE)
 
-  # Extract phase-specific requirements from traceability table
-  phase_requirements = []
-  traceability_section = extract_section(requirements_content, "## Traceability")
-  IF NOT traceability_section:
-    traceability_section = extract_section(requirements_content, "## Requirements Traceability")
-  IF traceability_section:
-    FOR each row in parse_markdown_table(traceability_section):
-      IF row.phase matches current phase (PHASE or phase.title):
-        phase_requirements.append({ id: row.req_id, description: row.description })
-
-  use_distributed = phase_requirements.length >= threshold
+  # 2. Decompose using @decompose-requirements.md <decompose>
+  result = decompose(phase_requirements, config)
+  use_distributed = result.use_distributed
+  requirement_groups = result.requirement_groups
 
   IF use_distributed:
-    # Group by category prefix: AUTH-*, UI-*, CONT-*, etc.
-    groups_by_prefix = {}
-    FOR each req in phase_requirements:
-      prefix = req.id.match(/^([A-Z]+)/)?.[1] or "MISC"
-      groups_by_prefix[prefix] = groups_by_prefix[prefix] or []
-      groups_by_prefix[prefix].push(req)
-
-    # Merge small groups (< min_per_group) into nearest group
-    min_per_group = distributed_config.min_requirements_per_group ?? 2
-    max_per_group = distributed_config.max_requirements_per_group ?? 5
-    max_groups = distributed_config.max_groups ?? 8
-
-    requirement_groups = merge_and_split_groups(groups_by_prefix, {
-      min_per_group, max_per_group, max_groups
-    })
-    # Each group: { number: N, title: "Authentication (AUTH)", prefix: "AUTH",
-    #   requirement_ids: ["AUTH-01", "AUTH-02"], requirements: [...] }
-
     Display:
     """
     Distributed research: {phase_requirements.length} requirements in {requirement_groups.length} groups
     {requirement_groups.map(g => "  " + g.number + ". " + g.title + " (" + g.requirement_ids.length + " reqs)").join("\n")}
     """
+ELSE:
+  use_distributed = false
+  requirement_groups = []
 ```
 
 ## 5. Spawn gsd-phase-researcher Agent(s)
 
 ```
 IF use_distributed:
-  Display:
-  """
-  -------------------------------------------
-   GSD > RESEARCHING PHASE {PHASE} (DISTRIBUTED)
-  -------------------------------------------
-
-  {requirement_groups.length} researchers spawning in parallel...
-  """
-
-  # Create group-specific research page placeholders (so we have IDs for config)
-  # Then spawn ALL researchers in ONE response (parallel)
-
-  FOR each group in requirement_groups:
-    assigned_reqs_xml = "<assigned_requirements>\n"
-    FOR each req_id in group.requirement_ids:
-      assigned_reqs_xml += '<req id="' + req_id + '" />\n'
-    assigned_reqs_xml += "</assigned_requirements>"
-
-    group_prompt = """
+  # Follow @~/.claude/get-shit-done/workflows/distributed-research.md <parallel_researcher_spawning>
+  # Command provides:
+  mosic_references_base = """
 <mosic_references>
 <phase id="{task_list_id}" title="{phase.title}" number="{PHASE}" />
 <workspace id="{workspace_id}" />
@@ -214,56 +181,13 @@ IF use_distributed:
 <requirements_page id="{requirements_page_id}" />
 <roadmap_page id="{roadmap_page_id}" />
 </mosic_references>
-
-<research_config>
-<tdd_config>{config.workflow?.tdd ?? "auto"}</tdd_config>
-<mode>ecosystem</mode>
-</research_config>
-
-""" + assigned_reqs_xml + """
-
-<decomposition_context>
-<my_group>{group.number}</my_group>
-<total_groups>{requirement_groups.length}</total_groups>
-<group_title>{group.title}</group_title>
-</decomposition_context>
-
-<research_type>
-Distributed Phase Research — investigating HOW to implement the {group.title} requirements.
-Focus on your assigned requirements only. Produce a ## Proposed Interfaces section listing
-what your group Exposes (APIs, models, services) and what it Consumes from other groups.
-</research_type>
-
-<key_insight>
-Focus on your {group.requirement_ids.length} assigned requirements.
-Discover: architecture patterns, standard stack, common pitfalls, and don't-hand-roll items
-relevant to this group's domain.
-</key_insight>
-
-<objective>
-Research implementation approach for Phase {PHASE}: {phase.title}
-Group {group.number}: {group.title}
-Requirements: {group.requirement_ids.join(", ")}
-</objective>
-
-<downstream_consumer>
-Your research will be loaded by a group-specific planner agent.
-CRITICAL: Include a ## Proposed Interfaces section with Exposes and Consumes lists.
-The orchestrator collects these to determine dependency order between groups.
-</downstream_consumer>
-
-<output>
-Return research findings as structured markdown. The orchestrator will create the Mosic page.
-</output>
 """
+  researcher_agent_path = "~/.claude/agents/gsd-phase-researcher.md"
+  tdd_config = config.workflow?.tdd ?? "auto"
+  scope_label = "Phase " + PHASE
 
-    # Spawn ALL in one response (parallel execution)
-    Task(
-      prompt="First, read ~/.claude/agents/gsd-phase-researcher.md for your role.\n\n" + group_prompt,
-      subagent_type="general-purpose",
-      model="{researcher_model}",
-      description="Research Group " + group.number + ": " + group.title.substring(0, 20)
-    )
+  # Spawn parallel researchers per @distributed-research.md
+  # All Task() calls in ONE response for parallel execution
 
 ELSE:
   # --- SINGLE RESEARCHER (existing behavior, unchanged) ---
@@ -353,85 +277,20 @@ Return research findings as structured markdown. The orchestrator will create th
 
 ```
 IF use_distributed:
-  # --- DISTRIBUTED: Handle multiple researcher returns ---
-
-  group_research_pages = []
-  all_interfaces = []
-  aggregate_gaps_status = "CLEAR"
-
-  FOR each (group, researcher_output) in zip(requirement_groups, researcher_results):
-    # Create group-specific research page
-    research_page = mosic_create_entity_page("MTask List", task_list_id, {
-      workspace_id: workspace_id,
-      title: "Phase " + PHASE + " Research: " + group.title,
-      page_type: "Document",
-      icon: config.mosic.page_icons.research,
-      status: "Published",
-      content: convert_to_editorjs(researcher_output),
-      relation_type: "Related"
-    })
-
-    # Tag research page
-    mosic_batch_add_tags_to_document("M Page", research_page.name, [
-      config.mosic.tags.gsd_managed,
-      config.mosic.tags.research,
-      config.mosic.tags.phase_tags[phase_key]
-    ])
-
-    group.research_page_id = research_page.name
-    group_research_pages.push({ group: group, page_id: research_page.name })
-
-    # Store in config
-    config.mosic.pages["phase-" + PHASE + "-research-group-" + group.number] = research_page.name
-
-    # Extract ## Proposed Interfaces from researcher output
-    interfaces_section = extract_section(researcher_output, "## Proposed Interfaces")
-    IF interfaces_section:
-      exposes = extract_subsection(interfaces_section, "### Exposes")
-      consumes = extract_subsection(interfaces_section, "### Consumes")
-      all_interfaces.push({
-        group_number: group.number,
-        title: group.title,
-        exposes: exposes or "",
-        consumes: consumes or ""
-      })
-
-    # Track worst gap status across groups
-    group_gaps = extract_field(researcher_output, "Gaps Status:")
-    IF group_gaps == "BLOCKING": aggregate_gaps_status = "BLOCKING"
-    ELIF group_gaps == "NON-BLOCKING" AND aggregate_gaps_status != "BLOCKING":
-      aggregate_gaps_status = "NON-BLOCKING"
-
-  # Determine dependency order from interfaces (Consumes → Exposes matching)
-  # Groups whose Consumes is empty or "None" → foundational → go first
-  # Groups that consume from foundational → go second
-  # If circular: break tie by group number
-  dependency_order = topological_sort_by_interfaces(all_interfaces)
-
-  # Store decomposition in config for plan-phase to reuse
-  config.mosic.session.decomposition = {
-    phase: PHASE,
-    groups: requirement_groups.map(g => ({
-      number: g.number,
-      title: g.title,
-      prefix: g.prefix,
-      requirement_ids: g.requirement_ids,
-      research_page_id: g.research_page_id
-    })),
-    interface_contracts: all_interfaces,
-    dependency_order: dependency_order
-  }
-
-  # Set primary research page to first group's page (for backward compat)
-  config.mosic.pages["phase-" + PHASE + "-research"] = group_research_pages[0].page_id
+  # Follow @~/.claude/get-shit-done/workflows/distributed-research.md:
+  # 1. <handle_research_returns> — create Mosic pages, collect gaps
+  #    entity_type="MTask List", entity_id=task_list_id
+  #    page_title_prefix="Phase " + PHASE
+  #    config_page_key_prefix="phase-" + PHASE
+  #
+  # 2. <interface_collection> — extract Proposed Interfaces from each researcher output
+  #
+  # 3. <dependency_ordering> — topological sort or tier heuristic fallback
+  #
+  # 4. <store_decomposition_after_research> — store in config.mosic.session.decomposition
+  #
+  # Output: group_research_pages[], aggregate_gaps_status, dependency_order[]
   gaps_status = aggregate_gaps_status
-
-  Display:
-  """
-  Distributed research complete: {requirement_groups.length} groups
-  Dependency order: {dependency_order.map(g => g.title).join(" → ")}
-  Research pages synced to Mosic
-  """
 
 ELSE:
   # --- SINGLE RESEARCHER (existing behavior) ---

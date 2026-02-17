@@ -321,55 +321,17 @@ IF research_content:
 
 ### 4. Detect TDD Eligibility
 
-Read `<planning_config>` for tdd_config value:
-
-```
-tdd_config = planning_config.tdd_config  # "auto", true, or false
-
-IF tdd_config !== false AND tdd_config !== "false":
-  # Check context page for user TDD decision
-  tdd_user_decision = extract_decision(context_content, "Testing Approach")
-  IF task_context_content:
-    tdd_user_decision = extract_decision(task_context_content, "Testing Approach") or tdd_user_decision
-
-  # Keyword detection from loaded text
-  phase_text = (phase.title + " " + (phase.description or "") + " " + (requirements_content or "")).toLowerCase()
-  tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
-    "state machine", "workflow engine", "utility", "helper", "business logic",
-    "data model", "schema", "converter", "calculator", "formatter", "serializer",
-    "authentication", "authorization"]
-  is_tdd_eligible = tdd_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
-
-  # Resolve mode (priority: user decision > config setting > keyword heuristic)
-  IF tdd_user_decision == "tdd": tdd_mode = "prefer"
-  ELIF tdd_user_decision == "standard": tdd_mode = "disabled"
-  ELIF tdd_user_decision == "planner_decides": tdd_mode = "auto"
-  ELIF tdd_config == true OR tdd_config == "true": tdd_mode = "prefer"
-  ELIF tdd_config == "auto" AND is_tdd_eligible: tdd_mode = "auto"
-  ELSE: tdd_mode = "disabled"
-
-  # Load TDD reference if needed
-  IF tdd_mode != "disabled":
-    tdd_reference = Read("~/.claude/get-shit-done/references/tdd.md")
-ELSE:
-  tdd_mode = "disabled"
-```
+Follow `<tdd_detection>` **For Planners** in `@~/.claude/get-shit-done/workflows/context-extraction.md`.
+Use keyword list from `@~/.claude/get-shit-done/references/detection-constants.md`.
+Input: `tdd_config` from `<planning_config>`, context pages, scope text.
+Output: `tdd_mode` ("prefer" | "auto" | "disabled").
 
 ### 5. Detect Frontend Work
 
-```
-frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
-  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
-  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
-  "UX", "interface", "widget"]
-
-phase_text = phase_text or (phase.title + " " + (phase.description or "")).toLowerCase()
-is_frontend = frontend_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
-
-IF is_frontend:
-  frontend_design_ref = Read("~/.claude/get-shit-done/references/frontend-design.md")
-  frontend_design_context = extract_section(frontend_design_ref, "## For Planners")
-```
+Follow `<frontend_detection>` in `@~/.claude/get-shit-done/workflows/context-extraction.md`.
+Use keyword list from `@~/.claude/get-shit-done/references/detection-constants.md`.
+Scope text: `phase.title + phase.description + requirements_content`.
+If `is_frontend`: extract `## For Planners` section from frontend-design.md.
 
 ### 6. Load Prior Group Plans (Sequential Distributed Planning)
 

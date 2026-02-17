@@ -18,6 +18,9 @@ allowed-tools:
 
 <execution_context>
 @~/.claude/get-shit-done/references/ui-brand.md
+@~/.claude/get-shit-done/workflows/context-extraction.md
+@~/.claude/get-shit-done/workflows/decompose-requirements.md
+@~/.claude/get-shit-done/workflows/distributed-planning.md
 </execution_context>
 
 <objective>
@@ -325,96 +328,44 @@ IF --gaps:
 
 ## 7.5. Decompose Phase into Requirement Groups
 
+Follow `@~/.claude/get-shit-done/workflows/decompose-requirements.md`:
+
 ```
-# Read decomposition from config (created by research-phase if distributed research ran)
+# 1. Check for existing decomposition from research-phase
 decomposition = config.mosic.session?.decomposition
 use_distributed = false
 requirement_groups = []
 dependency_order = []
 
 IF decomposition AND decomposition.phase == PHASE:
-  # Reuse decomposition from research phase
+  # Reuse: follow <decompose> "reuse existing" path
   requirement_groups = decomposition.groups
   dependency_order = decomposition.dependency_order
   use_distributed = true
-  Display: "Reusing decomposition from research: " + requirement_groups.length + " groups"
 
-  # CRITICAL: Load phase_requirements even when reusing decomposition.
-  # Steps 9 (coverage verification) and 10 (checker prompts) need this variable.
-  phase_requirements = []
-  IF requirements_page_id:
-    requirements_content = mosic_get_page(requirements_page_id, {
-      content_format: "markdown"
-    }).content
+ELIF requirements_page_id AND NOT --gaps:
+  # Decompose fresh: follow <decompose> with these inputs:
+  #   requirements_page_id, current phase (PHASE / phase.title), config
+  # Extract phase_requirements using <requirements_extraction> from @context-extraction.md
+  # Then group, merge/split, order using <decompose> + <tier_based_ordering>
+  result = decompose(requirements_page_id, PHASE, phase.title, config)
+  use_distributed = result.use_distributed
+  requirement_groups = result.requirement_groups
+  dependency_order = result.dependency_order
 
-    traceability_section = extract_section(requirements_content, "## Traceability")
-    IF NOT traceability_section:
-      traceability_section = extract_section(requirements_content, "## Requirements Traceability")
-    IF traceability_section:
-      FOR each row in parse_markdown_table(traceability_section):
-        IF row.phase matches current phase (PHASE or phase.title):
-          phase_requirements.append({ id: row.req_id, description: row.description })
-
-ELIF requirements_page_id:
-  # Decompose fresh (research was single-agent or skipped)
-  distributed_config = config.workflow?.distributed ?? {}
-  threshold = distributed_config.threshold ?? 6
-
-  requirements_content = mosic_get_page(requirements_page_id, {
-    content_format: "markdown"
-  }).content
-
-  # Extract phase requirements
-  phase_requirements = []
-  traceability_section = extract_section(requirements_content, "## Traceability")
-  IF NOT traceability_section:
-    traceability_section = extract_section(requirements_content, "## Requirements Traceability")
-  IF traceability_section:
-    FOR each row in parse_markdown_table(traceability_section):
-      IF row.phase matches current phase (PHASE or phase.title):
-        phase_requirements.append({ id: row.req_id, description: row.description })
-
-  use_distributed = (distributed_config.enabled !== false)
-    AND phase_requirements.length >= threshold
-    AND NOT --gaps
-
-  IF use_distributed:
-    # Group by category prefix: AUTH-*, UI-*, CONT-*, etc.
-    groups_by_prefix = {}
-    FOR each req in phase_requirements:
-      prefix = req.id.match(/^([A-Z]+)/)?.[1] or "MISC"
-      groups_by_prefix[prefix] = groups_by_prefix[prefix] or []
-      groups_by_prefix[prefix].push(req)
-
-    min_per_group = distributed_config.min_requirements_per_group ?? 2
-    max_per_group = distributed_config.max_requirements_per_group ?? 5
-    max_groups = distributed_config.max_groups ?? 8
-
-    requirement_groups = merge_and_split_groups(groups_by_prefix, {
-      min_per_group, max_per_group, max_groups
-    })
-
-    # Determine dependency order heuristically:
-    # - Groups with categories matching: API, BACKEND, DATA, AUTH, DB → tier 1 (foundational)
-    # - Groups with categories matching: UI, FRONTEND, PAGE, COMPONENT → tier 2 (depends on tier 1)
-    # - Groups with categories matching: INTEG, E2E, DEPLOY, TEST → tier 3 (depends on all)
-    # - Unknown categories → tier 2 (safe default)
-    # Within same tier: order by group number (deterministic)
-    # If interface contracts available from research: use Consumes/Exposes for topological sort
-    dependency_order = sort_by_tier(requirement_groups)
-
-    Display:
-    """
-    Fresh decomposition: {phase_requirements.length} requirements in {requirement_groups.length} groups
-    Dependency order: {dependency_order.map(g => g.title).join(" → ")}
-    """
+# CRITICAL: Always extract phase_requirements for Steps 9-10 (coverage + checker)
+phase_requirements = []
+IF requirements_page_id:
+  # Use <requirements_extraction> from @context-extraction.md
+  phase_requirements = extract_phase_requirements(requirements_page_id, PHASE, phase.title)
 ```
 
 ## 8. Spawn gsd-planner Agent(s)
 
 ```
 IF use_distributed:
-  # --- DISTRIBUTED: Sequential planner spawning in dependency order ---
+  # --- DISTRIBUTED: Follow @~/.claude/get-shit-done/workflows/distributed-planning.md ---
+  # Follow <sequential_planner_orchestration> with these scope-specific inputs:
 
   Display:
   """
@@ -426,97 +377,29 @@ IF use_distributed:
   {dependency_order.map(g => g.number + ". " + g.title).join("\n")}
   """
 
-  # Accumulate plan page IDs from completed planners
-  all_prior_plan_pages = []  # [{id, group_title, plan_title}]
-  all_plan_results = []
+  # Command provides scope-specific parameters to workflow:
+  #   build_mosic_refs(group) returns:
+  #     <mosic_references>
+  #     <phase id="{task_list_id}" title="{phase.title}" number="{PHASE}" />
+  #     <workspace id="{workspace_id}" />
+  #     <project id="{project_id}" />
+  #     <research_page id="{group_research_page_id}" />   ← group-specific if available
+  #     <context_page id="{context_page_id}" />
+  #     <requirements_page id="{requirements_page_id}" />
+  #     <roadmap_page id="{roadmap_page_id}" />
+  #     + verification_page if --gaps
+  #     </mosic_references>
+  #
+  #   planner_agent_path = "~/.claude/agents/gsd-planner.md"
+  #   planner_model = from config profile table
+  #   planning_mode = --gaps ? "gap_closure" : "standard"
+  #   tdd_config = config.workflow?.tdd ?? "auto"
+  #   scope_label = "Phase " + PHASE
+  #   decomposition = config.mosic.session.decomposition (for group research page IDs)
 
-  # SEQUENTIAL: One planner at a time, in dependency order
-  FOR each group in dependency_order:
-    Display:
-    """
-    Planning Group {group.number}/{requirement_groups.length}: {group.title}
-    Prior plans available: {all_prior_plan_pages.length}
-    """
-
-    # Build prior_plans XML from already-completed groups
-    prior_plans_xml = ""
-    IF all_prior_plan_pages.length > 0:
-      prior_plans_xml = "<prior_plans>\n"
-      FOR each pp in all_prior_plan_pages:
-        prior_plans_xml += '<plan_page id="' + pp.id + '" group="' + pp.group_title + '" title="' + pp.plan_title + '" />\n'
-      prior_plans_xml += "</prior_plans>"
-
-    # Use group-specific research page if available
-    group_research_page_id = decomposition?.groups?.find(
-      g => g.number == group.number
-    )?.research_page_id or research_page_id
-
-    planner_prompt = """
-<mosic_references>
-<phase id="{task_list_id}" title="{phase.title}" number="{PHASE}" />
-<workspace id="{workspace_id}" />
-<project id="{project_id}" />
-<research_page id="{group_research_page_id}" />
-<context_page id="{context_page_id}" />
-<requirements_page id="{requirements_page_id}" />
-<roadmap_page id="{roadmap_page_id}" />
-""" + (verification_page_id ? '<verification_page id="' + verification_page_id + '" />' : "") + """
-</mosic_references>
-
-<planning_config>
-<mode>""" + (--gaps ? "gap_closure" : "standard") + """</mode>
-<tdd_config>""" + (config.workflow?.tdd ?? "auto") + """</tdd_config>
-</planning_config>
-
-<assigned_requirements>
-""" + group.requirement_ids.map(id => '<req id="' + id + '" />').join("\n") + """
-</assigned_requirements>
-
-<decomposition_context>
-<my_group>{group.number}</my_group>
-<total_groups>{requirement_groups.length}</total_groups>
-</decomposition_context>
-
-""" + prior_plans_xml + """
-
-<downstream_consumer>
-Output consumed by /gsd:execute-phase
-Plans must include:
-- MANY small tasks with subtasks (3-8 subtasks per task)
-- Dependencies within group AND cross-group
-- Wave assignments for parallel execution
-- Verification criteria per subtask
-- must_haves for goal-backward verification
-IMPORTANT: Return plan page IDs and task IDs in ## PLANNING COMPLETE output.
-</downstream_consumer>
-"""
-
-    # Spawn ONE planner, WAIT for it to complete
-    result = Task(
-      prompt="First, read ~/.claude/agents/gsd-planner.md for your role.\n\n" + planner_prompt,
-      subagent_type="general-purpose",
-      model="{planner_model}",
-      description="Plan Group " + group.number + ": " + group.title.substring(0, 25)
-    )
-
-    # Collect plan page IDs from this planner's output
-    IF result contains "## PLANNING COMPLETE":
-      group_plan_pages = parse_plan_pages_table(result)
-      # group_plan_pages = [{task_id, page_id, plan_title, subtask_count}]
-
-      FOR each pp in group_plan_pages:
-        all_prior_plan_pages.push({
-          id: pp.page_id,
-          group_title: group.title,
-          plan_title: pp.plan_title
-        })
-
-      all_plan_results.push({ group, result, plan_pages: group_plan_pages })
-    ELSE:
-      Display: "Group {group.number} planning may be incomplete"
-      all_plan_results.push({ group, result, plan_pages: [] })
-
-  # After all groups complete: all_prior_plan_pages has ALL plan page IDs
+  # Workflow spawns planners sequentially in dependency_order,
+  # accumulating all_prior_plan_pages and all_plan_results.
+  # Output: all_prior_plan_pages[], all_plan_results[]
 
 ELSE:
   # --- SINGLE PLANNER (existing behavior, unchanged) ---
@@ -585,70 +468,21 @@ The orchestrator will create MTasks and M Pages in Mosic.
 
 ```
 IF use_distributed:
-  # --- DISTRIBUTED: Planners already created MTasks + M Pages + subtasks in Mosic ---
-  # (via <plan_creation_mosic> + <task_mode_subtask_creation>)
-  # Orchestrator needs to:
-  # 1. Verify coverage across all groups
-  # 2. Store all entity IDs in config
-  # 3. Create cross-group dependencies
+  # --- DISTRIBUTED: Follow @~/.claude/get-shit-done/workflows/distributed-planning.md ---
 
-  coverage_tracker = {}
-  plan_counter = 0
+  # 1. Follow <coverage_verification> with:
+  #    all_plan_results, phase_requirements, PHASE
+  #    Stores entity IDs in config, checks coverage completeness
 
-  FOR each gr in all_plan_results:
-    FOR each plan_page in gr.plan_pages:
-      plan_counter += 1
-      plan_number = printf("%02d", plan_counter)
+  # 2. Follow <cross_group_relations> with:
+  #    all_plan_results, workspace_id
+  #    Creates M Relations for cross-group dependencies
 
-      # Store in config (renumber sequentially across groups)
-      config.mosic.tasks["phase-" + PHASE + "-plan-" + plan_number] = plan_page.task_id
-      config.mosic.pages["phase-" + PHASE + "-plan-" + plan_number] = plan_page.page_id
+  # Config storage pattern:
+  #   config.mosic.tasks["phase-" + PHASE + "-plan-" + plan_number] = task_id
+  #   config.mosic.pages["phase-" + PHASE + "-plan-" + plan_number] = page_id
 
-      # Load plan page to extract coverage table
-      content = mosic_get_page(plan_page.page_id, { content_format: "markdown" }).content
-      covered_reqs = extract_coverage_table(content)
-      FOR each req_id in covered_reqs:
-        coverage_tracker[req_id] = plan_page.plan_title
-
-  # Verify complete coverage (if requirements were extracted)
-  IF phase_requirements AND phase_requirements.length > 0:
-    missing = phase_requirements.filter(r => !coverage_tracker[r.id])
-    IF missing.length > 0:
-      Display: "Missing coverage for: " + missing.map(r => r.id).join(", ")
-
-  # Create cross-group M Relations from planner output
-  # Each planner returns a "### Cross-Group Dependencies" table:
-  # | My Plan | Depends On | Reason |
-  FOR each gr in all_plan_results:
-    cross_deps = extract_section(gr.result, "### Cross-Group Dependencies")
-    IF cross_deps:
-      FOR each row in parse_markdown_table(cross_deps):
-        # row.depends_on format: "Group N, Plan MM" → resolve to task ID
-        dep_group_num = extract_group_number(row.depends_on)
-        dep_plan_title = extract_plan_title(row.depends_on)
-        dep_result = all_plan_results.find(r => r.group.number == dep_group_num)
-        IF dep_result:
-          dep_plan = dep_result.plan_pages.find(pp => pp.plan_title contains dep_plan_title)
-          IF dep_plan:
-            # Find source task ID from current group's plan pages
-            source_plan = gr.plan_pages.find(pp => pp.plan_title contains row.my_plan)
-            IF source_plan:
-              mosic_create_document("M Relation", {
-                workspace: workspace_id,
-                source_doctype: "MTask",
-                source_name: source_plan.task_id,
-                target_doctype: "MTask",
-                target_name: dep_plan.task_id,
-                relation_type: "Depends"
-              })
-
-  # Build created_plan_tasks with sequential numbering for verification step
-  created_plan_tasks = []
-  counter = 0
-  FOR each gr in all_plan_results:
-    FOR each pp in gr.plan_pages:
-      counter += 1
-      created_plan_tasks.push({ name: pp.task_id, number: printf("%02d", counter) })
+  # Output: created_plan_tasks[] (sequential numbering for verification step)
 
 ELSE:
   # --- SINGLE PLANNER (existing behavior, unchanged) ---
@@ -783,132 +617,21 @@ IF workflow_plan_check == false OR --skip-verify: Skip to step 11
 ```
 IF use_distributed AND NOT --skip-verify:
 
-  Display:
-  """
-  -------------------------------------------
-   GSD > VERIFYING PLANS (DISTRIBUTED)
-  -------------------------------------------
-  """
-
-  # --- PHASE 1: Group-scoped verification (PARALLEL) ---
-
-  # Load requirements for verification
-  requirements_content = ""
-  IF config.mosic.pages.requirements:
-    requirements_content = mosic_get_page(config.mosic.pages.requirements, {
-      content_format: "markdown"
-    }).content
-
-  checker_prompts = []
-  FOR each group in requirement_groups:
-    # Find this group's plan pages
-    group_plan_pages = all_plan_results.find(gr => gr.group.number == group.number)?.plan_pages or []
-
-    # Load only this group's plan content
-    group_plans_content = ""
-    FOR each pp in group_plan_pages:
-      plan_content = mosic_get_page(pp.page_id, { content_format: "markdown" }).content
-      group_plans_content += "\n\n---\n\n" + plan_content
-
-    # Build group-scoped requirements XML
-    group_reqs_xml = "<phase_requirements>\n"
-    FOR each req_id in group.requirement_ids:
-      req_desc = phase_requirements.find(r => r.id == req_id)?.description or ""
-      group_reqs_xml += '<requirement id="' + req_id + '">' + req_desc + '</requirement>\n'
-    group_reqs_xml += "</phase_requirements>"
-
-    checker_prompt = """
-<verification_context>
-
-**Phase:** {PHASE}
-**Phase Goal:** {phase.description}
-**Verification Scope:** Group {group.number}: {group.title}
-
-""" + group_reqs_xml + """
-
-<assigned_requirements>
-""" + group.requirement_ids.map(id => '<req id="' + id + '" />').join("\n") + """
-</assigned_requirements>
-
-**Plans to verify:**
-{group_plans_content}
-
-**Requirements (full page, if exists):**
-{requirements_content}
-
-</verification_context>
-
-<expected_output>
-Return one of:
-- ## VERIFICATION PASSED - all checks pass for this group
-- ## ISSUES FOUND - structured issue list for this group
-</expected_output>
-"""
-    checker_prompts.push({ prompt: checker_prompt, group })
-
-  # Spawn ALL group checkers in ONE response (parallel)
-  FOR each cp in checker_prompts:
-    Task(
-      prompt="First, read ~/.claude/agents/gsd-plan-checker.md for your role.\n\n" + cp.prompt,
-      subagent_type="general-purpose",
-      model="{checker_model}",
-      description="Verify Group " + cp.group.number
-    )
-
-  # --- PHASE 2: Cross-group verification (single, lightweight) ---
-  all_group_checks_passed = all checker results contain "## VERIFICATION PASSED"
-
-  IF all_group_checks_passed:
-    # Build cross-group coverage matrix
-    all_coverage_tables = ""
-    FOR each gr in all_plan_results:
-      FOR each pp in gr.plan_pages:
-        content = mosic_get_page(pp.page_id, { content_format: "markdown" }).content
-        coverage = extract_section(content, "## Requirements Coverage")
-        all_coverage_tables += "\n### " + pp.plan_title + "\n" + coverage
-
-    cross_checker_prompt = """
-<verification_context>
-
-**Phase:** {PHASE}
-**Phase Goal:** {phase.description}
-
-<verification_mode>cross-group</verification_mode>
-
-**All Coverage Tables:**
-{all_coverage_tables}
-
-**Decomposition:**
-{requirement_groups.map(g => "Group " + g.number + ": " + g.title + " (" + g.requirement_ids.join(", ") + ")").join("\n")}
-
-**Total phase requirements:** {phase_requirements.length}
-
-</verification_context>
-
-<expected_output>
-Verify:
-1. Every requirement is covered somewhere (global coverage matrix)
-2. No conflicting double-coverage
-3. Cross-group dependency graph is acyclic
-Return ## VERIFICATION PASSED or ## ISSUES FOUND
-</expected_output>
-"""
-
-    Task(
-      prompt="First, read ~/.claude/agents/gsd-plan-checker.md for your role.\n\n" + cross_checker_prompt,
-      subagent_type="general-purpose",
-      model="{checker_model}",
-      description="Cross-Group Verification"
-    )
-
-  ELSE:
-    # Some group checks failed — display issues, enter revision loop
-    Display: "Group verification found issues. Review required."
-    # Handle same as single-planner issues below
-
-  **Handle checker returns:**
-  IF all checks passed (group + cross-group): Proceed to step 11
-  IF issues found: Display issues, enter revision loop (iteration_count < 3)
+  # --- DISTRIBUTED VERIFICATION ---
+  # Follow <distributed_verification> in @~/.claude/get-shit-done/workflows/distributed-planning.md
+  #
+  # Command provides scope-specific inputs:
+  #   requirement_groups, all_plan_results, phase_requirements
+  #   phase_description = phase.description
+  #   PHASE, checker_model, requirements_page_id
+  #   checker_agent_path = "~/.claude/agents/gsd-plan-checker.md"
+  #
+  # Workflow handles:
+  #   Phase 1: Parallel group-scoped verification (one checker per group)
+  #   Phase 2: Cross-group verification (coverage matrix + dependency acyclicity)
+  #   Issue handling: display issues, enter revision loop (iteration_count < 3)
+  #
+  # Output: all checks passed → proceed to step 11, or issues → revision loop
 
 ELSE:
   # --- SINGLE PLANNER VERIFICATION (existing behavior, unchanged) ---

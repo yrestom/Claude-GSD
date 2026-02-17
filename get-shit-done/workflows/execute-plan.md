@@ -282,142 +282,34 @@ This IS the execution instructions. Follow it exactly.
 
 Skip this extraction if your prompt already contains a `<user_decisions>` XML block — the orchestrator has pre-extracted decisions for you.
 
-```javascript
-if (!prompt.includes("<user_decisions>")) {
-  locked_decisions = ""
-  deferred_ideas = ""
-  discretion_areas = ""
-
-  // Task-level context first (highest priority)
-  if (task_context_content) {
-    locked_decisions = extract_section(task_context_content, "## Decisions")
-    deferred_ideas = extract_section(task_context_content, "## Deferred Ideas")
-    discretion_areas = extract_section(task_context_content, "## Claude's Discretion")
-  }
-
-  // Phase-level context (merge)
-  if (phase_context_content) {
-    phase_locked = extract_section(phase_context_content, "## Decisions")
-      || extract_section(phase_context_content, "## Implementation Decisions")
-    if (phase_locked) {
-      locked_decisions = locked_decisions
-        ? locked_decisions + "\n\n**Inherited from phase:**\n" + phase_locked
-        : phase_locked
-    }
-    if (!deferred_ideas) deferred_ideas = extract_section(phase_context_content, "## Deferred Ideas")
-    if (!discretion_areas) discretion_areas = extract_section(phase_context_content, "## Claude's Discretion")
-  }
-
-  // Research pages (fallback)
-  if (phase_research_content && !locked_decisions) {
-    user_constraints = extract_section(phase_research_content, "## User Constraints")
-    if (user_constraints) {
-      locked_decisions = extract_subsection(user_constraints, "### Locked Decisions")
-      if (!deferred_ideas) deferred_ideas = extract_subsection(user_constraints, "### Deferred Ideas")
-      if (!discretion_areas) discretion_areas = extract_subsection(user_constraints, "### Claude's Discretion")
-    }
-  }
-
-  if (task_research_content && !locked_decisions) {
-    task_constraints = extract_section(task_research_content, "## User Constraints")
-    if (task_constraints) {
-      locked_decisions = extract_subsection(task_constraints, "### Locked Decisions")
-      if (!deferred_ideas) deferred_ideas = extract_subsection(task_constraints, "### Deferred Ideas")
-      if (!discretion_areas) discretion_areas = extract_subsection(task_constraints, "### Claude's Discretion")
-    }
-  }
-
-  // Store as internal state for context_fidelity enforcement
-  self_extracted_decisions = { locked_decisions, deferred_ideas, discretion_areas }
-}
-```
+Otherwise, follow `<user_decision_extraction>` in `@~/.claude/get-shit-done/workflows/context-extraction.md`.
+Input: `task_context_content`, `phase_context_content`, `phase_research_content`, `task_research_content` (all loaded in `load_mosic_context` step).
+Output: `locked_decisions`, `deferred_ideas`, `discretion_areas`.
 
 **Self-extract requirements (when NOT already provided by orchestrator):**
 
 Skip if your prompt already contains a `<phase_requirements>` XML block.
 
-```javascript
-if (!prompt.includes("<phase_requirements>")) {
-  phase_requirements = []
-
-  // From requirements page (loaded in load_mosic_context)
-  if (requirements_content) {
-    traceability = extract_section(requirements_content, "## Traceability")
-      || extract_section(requirements_content, "## Requirements Traceability")
-    if (traceability) {
-      for (row of parse_markdown_table(traceability)) {
-        if (row.phase matches current phase) {
-          phase_requirements.push({ id: row.requirement_id, description: row.description })
-        }
-      }
-    }
-  }
-
-  // From plan page coverage table
-  if (plan_content) {
-    coverage = extract_section(plan_content, "## Requirements Coverage")
-    if (coverage) {
-      for (row of parse_markdown_table(coverage)) {
-        phase_requirements.push({ id: row.req_id, description: row.description })
-      }
-    }
-  }
-}
-```
+Otherwise, follow `<requirements_extraction>` in `@~/.claude/get-shit-done/workflows/context-extraction.md`.
+Input: `requirements_content`, `plan_content`, current phase.
+Output: `phase_requirements[]`.
 
 **Self-detect frontend work (when NOT already provided by orchestrator):**
 
 Skip if your prompt already contains a `<frontend_design_context>` XML block.
 
-```javascript
-if (!prompt.includes("<frontend_design_context>")) {
-  frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
-    "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
-    "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
-    "UX", "interface", "widget"]
-
-  task_text = (task.title + " " + (task.description || "") + " " + (plan_content || "")).toLowerCase()
-  is_frontend = frontend_keywords.some(kw => task_text.includes(kw.toLowerCase()))
-
-  if (is_frontend) {
-    frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
-    frontend_design_context = extract_section(frontend_design_content, "## For Executors")
-  }
-}
-```
+Otherwise, follow `<frontend_detection>` in `@~/.claude/get-shit-done/workflows/context-extraction.md`.
+Use keyword list from `@~/.claude/get-shit-done/references/detection-constants.md`.
+Scope text: `task.title + task.description + plan_content`.
+If `is_frontend`: extract `## For Executors` section from frontend-design.md.
 
 **Self-detect TDD tasks (when NOT already provided by orchestrator):**
 
 Skip if your prompt already contains a `<tdd_execution_context>` XML block.
 
-```javascript
-if (!prompt.includes("<tdd_execution_context>")) {
-  has_tdd = false
-
-  // Check 1: Plan content for tdd="true" (phase-level plans)
-  if (plan_content && plan_content.includes('tdd="true"')) has_tdd = true
-
-  // Check 2: Plan/subtask content for **Type:** tdd (task-level subtasks)
-  if (plan_content && plan_content.includes('**Type:** tdd')) has_tdd = true
-
-  // Check 3: Task tags include "tdd" (set by planner)
-  if (task.tags && task.tags.includes("tdd")) has_tdd = true
-
-  // Check 4: Config fallback — only explicit true forces TDD without markers
-  // ("auto" requires planner classification, so no fallback for auto)
-  if (!has_tdd) {
-    tdd_config = Read("config.json").workflow?.tdd
-    if (tdd_config === true || tdd_config === "true") has_tdd = true
-  }
-
-  if (has_tdd) {
-    tdd_reference = Read("~/.claude/get-shit-done/references/tdd.md")
-    tdd_execution_context = extract_sections(tdd_reference, [
-      "<execution_flow>", "<test_quality>", "<commit_patterns>", "<mosic_test_tracking>"
-    ])
-  }
-}
-```
+Otherwise, follow `<tdd_detection>` **For Executors** in `@~/.claude/get-shit-done/workflows/context-extraction.md`.
+Input: `plan_content`, `task.tags`, `config.workflow.tdd`.
+Output: `has_tdd` boolean + `tdd_execution_context` string.
 </step>
 
 <step name="detect_execution_mode">

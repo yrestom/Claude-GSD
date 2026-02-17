@@ -31,6 +31,7 @@ Verify that a completed task achieved its goal through user acceptance testing (
 
 <execution_context>
 @~/.claude/get-shit-done/references/ui-brand.md
+@~/.claude/get-shit-done/workflows/code-review.md
 @~/.claude/get-shit-done/templates/UAT.md
 @~/.claude/get-shit-done/references/verification-patterns.md
 </execution_context>
@@ -290,183 +291,33 @@ Verification Criteria ({verification_criteria.length}):
 ).join("\n")}
 ```
 
-## 6. Automated Code Review
+## 6. Automated Code Review (Shared Workflow)
 
 Before user verification, perform automated analysis of actual code changes.
 
-### 6a. Identify and Gather Changes
+Follow `@~/.claude/get-shit-done/workflows/code-review.md` with these scope parameters:
 
-```
-# Find commits related to this task
-task_commits = run_bash("git log --all --oneline --grep='" + TASK_IDENTIFIER + "'")
-
-# Check summary page for commit references if none found by identifier
-IF task_commits is empty AND summary_content:
-  commit_refs = extract_commit_hashes(summary_content)
-  IF commit_refs.length > 0:
-    task_commits = commit_refs
-
-# Gather the diff
-IF task_commits found:
-  changed_files = run_bash("git diff --name-only " + oldest_commit + "^.." + newest_commit)
-  full_diff = run_bash("git diff " + oldest_commit + "^.." + newest_commit)
-ELSE:
-  # Fallback: recent changes on current branch
-  changed_files = run_bash("git diff --name-only HEAD~5")
-  full_diff = run_bash("git diff HEAD~5")
-  Display: "No task-specific commits found. Reviewing recent changes."
-
-# Read full content of each changed file for surrounding context
-FOR each file in changed_files:
-  Read(file)
-
-Display:
-"""
-Files changed: {changed_files.length}
-Commits found: {task_commits.length}
-"""
+```xml
+<review_scope>
+  <entity_type>task</entity_type>
+  <entity_identifier>{TASK_IDENTIFIER}</entity_identifier>
+  <completed_tasks>[{ name: TASK_ID, identifier: TASK_IDENTIFIER, title: TASK_TITLE, done: task.done }]</completed_tasks>
+  <verification_criteria>{verification_criteria from Step 5}</verification_criteria>
+  <requirements_content>{plan_content if available}</requirements_content>
+</review_scope>
 ```
 
-### 6b. Requirements Traceability
+The shared workflow handles:
+1. **Commit Identification** — find task commits, gather diffs, read changed files
+2. **Requirements Traceability** — map each criterion to code changes, TDD compliance
+3. **Code Quality Analysis** — correctness, security, over-engineering, stubs
+4. **Present Review** — verdict, traceability table, findings
 
-Map each verification criterion from Step 5 to actual code changes.
+Output variables: `traceability[]`, `auto_findings[]`, `changed_files[]`, `all_commits[]`, `verdict`
 
-```
-traceability = []
-
-FOR each criterion in verification_criteria:
-  # Search changed files and diff for evidence of implementation
-  evidence = []
-  FOR each file in changed_files:
-    matches = search_diff_and_file(criterion.criterion, file, full_diff)
-    IF matches:
-      evidence.push(file + ":" + match_lines)
-
-  status = "NOT MET"
-  IF evidence.length > 0:
-    status = "MET"
-  ELIF criterion.type == "subtask_completion" AND criterion.done:
-    status = "MET (subtask marked done)"
-
-  traceability.push({
-    criterion: criterion,
-    status: status,
-    evidence: evidence
-  })
-
-# TDD-specific traceability
-IF is_tdd_task:
-  # Verify commit ordering: test() commits should precede feat() commits
-  task_commits_list = run_bash("git log --all --oneline --format='%s' --grep='" + TASK_IDENTIFIER + "'")
-
-  test_commits = task_commits_list.filter(c => c.startsWith("test("))
-  feat_commits = task_commits_list.filter(c => c.startsWith("feat("))
-  refactor_commits = task_commits_list.filter(c => c.startsWith("refactor("))
-
-  traceability.push({
-    criterion: { criterion: "TDD: test() commits exist", type: "tdd_compliance" },
-    status: test_commits.length > 0 ? "MET" : "NOT MET",
-    evidence: test_commits.length > 0 ? test_commits.join(", ") : "No test() commits found"
-  })
-
-  IF not test_commits.length > 0:
-    Display: "WARNING: TDD task has no test() commits. TDD may not have been followed."
-
-# Flag files changed but not traced to any criterion
-unrequested = changed_files.filter(f =>
-  !traceability.any(t => t.evidence.any(e => e.startsWith(f)))
-)
-```
-
-### 6c. Code Quality Analysis
-
-For each changed file, analyze the diff and full content for issues.
+### 6e. Augment Verification Criteria with Review Findings
 
 ```
-auto_findings = []
-
-FOR each file in changed_files:
-  # CORRECTNESS
-  # - Logic errors, off-by-one, null/undefined handling
-  # - Error paths handled appropriately
-  # - Return types and function signatures correct
-  # - Database operations atomic where needed
-  # - External boundaries validated (user input, API responses)
-
-  # SECURITY
-  # - No SQL injection (parameterized queries)
-  # - No XSS (escaped user content in templates)
-  # - No command injection (sanitized shell input)
-  # - Permission checks present on endpoints
-  # - No secrets/credentials in code or logs
-
-  # OVER-ENGINEERING
-  # - Abstractions used only once
-  # - Config/options for hypothetical future needs (YAGNI)
-  # - Helper functions wrapping 3 or fewer lines
-  # - Extra error handling for impossible scenarios
-
-  # STUB DETECTION (per verification-patterns.md)
-  # - TODO/FIXME/PLACEHOLDER in new code
-  # - Empty function bodies (return null, pass, ...)
-  # - Console.log-only handlers
-  # - Hardcoded values where dynamic expected
-
-  # Each finding: { severity: "Critical"|"Warning"|"Note", file, line, issue, fix }
-```
-
-### 6d. Present Review and Augment Criteria
-
-```
-met = traceability.filter(t => t.status.startsWith("MET")).length
-total = traceability.length
-critical = auto_findings.filter(f => f.severity == "Critical").length
-warnings = auto_findings.filter(f => f.severity == "Warning").length
-
-verdict = "PASS"
-IF critical > 0: verdict = "CRITICAL ISSUES"
-ELIF warnings > 0: verdict = "NEEDS ATTENTION"
-ELIF met < total: verdict = "GAPS FOUND"
-
-Display:
-"""
--------------------------------------------
- CODE REVIEW: {TASK_IDENTIFIER}
--------------------------------------------
-
-Verdict: {verdict}
-
-### Requirements Traceability
-
-| # | Criterion | Status | Evidence |
-|---|-----------|--------|----------|
-{traceability.map((t, i) =>
-  "| " + (i+1) + " | " + t.criterion.criterion.substring(0,60) + " | " +
-  t.status + " | " + (t.evidence.join(", ") or "-") + " |"
-).join("\n")}
-
-Score: {met}/{total} requirements traced to code
-
-{IF auto_findings.length > 0:}
-### Findings
-
-{auto_findings.map(f =>
-  "**" + f.severity + "** `" + f.file + ":" + f.line + "`\n" +
-  f.issue + "\n*Suggested fix:* " + f.fix
-).join("\n\n")}
-{ENDIF}
-
-{IF unrequested.length > 0:}
-### Scope Check
-
-Files changed but not traced to any requirement:
-{unrequested.map(f => "- " + f).join("\n")}
-{ENDIF}
-
----
-Proceeding to manual verification...
-"""
-
 # Append Critical/Warning findings as additional verification criteria
 FOR each finding in auto_findings.filter(f => f.severity in ["Critical", "Warning"]):
   verification_criteria.push({

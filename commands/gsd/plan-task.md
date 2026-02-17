@@ -33,6 +33,9 @@ Create an execution plan for a specific task, decomposing it into subtasks with 
 <execution_context>
 @~/.claude/get-shit-done/references/ui-brand.md
 @~/.claude/get-shit-done/references/content-formatting.md
+@~/.claude/get-shit-done/workflows/context-extraction.md
+@~/.claude/get-shit-done/workflows/decompose-requirements.md
+@~/.claude/get-shit-done/workflows/distributed-planning.md
 </execution_context>
 
 <context>
@@ -210,6 +213,58 @@ Context discovered:
 - Task research: {task_research_page_id ? "Yes" : "No"}
 ```
 
+## 4.5. Decompose Task for Distributed Planning
+
+Follow `@~/.claude/get-shit-done/workflows/decompose-requirements.md`:
+
+```
+use_distributed = false
+requirement_groups = []
+dependency_order = []
+task_requirements = []
+
+# Check for decomposition from research-task (stored in config)
+task_decomposition = config.mosic.session?.task_decomposition
+IF task_decomposition AND task_decomposition.task == TASK_IDENTIFIER:
+  # Reuse decomposition from research-task
+  requirement_groups = task_decomposition.groups
+  dependency_order = task_decomposition.dependency_order
+  use_distributed = true
+  Display: "Reusing decomposition from research: " + requirement_groups.length + " groups"
+
+  # Extract task_requirements for coverage verification (Step 7)
+  task_requirements = []
+  FOR each group in requirement_groups:
+    FOR each req_id in group.requirement_ids:
+      task_requirements.append({ id: req_id })
+
+ELIF NOT quick_mode:
+  # Check if task has enough requirements for distributed planning
+  # Extract from plan page coverage table (same as research-task Step 3.5)
+  plan_page_for_reqs = task_pages.find(p => p.page_type == "Spec")
+  IF plan_page_for_reqs:
+    plan_content = mosic_get_page(plan_page_for_reqs.name, { content_format: "markdown" }).content
+    coverage_section = extract_section(plan_content, "## Requirements Coverage")
+    IF coverage_section:
+      FOR each row in parse_markdown_table(coverage_section):
+        task_requirements.append({ id: row.req_id, description: row.description })
+
+  distributed_config = config.workflow?.distributed ?? {}
+  threshold = distributed_config.threshold ?? 6
+
+  IF task_requirements.length >= threshold AND (distributed_config.enabled !== false):
+    result = decompose(task_requirements, config)
+    use_distributed = result.use_distributed
+    requirement_groups = result.requirement_groups
+    dependency_order = result.dependency_order
+
+    IF use_distributed:
+      Display:
+      """
+      Distributed planning: {task_requirements.length} requirements in {requirement_groups.length} groups
+      """
+```
+
 ## 5. Create or Update Plan Page
 
 ```
@@ -252,23 +307,68 @@ ELSE:
 
 *Step 5.5 removed — planner self-extracts requirements from Mosic pages.*
 
-## 6. Spawn gsd-planner Agent
-
-Display:
-```
--------------------------------------------
- GSD > SPAWNING PLANNER {quick_mode ? "(QUICK)" : ""}
--------------------------------------------
-
-Analyzing task and creating subtasks...
-```
-
-Build lean prompt with page IDs only — planner self-loads all content from Mosic:
+## 6. Spawn gsd-planner Agent(s)
 
 ```
-planning_mode = quick_mode ? "task-quick" : "task-planning"
+IF use_distributed:
+  # --- DISTRIBUTED: Follow @~/.claude/get-shit-done/workflows/distributed-planning.md ---
+  # Follow <sequential_planner_orchestration> with these scope-specific inputs:
 
-planner_prompt = """
+  Display:
+  """
+  -------------------------------------------
+   GSD > PLANNING TASK (DISTRIBUTED)
+  -------------------------------------------
+
+  {TASK_IDENTIFIER}: {TASK_TITLE}
+  {requirement_groups.length} groups, executing in dependency order:
+  {dependency_order.map(g => g.number + ". " + g.title).join("\n")}
+  """
+
+  # Command provides scope-specific parameters to workflow:
+  #   build_mosic_refs(group) returns:
+  #     <mosic_references>
+  #     <task id="{TASK_ID}" identifier="{TASK_IDENTIFIER}" title="{TASK_TITLE}" />
+  #     <phase id="{phase_id}" title="{phase.title}" />
+  #     <workspace id="{workspace_id}" />
+  #     <project id="{project_id}" />
+  #     <plan_page id="{PLAN_PAGE_ID}" />
+  #     <research_page id="{group_research_page_id}" />   ← group-specific if available
+  #     <context_page id="{context_page_id}" />
+  #     <requirements_page id="{requirements_page_id}" />
+  #     <task_context_page id="{task_context_page_id}" />
+  #     <task_research_page id="{task_research_page_id}" />
+  #     </mosic_references>
+  #
+  #   planner_agent_path = "~/.claude/agents/gsd-planner.md"
+  #   planner_model = from config profile table
+  #   planning_mode = "task-planning"
+  #   tdd_config = config.workflow?.tdd ?? "auto"
+  #   scope_label = TASK_IDENTIFIER
+  #   subtask_range = "1-8 per group" (override default 1-5)
+  #   decomposition = config.mosic.session.task_decomposition
+
+  # Workflow spawns planners sequentially in dependency_order,
+  # accumulating all_prior_plan_pages and all_plan_results.
+  # Output: all_prior_plan_pages[], all_plan_results[]
+
+ELSE:
+  # --- SINGLE PLANNER (existing behavior, unchanged) ---
+
+  Display:
+  """
+  -------------------------------------------
+   GSD > SPAWNING PLANNER {quick_mode ? "(QUICK)" : ""}
+  -------------------------------------------
+
+  Analyzing task and creating subtasks...
+  """
+
+  Build lean prompt with page IDs only — planner self-loads all content from Mosic:
+
+  planning_mode = quick_mode ? "task-quick" : "task-planning"
+
+  planner_prompt = """
 <mosic_references>
 <task id="{TASK_ID}" identifier="{TASK_IDENTIFIER}" title="{TASK_TITLE}" />
 <phase id="{phase_id}" title="{phase.title}" />
@@ -375,19 +475,49 @@ Return structured result with:
 </output_format>
 """
 
-Task(
-  prompt="First, read ~/.claude/agents/gsd-planner.md for your role.\n\n" + planner_prompt,
-  subagent_type="general-purpose",
-  model="{planner_model}",
-  description="Plan task: " + TASK_TITLE.substring(0, 30)
-)
+  Task(
+    prompt="First, read ~/.claude/agents/gsd-planner.md for your role.\n\n" + planner_prompt,
+    subagent_type="general-purpose",
+    model="{planner_model}",
+    description="Plan task: " + TASK_TITLE.substring(0, 30)
+  )
 ```
 
 ## 7. Handle Planner Return
 
 ```
-# Parse planner output for ## PLANNING COMPLETE
-IF planner_output contains "## PLANNING COMPLETE":
+IF use_distributed:
+  # Follow @~/.claude/get-shit-done/workflows/distributed-planning.md:
+  # 1. <coverage_verification> — store entity IDs in config, check coverage
+  #    Config storage: config.mosic.pages["task-" + TASK_IDENTIFIER + "-plan-group-NN"] = page_id
+  # 2. <cross_group_relations> — create M Relations for cross-group dependencies
+
+  # Verify subtasks were created across all groups
+  created_subtasks = mosic_search_tasks({
+    workspace_id: workspace_id,
+    filters: { parent_task: TASK_ID }
+  })
+
+  subtask_count = created_subtasks.results.length
+
+  # Update task status
+  mosic_update_document("MTask", TASK_ID, {
+    status: "In Progress"
+  })
+
+  # Add planning comment
+  mosic_create_document("M Comment", {
+    workspace: workspace_id,
+    ref_doc: "MTask",
+    ref_name: TASK_ID,
+    content: "<p><strong>Distributed Planning Complete</strong></p>" +
+      "<p>Groups: " + requirement_groups.length + "</p>" +
+      "<p>Subtasks: " + subtask_count + "</p>" +
+      "<p><a href=\"https://mosic.pro/app/page/" + PLAN_PAGE_ID + "\">View Plan</a></p>"
+  })
+
+# Single planner path
+ELIF planner_output contains "## PLANNING COMPLETE":
   # Extract subtask count
   subtask_count = extract_number(planner_output, "Subtasks Created:")
 
@@ -425,17 +555,38 @@ ELSE:
 workflow_plan_check = config.workflow?.plan_check ?? true
 
 IF workflow_plan_check and not skip_verify:
-  Display:
-  """
-  -------------------------------------------
-   GSD > VERIFYING PLAN
-  -------------------------------------------
 
-  Checking plan quality...
-  """
+  IF use_distributed:
+    # --- DISTRIBUTED VERIFICATION ---
+    # Follow <distributed_verification> in @~/.claude/get-shit-done/workflows/distributed-planning.md
+    #
+    # Command provides scope-specific inputs:
+    #   requirement_groups, all_plan_results, task_requirements
+    #   task_description = TASK_TITLE
+    #   TASK_IDENTIFIER, checker_model, requirements_page_id
+    #   checker_agent_path = "~/.claude/agents/gsd-plan-checker.md"
+    #
+    # Workflow handles:
+    #   Phase 1: Parallel group-scoped verification (one checker per group)
+    #   Phase 2: Cross-group verification (coverage matrix + dependency acyclicity)
+    #   Issue handling: display issues, enter revision loop (iteration_count < 3)
+    #
+    # Output: all checks passed → proceed to step 9, or issues → revision loop
 
-  # Load requirements for verification (deferred from step 4 — not needed by planner)
-  requirements_content = ""
+  ELSE:
+    # --- SINGLE PLANNER VERIFICATION (existing behavior) ---
+
+    Display:
+    """
+    -------------------------------------------
+     GSD > VERIFYING PLAN
+    -------------------------------------------
+
+    Checking plan quality...
+    """
+
+    # Load requirements for verification (deferred from step 4 — not needed by planner)
+    requirements_content = ""
   IF config.mosic.pages.requirements:
     requirements_content = mosic_get_page(config.mosic.pages.requirements, {
       content_format: "markdown"
@@ -527,8 +678,8 @@ Return one of:
 """
 
   Task(
-    prompt=checker_prompt,
-    subagent_type="gsd-plan-checker",
+    prompt="First, read ~/.claude/agents/gsd-plan-checker.md for your role.\n\n" + checker_prompt,
+    subagent_type="general-purpose",
     model="{checker_model}",
     description="Verify task plan: " + TASK_IDENTIFIER
   )
@@ -625,12 +776,18 @@ IF mosic operation fails during subtask creation:
 <success_criteria>
 - [ ] Task loaded from Mosic (by identifier or active task)
 - [ ] Phase/task page IDs discovered
+- [ ] Distributed threshold evaluated (task requirements count vs config threshold)
+- [ ] If distributed: decomposition reused from research-task or computed fresh
+- [ ] If distributed: planners spawned sequentially with prior plan page IDs
+- [ ] If distributed: coverage verified, cross-group relations created
+- [ ] If distributed: distributed verification (group-scoped + cross-group)
+- [ ] If single: gsd-planner spawned with page IDs (planner self-loads content)
 - [ ] Plan page created/updated linked to task
-- [ ] gsd-planner spawned with page IDs (planner self-loads content)
 - [ ] Subtasks created with parent_task field
 - [ ] Checklist items added for acceptance criteria
 - [ ] Plan page tagged (gsd-managed, plan)
 - [ ] Verification passed (unless skipped)
-- [ ] config.json updated with page ID
+- [ ] BUG FIX: checker uses subagent_type="general-purpose" (not "gsd-plan-checker")
+- [ ] config.json updated with page ID(s)
 - [ ] User sees Mosic URLs and next steps
 </success_criteria>

@@ -161,6 +161,20 @@ else {
 
 After loading pages from Mosic, extract all research-relevant context yourself.
 
+### 0. Check for Assigned Requirements (Distributed Research)
+
+```
+IF prompt.includes("<assigned_requirements>"):
+  assigned_ids = parse xml list of <req id="..."/> from <assigned_requirements>
+  research_scope = "focused"
+  # Focus research scope to assigned requirements only
+  # Still load full context page for locked decisions (global)
+  # Still detect frontend/TDD, but only for assigned requirement domain
+ELSE:
+  assigned_ids = null
+  research_scope = "full"
+```
+
 ### 1. Extract User Decisions
 
 Parse from loaded context pages (task-level first, then merge phase-level):
@@ -229,49 +243,16 @@ ELSE:
 
 ### 3. Detect Frontend Work
 
-```
-frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
-  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
-  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
-  "UX", "interface", "widget"]
-
-task_text = (task.title + " " + (task.description or "")).toLowerCase()
-is_frontend = frontend_keywords.some(kw => task_text.includes(kw.toLowerCase()))
-
-IF is_frontend:
-  frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
-  frontend_design_context = extract_section(frontend_design_content, "## For Researchers")
-```
+Follow `<frontend_detection>` in `@~/.claude/get-shit-done/workflows/context-extraction.md`.
+Use keyword list from `@~/.claude/get-shit-done/references/detection-constants.md`.
+Scope text: `task.title + task.description`.
+If `is_frontend`: extract `## For Researchers` section from frontend-design.md.
 
 ### 4. Detect TDD Eligibility
 
-Read `<research_config>` for tdd_config value:
-
-```
-tdd_config = research_config.tdd_config  # "auto", true, or false
-
-IF tdd_config !== false AND tdd_config !== "false":
-  # Check context pages for user TDD decision
-  tdd_user_decision = extract_decision(task_context_content, "Testing Approach")
-  IF not tdd_user_decision:
-    tdd_user_decision = extract_decision(phase_context_content, "Testing Approach")
-
-  # Keyword detection
-  tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
-    "state machine", "workflow engine", "utility", "helper", "business logic",
-    "data model", "schema", "converter", "calculator", "formatter", "serializer",
-    "authentication", "authorization"]
-  is_tdd_eligible = tdd_keywords.some(kw => task_text.includes(kw.toLowerCase()))
-
-  # Resolve (priority: user decision > config setting > keyword heuristic)
-  IF tdd_user_decision == "tdd": include_tdd_research = true
-  ELIF tdd_user_decision == "standard": include_tdd_research = false
-  ELIF tdd_config == true OR tdd_config == "true": include_tdd_research = true
-  ELIF tdd_config == "auto" AND is_tdd_eligible: include_tdd_research = true
-  ELSE: include_tdd_research = false
-ELSE:
-  include_tdd_research = false
-```
+Follow `<tdd_detection>` **For Researchers** in `@~/.claude/get-shit-done/workflows/context-extraction.md`.
+Use keyword list from `@~/.claude/get-shit-done/references/detection-constants.md`.
+Input: `tdd_config` from `<research_config>`, context pages, scope text.
 
 </research_context_extraction>
 
@@ -384,6 +365,7 @@ Update the research M Page with:
 **Task:** {task title}
 **Researched:** {date}
 **Confidence:** HIGH/MEDIUM/LOW
+**Scope:** {research_scope == "focused" ? "Group: {group_title} ({assigned_ids.length} requirements)" : "Full task"}
 
 ## User Constraints
 
@@ -503,6 +485,20 @@ Update the research M Page with:
 - **Severity:** {BLOCKING or NON-BLOCKING}
 - **Impact if unresolved:** {what goes wrong}
 - **Suggested resolution/Default:** {options or default}
+
+## Proposed Interfaces (if `research_scope == "focused"`)
+
+*Include this section only when `<assigned_requirements>` is present (distributed research mode).*
+
+### Exposes (other groups can depend on these)
+- `POST /api/auth/login` → `{ token: string, user: { id, email, name } }`
+- `User` model: `{ id: UUID, email: string, name: string }`
+
+### Consumes (depends on other groups)
+- None (foundational group)
+- OR: `POST /api/auth/login` from Authentication group
+
+*List every API endpoint, data model, component, service, or utility this group's requirements will create (Exposes) or need from other groups (Consumes). The orchestrator uses this to determine dependency order between groups.*
 
 ## Sources
 

@@ -524,47 +524,16 @@ ELIF context_content:
 
 ### 3. Detect Frontend Work
 
-```
-frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
-  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
-  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
-  "UX", "interface", "widget"]
-
-phase_text = (phase.title + " " + (phase.description or "") + " " + (requirements_content or "")).toLowerCase()
-is_frontend = frontend_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
-
-IF is_frontend:
-  frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
-  frontend_design_context = extract_section(frontend_design_content, "## For Researchers")
-```
+Follow `<frontend_detection>` in `@~/.claude/get-shit-done/workflows/context-extraction.md`.
+Use keyword list from `@~/.claude/get-shit-done/references/detection-constants.md`.
+Scope text: `phase.title + phase.description + requirements_content`.
+If `is_frontend`: extract `## For Researchers` section from frontend-design.md.
 
 ### 4. Detect TDD Eligibility
 
-Read `<research_config>` for tdd_config value:
-
-```
-tdd_config = research_config.tdd_config  # "auto", true, or false
-
-IF tdd_config !== false AND tdd_config !== "false":
-  # Check context page for user TDD decision
-  tdd_user_decision = extract_decision(context_content, "Testing Approach")
-
-  # Keyword detection from loaded text
-  tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
-    "state machine", "workflow engine", "utility", "helper", "business logic",
-    "data model", "schema", "converter", "calculator", "formatter", "serializer",
-    "authentication", "authorization"]
-  is_tdd_eligible = tdd_keywords.some(kw => phase_text.includes(kw.toLowerCase()))
-
-  # Resolve mode (priority: user decision > config setting > keyword heuristic)
-  IF tdd_user_decision == "tdd": include_tdd_research = true
-  ELIF tdd_user_decision == "standard": include_tdd_research = false
-  ELIF tdd_config == true OR tdd_config == "true": include_tdd_research = true
-  ELIF tdd_config == "auto" AND is_tdd_eligible: include_tdd_research = true
-  ELSE: include_tdd_research = false
-ELSE:
-  include_tdd_research = false
-```
+Follow `<tdd_detection>` **For Researchers** in `@~/.claude/get-shit-done/workflows/context-extraction.md`.
+Use keyword list from `@~/.claude/get-shit-done/references/detection-constants.md`.
+Input: `tdd_config` from `<research_config>`, context pages, scope text.
 
 </research_context_extraction>
 

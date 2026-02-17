@@ -32,7 +32,9 @@ Extract implementation decisions for a specific task - downstream agents (resear
 
 <execution_context>
 @~/.claude/get-shit-done/workflows/discuss-phase.md
+@~/.claude/get-shit-done/workflows/discuss-shared.md
 @~/.claude/get-shit-done/templates/context.md
+@~/.claude/get-shit-done/references/detection-constants.md
 </execution_context>
 
 <context>
@@ -167,365 +169,34 @@ IF existing_context_page:
     EXIT
 ```
 
-## 4.5 Quick Discovery (Automated)
+## 4.5-7. Discussion Flow (Shared Workflow)
 
-Display:
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GSD ► QUICK DISCOVERY
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Follow `@~/.claude/get-shit-done/workflows/discuss-shared.md` with these scope parameters:
 
-Scanning codebase for task-relevant context...
-```
-
-### 4.5.1 Focused Codebase Scan
-Scan the project codebase for context relevant to THIS task:
-- Files and directories related to the task description (Glob + Grep)
-- Existing implementations of similar patterns
-- Related components, APIs, or modules
-- Import patterns and dependencies
-
-### 4.5.2 Quick Web Research (1-2 searches)
-Search for best practices specific to the task:
-- "[task keywords] best practices [framework] [current year]"
-- 1-2 targeted searches max (task scope is smaller)
-
-### 4.5.3 Present Discovery
-
-Display:
-```
--------------------------------------------
- Discovery Findings
--------------------------------------------
-
-**Relevant Code Found:**
-- {Existing files/patterns related to task}
-- {What already exists that this task connects to}
-
-**Best Practices:**
-- {Key finding from web research}
-
-**Considerations:**
-- {What the existing code suggests about implementation}
+```xml
+<discussion_scope>
+  <entity_type>MTask</entity_type>
+  <entity_id>{TASK_ID}</entity_id>
+  <entity_title>{TASK_TITLE}</entity_title>
+  <entity_label>{TASK_IDENTIFIER}</entity_label>
+  <scope_text>{task.title + " " + task.description}</scope_text>
+  <scope_guardrail>That's beyond this task's scope. I'll note it for a separate task.</scope_guardrail>
+  <web_search_count>1-2</web_search_count>
+  <tag_set>[config.mosic.tags.gsd_managed, config.mosic.tags.task_context or "task-context"]</tag_set>
+  <config_key>task-{TASK_IDENTIFIER}-context</config_key>
+  <parent_context_page_id>{phase_context_page ? phase_context_page.name : null}</parent_context_page_id>
+</discussion_scope>
 ```
 
-This context informs the gray areas in step 5.
+The shared workflow handles:
+1. **Quick Discovery** — codebase scan, web research, frontend detection
+2. **Pre-Discussion Gap Scan** — cross-reference goal + requirements + discovery
+3. **Gray Area Generation** — gap-informed, frontend, TDD (using `@detection-constants.md`)
+4. **Deep-Dive Question Loop** — 3-4 per area, continue/next, scope guardrail
+5. **Post-Discussion Gap Assessment** — track resolved vs remaining gaps
+6. **Context Page Creation** — Editor.js blocks with canonical sections, tagging
 
-### 4.5.4 Frontend Detection
-
-```
-# Detect frontend work from task description
-frontend_keywords = ["UI", "frontend", "component", "page", "screen", "layout",
-  "design", "form", "button", "modal", "dialog", "sidebar", "navbar", "dashboard",
-  "responsive", "styling", "CSS", "Tailwind", "React", "Vue", "template", "view",
-  "UX", "interface", "widget"]
-
-task_text = (task.title + " " + task.description).toLowerCase()
-is_frontend = frontend_keywords.some(kw => task_text.includes(kw.toLowerCase()))
-
-IF is_frontend:
-  # Load frontend design reference
-  frontend_design_ref = Read("~/.claude/get-shit-done/references/frontend-design.md")
-  Display: "Frontend work detected — UI-specific gray areas will be included."
-```
-
-## 4.6 Pre-Discussion Gap Scan
-
-Cross-reference task goal + inherited phase requirements against discovery findings to
-identify what's missing or ambiguous BEFORE generating gray areas.
-
-```
-# What we know:
-# - Task description and goal
-# - Phase requirements (inherited from phase context)
-# - Discovery findings (from Step 4.5)
-
-# Cross-reference:
-1. Enumerate what the task goal implies must be decided
-   - What behaviors need specifying?
-   - What interfaces need defining?
-   - What edge cases need handling?
-
-2. Check which of these are already answered by:
-   - Task description details
-   - Phase context decisions (inherited)
-   - Discovery findings (existing code patterns found)
-   - Obvious defaults
-
-3. Remaining items = gaps
-   Classify each:
-   - REQUIREMENT_GAP: Task goal implies X but no requirement defines it
-   - AMBIGUITY_GAP: Requirement exists but allows 2+ valid interpretations
-   - CONFLICT_GAP: Task description or findings contradict
-   - UNKNOWN_GAP: Technical question discovery couldn't answer
-
-4. pre_discussion_gaps = { gaps: [...], count: N }
-
-Display:
-"""
-Gap scan: {N} areas identified that need your input
-{IF N == 0: "No ambiguities detected — gray areas will cover preferences."}
-{IF N > 0: list top 3 gaps briefly}
-"""
-```
-
-## 5. Analyze Task and Generate Gray Areas
-
-```
-# Use discovery findings + task description to generate gray areas
-task_desc_lower = task.description.toLowerCase()
-
-# Gap-informed gray area priority:
-IF pre_discussion_gaps.count > 0:
-  # Convert gaps to gray areas (gaps get priority slots)
-  gap_gray_areas = pre_discussion_gaps.gaps.slice(0, 2).map(gap => ({
-    id: String.fromCharCode(65 + gap_gray_areas.length),
-    name: "⚠ " + gap.area,
-    reason: gap.description + " (identified as gap in requirements)"
-  }))
-ELSE:
-  gap_gray_areas = []
-
-# Discovery-informed analysis based on task type and codebase findings
-gray_areas = [...gap_gray_areas]
-
-# Standard gray areas informed by discovery (existing patterns, best practices)
-
-# If frontend detected, add UI-specific gray areas from frontend-design reference
-IF is_frontend:
-  gray_areas.push({
-    id: "F",
-    name: "UI Design & Layout",
-    reason: "Frontend work detected — layout, interactions, and visual design need decisions"
-  })
-
-IF task_desc_lower.includes("ui") or task_desc_lower.includes("form") or task_desc_lower.includes("component"):
-  gray_areas.push({
-    id: "A",
-    name: "User Interaction",
-    reason: "How should users interact with this feature?"
-  })
-
-IF task_desc_lower.includes("api") or task_desc_lower.includes("endpoint") or task_desc_lower.includes("request"):
-  gray_areas.push({
-    id: "B",
-    name: "API Behavior",
-    reason: "What should the API return in different scenarios?"
-  })
-
-IF task_desc_lower.includes("error") or task_desc_lower.includes("fail") or task_desc_lower.includes("invalid"):
-  gray_areas.push({
-    id: "C",
-    name: "Error Handling",
-    reason: "How should errors be handled and communicated?"
-  })
-
-IF task_desc_lower.includes("data") or task_desc_lower.includes("store") or task_desc_lower.includes("persist"):
-  gray_areas.push({
-    id: "D",
-    name: "Data Handling",
-    reason: "How should data be stored, validated, and transformed?"
-  })
-
-# TDD gray area detection
-tdd_keywords = ["API", "endpoint", "validation", "parser", "transform", "algorithm",
-  "state machine", "workflow engine", "utility", "helper", "business logic",
-  "data model", "schema", "converter", "calculator", "formatter", "serializer",
-  "authentication", "authorization"]
-
-tdd_config = config.workflow?.tdd ?? "auto"
-is_tdd_eligible = tdd_config == true OR
-  (tdd_config !== false AND tdd_keywords.some(kw => task_desc_lower.includes(kw.toLowerCase())))
-
-IF is_tdd_eligible:
-  gray_areas.push({
-    id: String.fromCharCode(65 + gray_areas.length),
-    name: "Testing Approach",
-    reason: "This task involves testable logic — TDD (write tests first) may improve quality"
-  })
-
-# Always include edge cases
-gray_areas.push({
-  id: String.fromCharCode(65 + gray_areas.length),
-  name: "Edge Cases",
-  reason: "What happens in unusual or boundary conditions?"
-})
-
-# Always include success criteria
-gray_areas.push({
-  id: String.fromCharCode(65 + gray_areas.length),
-  name: "Success Criteria",
-  reason: "How do we know this task is truly complete?"
-})
-
-# Limit to 4 gray areas (gap gray areas already have priority from being first)
-gray_areas = gray_areas.slice(0, 4)
-```
-
-Display:
-```
-Based on "{TASK_TITLE}", I've identified areas where your input will shape implementation:
-
-{gray_areas.map(g => "[" + g.id + "] " + g.name + " - " + g.reason).join("\n")}
-
-Which areas should we discuss? (Enter letters, e.g., "A, C" or "all")
-```
-
-Wait for response.
-
-## 6. Deep-Dive Selected Areas
-
-For each selected area:
-
-```
-FOR each selected_area in user_selection:
-  Display:
-  """
-  -------------------------------------------
-   Discussing: {selected_area.name}
-  -------------------------------------------
-  """
-
-  # Ask 3-4 targeted questions per area
-  questions_asked = 0
-  area_decisions = []
-
-  WHILE questions_asked < 4:
-    # Generate contextual question based on area and task
-    question = generate_contextual_question(selected_area, task, questions_asked)
-
-    AskUserQuestion({
-      questions: [{
-        question: question.text,
-        header: selected_area.name.substring(0, 12),
-        options: question.options,
-        multiSelect: false
-      }]
-    })
-
-    area_decisions.push({
-      question: question.text,
-      answer: user_response
-    })
-
-    questions_asked += 1
-
-  # After 3-4 questions
-  AskUserQuestion({
-    questions: [{
-      question: "More questions about " + selected_area.name + ", or move to next?",
-      header: "Continue?",
-      options: [
-        { label: "Move to next", description: "Done with this area" },
-        { label: "More questions", description: "Keep discussing" }
-      ],
-      multiSelect: false
-    }]
-  })
-
-  IF user_selection == "More questions":
-    # Ask 3-4 more questions
-    CONTINUE with more questions
-```
-
-**Scope guardrail:**
-- Task scope is FIXED by the task description
-- Discussion clarifies HOW to implement, not WHETHER to add more
-- If user suggests new capabilities: "That's beyond this task's scope. I'll note it for a separate task."
-- Capture deferred ideas - don't lose them, don't act on them
-
-## 6.5 Post-Discussion Gap Assessment
-
-```
-# Check which pre-discussion gaps were resolved through user answers
-resolved_gaps = []
-remaining_gaps = []
-
-FOR each gap in pre_discussion_gaps.gaps:
-  IF gap was covered by a discussed area AND user made a decision:
-    resolved_gaps.push({ ...gap, resolved_by: area_name })
-  ELSE:
-    remaining_gaps.push(gap)
-
-# Also check for NEW gaps surfaced during discussion
-# (e.g., user revealed conflicting preferences, or "I haven't decided yet" answers)
-FOR each discussed_area:
-  IF user response was ambiguous or explicitly deferred:
-    remaining_gaps.push({
-      type: "DEFERRED_GAP",
-      area: area_name,
-      description: "User deferred decision — researcher should investigate options"
-    })
-
-gap_resolution_status = remaining_gaps.length == 0 ? "RESOLVED" : "PARTIAL"
-
-Display:
-"""
-Gap assessment: {resolved_gaps.length} resolved, {remaining_gaps.length} remaining
-{IF remaining_gaps.length > 0: "Remaining gaps will be flagged for research investigation."}
-"""
-```
-
-## 7. Create/Update Context Page in Mosic
-
-```
-Display: "Ready to save context decisions?"
-
-AskUserQuestion({
-  questions: [{
-    question: "Save decisions to Mosic?",
-    header: "Save",
-    options: [
-      { label: "Yes, save", description: "Create/update context page" },
-      { label: "Add more", description: "Discuss more areas first" }
-    ],
-    multiSelect: false
-  }]
-})
-
-IF user_selection == "Add more":
-  GOTO step 5 (present gray areas again)
-
-# Build context content (includes Discussion Gap Status section)
-context_content = build_context_markdown({
-  task_identifier: TASK_IDENTIFIER,
-  task_title: TASK_TITLE,
-  areas_discussed: selected_areas,
-  decisions: all_decisions,
-  deferred_ideas: deferred_items,
-  pre_discussion_gaps: pre_discussion_gaps,
-  resolved_gaps: resolved_gaps,
-  remaining_gaps: remaining_gaps
-})
-
-IF existing_context_page:
-  # Append new decisions
-  mosic_update_document("M Page", existing_context_page.name, {
-    content: convert_to_editorjs(
-      existing_content + "\n\n---\n\n## Updated Decisions\n\n" + new_decisions
-    ),
-    status: "Published"
-  })
-  context_page_id = existing_context_page.name
-ELSE:
-  # Create new context page linked to task
-  context_page = mosic_create_entity_page("MTask", TASK_ID, {
-    workspace_id: workspace_id,
-    title: TASK_IDENTIFIER + " Context & Decisions",
-    page_type: "Document",
-    icon: "lucide:message-square",
-    status: "Published",
-    content: convert_to_editorjs(context_content),
-    relation_type: "Related"
-  })
-  context_page_id = context_page.name
-
-# Tag the context page
-mosic_batch_add_tags_to_document("M Page", context_page_id, [
-  config.mosic.tags.gsd_managed,
-  config.mosic.tags.task_context or "task-context"
-])
-```
+Output: `context_page_id` stored in config via `config_key`
 
 ## 8. Update Config
 

@@ -24,6 +24,7 @@ Output: UAT Page in Mosic tracking all test results. If issues found: diagnosed 
 
 <execution_context>
 @~/.claude/get-shit-done/workflows/verify-work.md
+@~/.claude/get-shit-done/workflows/code-review.md
 @~/.claude/get-shit-done/templates/UAT.md
 </execution_context>
 
@@ -164,46 +165,12 @@ DISPLAY: "Found " + test_items.length + " testable items from " + completed_task
 
 ## Step 3: Automated Code Review
 
-Before manual testing, analyze the code changes across all completed tasks.
+Before manual testing, build verification criteria and run automated code review.
 
-### 3a. Gather Phase Changes
-
-```
-# Collect commits for all completed tasks
-all_commits = []
-
-FOR each task in completed_tasks:
-  task_commits = run_bash("git log --all --oneline --grep='" + task.identifier + "'")
-  IF task_commits:
-    all_commits.push(...task_commits)
-
-# Deduplicate and sort commits
-all_commits = deduplicate(all_commits)
-
-# If no task-specific commits, fall back to branch diff
-IF all_commits.length == 0:
-  all_commits = run_bash("git log --oneline -20")
-  Display: "No task-specific commits found. Reviewing recent changes."
-
-# Get consolidated diff
-IF all_commits has identifiable range:
-  changed_files = run_bash("git diff --name-only " + oldest + "^.." + newest)
-  full_diff = run_bash("git diff " + oldest + "^.." + newest)
-ELSE:
-  changed_files = run_bash("git diff --name-only HEAD~10")
-  full_diff = run_bash("git diff HEAD~10")
-
-# Read changed files for context
-FOR each file in changed_files:
-  Read(file)
-
-Display: "Reviewing {changed_files.length} files across {all_commits.length} commits"
-```
-
-### 3b. Per-Task Requirements Traceability
+### 3a. Build Phase Verification Criteria
 
 ```
-task_traceability = []
+phase_verification_criteria = []
 
 FOR each task in completed_tasks:
   # Get task's plan page for requirements
@@ -215,137 +182,48 @@ FOR each task in completed_tasks:
     plan_content = mosic_get_page(plan_page.name, { content_format: "markdown" }).content
     must_haves = extract_section(plan_content, "## Must-Haves")
     IF must_haves:
-      task_requirements = extract_list_items(must_haves, "Observable Truths")
+      truths = extract_list_items(must_haves, "Observable Truths")
+      FOR each truth in truths:
+        task_requirements.push({ source: "plan", criterion: truth, type: "observable_truth" })
 
   # Fall back to task title/checklist if no plan
   IF task_requirements.length == 0:
-    task_requirements = [task.title + " works as expected"]
+    task_requirements.push({ source: "task", criterion: task.title + " works as expected", type: "general" })
     IF task.checklists:
-      task_requirements.push(...task.checklists.map(c => c.title))
+      FOR each cl in task.checklists:
+        task_requirements.push({ source: "checklist", criterion: cl.title, type: "acceptance_criterion", done: cl.done })
 
-  # Map requirements to code
-  FOR each req in task_requirements:
-    evidence = search_changed_files(req, changed_files, full_diff)
-    task_traceability.push({
-      task_id: task.name,
-      task_title: task.title,
-      requirement: req,
-      status: evidence.length > 0 ? "MET" : "NOT MET",
-      evidence: evidence
-    })
-
-  # TDD compliance check per task
-  task_tags = mosic_get_document_tags("MTask", task.name)
-  is_tdd_task = task_tags.some(t => t.tag == "tdd")
-
-  IF is_tdd_task:
-    # Verify TDD commit pattern for this task
-    task_commits = run_bash("git log --all --oneline --grep='" + task.identifier + "'")
-    has_test_commit = task_commits.some(c => c.includes("test("))
-    has_feat_commit = task_commits.some(c => c.includes("feat("))
-
-    task_traceability.push({
-      task_id: task.name,
-      task_title: task.title,
-      requirement: "TDD: test commit(s) before implementation commit(s)",
-      status: has_test_commit ? "MET" : "NOT MET",
-      evidence: has_test_commit ? "Found test() commits" : "No test() commits found"
-    })
-
-    # Check RED/GREEN/REFACTOR subtask completion
-    subtasks = mosic_search_tasks({ parent_task: task.name })
-    tdd_phases = subtasks.filter(s => s.title.match(/^(RED|GREEN|REFACTOR):/))
-    incomplete_phases = tdd_phases.filter(s => !s.done)
-
-    IF incomplete_phases.length > 0:
-      task_traceability.push({
-        task_id: task.name,
-        task_title: task.title,
-        requirement: "TDD phases complete: " + tdd_phases.map(p => p.title).join(", "),
-        status: "NOT MET",
-        evidence: "Incomplete: " + incomplete_phases.map(p => p.title).join(", ")
-      })
+  phase_verification_criteria.push(...task_requirements)
 ```
 
-### 3c. Code Quality Analysis
+### 3b-3d. Code Review (Shared Workflow)
 
-```
-auto_findings = []
+Follow `@~/.claude/get-shit-done/workflows/code-review.md` with these scope parameters:
 
-FOR each file in changed_files:
-  # CORRECTNESS: logic errors, null handling, error paths, atomicity
-  # SECURITY: injection, XSS, permission checks, credentials in code
-  # OVER-ENGINEERING: YAGNI, single-use abstractions, trivial helpers
-  # STUB DETECTION: TODO/FIXME, empty bodies, hardcoded values
-
-  # Each finding: { severity: "Critical"|"Warning"|"Note", file, line, issue, fix, related_task }
-
-# Add TDD compliance to code quality report
-tdd_tasks = completed_tasks.filter(t => {
-  tags = mosic_get_document_tags("MTask", t.name)
-  return tags.some(tag => tag.tag == "tdd")
-})
-
-IF tdd_tasks.length > 0:
-  auto_findings.push({
-    severity: "Note",
-    file: "n/a",
-    line: "n/a",
-    issue: "TDD Compliance: " + tdd_tasks.length + " TDD tasks in phase",
-    fix: "Verify test-first commit ordering and RED/GREEN/REFACTOR phase completion",
-    related_task: tdd_tasks.map(t => t.identifier).join(", ")
-  })
+```xml
+<review_scope>
+  <entity_type>phase</entity_type>
+  <entity_identifier>{PHASE_IDENTIFIER}</entity_identifier>
+  <completed_tasks>{completed_tasks}</completed_tasks>
+  <verification_criteria>{phase_verification_criteria}</verification_criteria>
+  <requirements_content>{requirements_content if available}</requirements_content>
+</review_scope>
 ```
 
-### 3d. Present Phase Code Review
+The shared workflow handles:
+1. **Commit Identification** — gather commits across completed tasks, build consolidated diff
+2. **Requirements Traceability** — map criteria to code changes, TDD compliance
+3. **Code Quality Analysis** — correctness, security, over-engineering, stubs
+4. **Present Review** — verdict, traceability table, findings
+
+Output variables: `traceability[]`, `auto_findings[]`, `changed_files[]`, `all_commits[]`, `verdict`
+
+### 3e. Enrich Test Items with Review Data
 
 ```
-met = task_traceability.filter(t => t.status == "MET").length
-total = task_traceability.length
-critical = auto_findings.filter(f => f.severity == "Critical").length
-
-verdict = "PASS"
-IF critical > 0: verdict = "CRITICAL ISSUES"
-ELIF auto_findings.length > 0: verdict = "NEEDS ATTENTION"
-ELIF met < total: verdict = "GAPS FOUND"
-
-Display:
-"""
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- CODE REVIEW: {PHASE_IDENTIFIER}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Verdict: {verdict}
-Files changed: {changed_files.length}
-Commits: {all_commits.length}
-
-### Requirements Traceability
-
-| Task | Requirement | Status | Evidence |
-|------|-------------|--------|----------|
-{task_traceability.map(t =>
-  "| " + t.task_title.substring(0,30) + " | " + t.requirement.substring(0,40) + " | " +
-  t.status + " | " + (t.evidence.join(", ") or "-") + " |"
-).join("\n")}
-
-Score: {met}/{total} requirements traced to code
-
-{IF auto_findings.length > 0:}
-### Findings
-
-{auto_findings.map(f =>
-  "**" + f.severity + "** `" + f.file + ":" + f.line + "`\n" +
-  f.issue + "\n*Suggested fix:* " + f.fix
-).join("\n\n")}
-{ENDIF}
-
----
-Proceeding to manual testing...
-"""
-
-# Enrich test_items with auto-review data
+# Augment test_items with auto-review findings
 FOR each test_item in test_items:
-  related_trace = task_traceability.filter(t => t.task_id == test_item.task_id)
+  related_trace = traceability.filter(t => t.criterion.task_id == test_item.task_id)
   test_item.auto_traceability = related_trace
   related_findings = auto_findings.filter(f => f.related_task == test_item.task_id)
   test_item.auto_findings = related_findings
