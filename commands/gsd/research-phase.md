@@ -54,11 +54,15 @@ If missing: Error - run `/gsd:new-project` first.
 workspace_id = config.mosic.workspace_id
 project_id = config.mosic.project_id
 model_profile = config.model_profile or "balanced"
+model_overrides = config.model_overrides or {}
 
+# Model resolution: override takes precedence over profile lookup
 Model lookup:
 | Agent | quality | balanced | budget |
 |-------|---------|----------|--------|
 | gsd-phase-researcher | opus | sonnet | haiku |
+
+researcher_model = model_overrides["gsd-phase-researcher"] ?? lookup(model_profile)
 ```
 
 ## 1. Normalize and Validate Phase

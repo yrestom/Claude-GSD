@@ -84,12 +84,19 @@ Resolve model profile:
 MODEL_PROFILE=$(echo "$CONFIG" | jq -r '.model_profile // "balanced"')
 ```
 
+Read model overrides (override takes precedence over profile lookup):
+```bash
+MODEL_OVERRIDES = config.model_overrides or {}
+```
+
 **Model lookup table:**
 
 | Agent | quality | balanced | budget |
 |-------|---------|----------|--------|
 | gsd-planner | opus | opus | sonnet |
 | gsd-executor | opus | sonnet | sonnet |
+
+For each agent: model = MODEL_OVERRIDES[agent_name] ?? lookup(MODEL_PROFILE)
 
 ---
 

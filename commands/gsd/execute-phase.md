@@ -85,6 +85,7 @@ If missing: Error - run `/gsd:new-project` first.
 workspace_id = config.mosic.workspace_id
 project_id = config.mosic.project_id
 model_profile = config.model_profile or "balanced"
+model_overrides = config.model_overrides or {}
 
 # Load parallelization config (defaults if not set)
 PARALLEL_ENABLED = config.parallelization?.enabled ?? true
@@ -92,11 +93,15 @@ PARALLEL_PLAN_LEVEL = config.parallelization?.plan_level ?? true
 MAX_CONCURRENT = config.parallelization?.max_concurrent_agents ?? 3
 MIN_PLANS_FOR_PARALLEL = config.parallelization?.min_plans_for_parallel ?? 2
 
+# Model resolution: override takes precedence over profile lookup
 Model lookup:
 | Agent | quality | balanced | budget |
 |-------|---------|----------|--------|
 | plan-orchestrator | opus | sonnet | sonnet |
 | gsd-verifier | sonnet | sonnet | haiku |
+
+orchestrator_model = model_overrides["plan-orchestrator"] ?? lookup(model_profile)
+verifier_model = model_overrides["gsd-verifier"] ?? lookup(model_profile)
 
 ```
 

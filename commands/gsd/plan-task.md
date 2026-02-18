@@ -64,12 +64,16 @@ project_id = config.mosic.project_id
 **Resolve model profile:**
 ```
 model_profile = config.model_profile or "balanced"
+model_overrides = config.model_overrides or {}
 
+# Model resolution: override takes precedence over profile lookup
 Model lookup:
 | Agent | quality | balanced | budget |
 |-------|---------|----------|--------|
 | gsd-planner | opus | opus | sonnet |
 | gsd-plan-checker | sonnet | sonnet | haiku |
+
+For each agent: model = model_overrides[agent_name] ?? lookup(model_profile)
 ```
 
 ## 2. Parse Arguments and Load Task

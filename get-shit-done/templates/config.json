@@ -42,6 +42,7 @@
     "always_confirm_destructive": true,
     "always_confirm_external_services": true
   },
+  "model_overrides": {},
   "mosic": {
     "enabled": true,
     "workspace_id": "b0dd6682-3b21-4556-aeba-59229d454a27",

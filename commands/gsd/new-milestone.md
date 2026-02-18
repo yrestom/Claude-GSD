@@ -149,6 +149,11 @@ Read model profile for agent spawning:
 MODEL_PROFILE=$(cat config.json 2>/dev/null | jq -r ".model_profile // \"balanced\"")
 ```
 
+Read model overrides (override takes precedence over profile lookup):
+```
+MODEL_OVERRIDES = config.model_overrides or {}
+```
+
 **Model lookup table:**
 
 | Agent | quality | balanced | budget |
@@ -156,6 +161,8 @@ MODEL_PROFILE=$(cat config.json 2>/dev/null | jq -r ".model_profile // \"balance
 | gsd-project-researcher | opus | sonnet | haiku |
 | gsd-research-synthesizer | sonnet | sonnet | haiku |
 | gsd-roadmapper | opus | sonnet | sonnet |
+
+For each agent: model = MODEL_OVERRIDES[agent_name] ?? lookup(MODEL_PROFILE)
 
 ## Phase 7: Research Decision
 

@@ -591,6 +591,11 @@ MODEL_PROFILE=$(cat config.json 2>/dev/null | grep -o '"model_profile"[[:space:]
 
 Default to "balanced" if not set.
 
+Read model overrides (override takes precedence over profile lookup):
+```
+MODEL_OVERRIDES = config.model_overrides or {}
+```
+
 **Model lookup table:**
 
 | Agent | quality | balanced | budget |
@@ -599,7 +604,7 @@ Default to "balanced" if not set.
 | gsd-research-synthesizer | sonnet | sonnet | haiku |
 | gsd-roadmapper | opus | sonnet | sonnet |
 
-Store resolved models for use in Task calls below.
+For each agent: model = MODEL_OVERRIDES[agent_name] ?? lookup(MODEL_PROFILE)
 
 ## Phase 6: Research Decision
 

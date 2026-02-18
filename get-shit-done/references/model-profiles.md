@@ -42,10 +42,13 @@ Orchestrators resolve model before spawning:
 
 ```
 1. Read config.json
-2. Get model_profile (default: "balanced")
-3. Look up agent in table above
-4. Pass model parameter to Task call
+2. Check config.model_overrides[agent_name] → if present, use it directly (skip steps 3-4)
+3. Get model_profile (default: "balanced")
+4. Look up agent in profile table above
+5. Pass model parameter to Task call
 ```
+
+**Override takes precedence over profile.** This allows pinning a specific agent to a model regardless of which profile is active.
 
 ## Switching Profiles
 
@@ -57,6 +60,20 @@ Per-project default: Set in `config.json`:
   "model_profile": "balanced"
 }
 ```
+
+## Per-Agent Model Override
+
+To force a specific model for any agent, set `model_overrides` in `config.json`:
+```json
+{
+  "model_overrides": {
+    "gsd-executor": "sonnet",
+    "gsd-execution-reviewer": "sonnet"
+  }
+}
+```
+
+When set, the override is used regardless of the active `model_profile`. Only agents listed in `model_overrides` are affected — all others still use profile-based resolution.
 
 ## Design Rationale
 

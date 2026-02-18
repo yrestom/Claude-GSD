@@ -42,14 +42,17 @@ review_context = {
 
 ```
 max_retries = review_context.config.max_retries ?? 2
-reviewer_model = resolve_model("gsd-execution-reviewer", review_context.model_profile)
-executor_model = resolve_model("gsd-executor", review_context.model_profile)
+model_overrides = config.model_overrides or {}
 
+# Model resolution: override takes precedence over profile lookup
 Model lookup:
 | Agent | quality | balanced | budget |
 |-------|---------|----------|--------|
 | gsd-execution-reviewer | opus | sonnet | haiku |
 | gsd-executor | opus | sonnet | sonnet |
+
+reviewer_model = model_overrides["gsd-execution-reviewer"] ?? resolve_model("gsd-execution-reviewer", review_context.model_profile)
+executor_model = model_overrides["gsd-executor"] ?? resolve_model("gsd-executor", review_context.model_profile)
 
 attempt = 1
 current_executor_result = review_context.executor_result

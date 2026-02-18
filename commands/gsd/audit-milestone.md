@@ -46,13 +46,18 @@ MODEL_PROFILE=$(cat config.json 2>/dev/null | jq -r ".model_profile // \"balance
 
 Default to "balanced" if not set.
 
+Read model overrides (override takes precedence over profile lookup):
+```
+MODEL_OVERRIDES = config.model_overrides or {}
+```
+
 **Model lookup table:**
 
 | Agent | quality | balanced | budget |
 |-------|---------|----------|--------|
 | gsd-integration-checker | sonnet | sonnet | haiku |
 
-Store resolved model for use in Task call below.
+checker_model = MODEL_OVERRIDES["gsd-integration-checker"] ?? lookup(MODEL_PROFILE)
 
 ## 1. Load Project Context from Mosic
 
