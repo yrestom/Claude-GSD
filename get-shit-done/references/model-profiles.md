@@ -15,6 +15,7 @@ Model profiles control which Claude model each GSD agent uses. This allows balan
 | gsd-debugger | opus | sonnet | sonnet |
 | gsd-codebase-mapper | sonnet | haiku | haiku |
 | gsd-verifier | sonnet | sonnet | haiku |
+| gsd-execution-reviewer | opus | sonnet | haiku |
 | gsd-plan-checker | sonnet | sonnet | haiku |
 | gsd-integration-checker | sonnet | sonnet | haiku |
 
@@ -74,6 +75,18 @@ To force a specific model for any agent, set `model_overrides` in `config.json`:
 ```
 
 When set, the override is used regardless of the active `model_profile`. Only agents listed in `model_overrides` are affected — all others still use profile-based resolution.
+
+## Adaptive Review Models
+
+When adaptive review is enabled (`config.workflow.execution_review.adaptive.enabled: true`), the execution reviewer uses its own model resolution that bypasses the profile table above:
+
+- **Quick scan phase:** Uses the tier's `scan_model` (or `model` for quick tier), typically Haiku
+- **Deep review phase:** Uses the tier's `deep_model` (standard/thorough) or `model` (quick tier), typically Sonnet
+- **Escalation on retry:** Uses `adaptive.escalation.retry_model` (typically Opus) after the configured attempt threshold
+
+`model_overrides` still takes highest precedence — if set, it overrides tier-specific models, escalation, and profile lookup. Tier-specific models (defined in `config.workflow.execution_review.adaptive.tiers`) are smart defaults that apply when no override is set. Escalation models (`adaptive.escalation`) are a safety net for late retries, also below `model_overrides` in priority.
+
+See `execution-review.md` workflow for full resolution logic.
 
 ## Design Rationale
 

@@ -537,6 +537,72 @@ Evaluate EACH task against the TDD heuristic:
 
 </task_breakdown>
 
+<review_tier_assignment>
+
+## Assigning Review Tiers to Subtasks
+
+When creating subtasks, assign a `Review Tier` to each based on its risk level. This controls how deeply the execution reviewer inspects the work.
+
+**Tiers:**
+
+| Tier | When to Assign |
+|------|----------------|
+| `skip` | Subtask ONLY modifies docs, config, comments, or renames. Files are all `.md/.json/.yml/.yaml/.css/.txt/.rst`. No logic changes. |
+| `quick` | Single-file modification, test-only changes, CSS/style-only changes, minor fixes. Low risk of security or correctness issues. |
+| `standard` | Default for all code changes. Multiple files, business logic, data access. |
+| `thorough` | Action mentions permissions, auth, workspace isolation, raw SQL, `frappe.whitelist`, external API integration, DB migration, security, or payment processing. |
+
+**Assignment heuristic (evaluate per subtask):**
+
+```
+FUNCTION assign_review_tier(subtask_action, subtask_files):
+  action_lower = subtask_action.lower()
+  files_lower = subtask_files.map(f => f.lower())
+
+  # Use keyword lists from @~/.claude/get-shit-done/references/detection-constants.md
+  # "## Review Tier Keywords" section
+
+  # Check high-risk first (thorough)
+  high_risk_keywords = [
+    "whitelist", "permission", "auth", "login", "session",
+    "frappe.db.sql", "raw sql", "ignore_permissions",
+    "workspace isolation", "external api", "webhook",
+    "db migration", "security", "payment", "oauth"
+  ]
+  IF any(kw in action_lower for kw in high_risk_keywords):
+    RETURN "thorough"
+
+  # Check skip conditions
+  doc_extensions = [".md", ".yml", ".yaml", ".txt", ".rst"]
+  config_extensions = [".json", ".toml", ".ini", ".cfg"]
+  skip_actions = ["documentation", "readme", "changelog", "docstring",
+                  "comment-only", "rename", "move file", "config update"]
+  IF any(kw in action_lower for kw in skip_actions):
+    IF all(any(f.endswith(ext) for ext in doc_extensions + config_extensions) for f in files_lower):
+      RETURN "skip"
+
+  # Check quick conditions
+  quick_actions = ["test", "spec", "css", "scss", "style", "minor fix", "typo"]
+  test_extensions = ["_test.py", ".test.ts", ".test.js", ".spec.ts", ".spec.js"]
+  IF any(kw in action_lower for kw in quick_actions):
+    RETURN "quick"
+  IF all(any(f.endswith(ext) for ext in test_extensions) for f in files_lower):
+    RETURN "quick"
+  IF len(files_lower) == 1 AND all(any(f.endswith(ext) for ext in [".css", ".scss", ".less"]) for f in files_lower):
+    RETURN "quick"
+
+  # Default
+  RETURN "standard"
+```
+
+**Rules:**
+- Every subtask MUST have a Review Tier in its Metadata paragraph
+- When in doubt, use `standard` (it's the safe default)
+- TDD subtasks (Type=tdd) should be at least `quick` (never `skip`)
+- If a subtask creates a new `@frappe.whitelist` endpoint, it MUST be `thorough`
+
+</review_tier_assignment>
+
 <dependency_graph>
 
 ## Building the Dependency Graph
@@ -785,7 +851,7 @@ subtask = mosic_create_document("MTask", {
       { type: "paragraph", data: { text: "{what to do}" } },
       { type: "header", data: { text: "Metadata", level: 2 } },
       { type: "paragraph", data: {
-        text: "**Wave:** {wave_number}\n**Depends On:** {comma-separated subtask titles or 'None'}\n**Type:** {auto|tdd|checkpoint:*}"
+        text: "**Wave:** {wave_number}\n**Depends On:** {comma-separated subtask titles or 'None'}\n**Type:** {auto|tdd|checkpoint:*}\n**Review Tier:** {skip|quick|standard|thorough}"
       }},
       { type: "header", data: { text: "Files", level: 2 } },
       { type: "list", data: { style: "unordered", items: file_paths } },

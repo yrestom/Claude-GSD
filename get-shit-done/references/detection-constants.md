@@ -39,3 +39,41 @@ converter, calculator, formatter, serializer, authentication, authorization
 1. User decision (from context page `Testing Approach`) — highest priority
 2. Config setting (`config.workflow.tdd`) — `true` forces TDD, `false` disables
 3. Keyword heuristic (these keywords) — only when config is `"auto"`
+
+## Review Tier Keywords
+
+Keywords used by the planner and runtime tier detection to assign review depth to subtasks.
+
+### High-Risk Patterns (→ `thorough` tier)
+
+Match case-insensitively against subtask action text, file paths, and `git diff` output.
+
+```
+frappe.whitelist, @frappe.whitelist, whitelist, allow_guest,
+has_permission, permission, workspace isolation, workspace boundary,
+frappe.db.sql, raw SQL, db.sql, frappe.get_all,
+ignore_permissions, is_user_member_of_workspace,
+authentication, authorization, auth, login, session,
+API endpoint, new endpoint, external API, external integration,
+webhook, third-party, payment, stripe, oauth,
+DB migration, schema migration, database migration,
+security, CSRF, XSS, injection, sanitize
+```
+
+### Low-Risk Patterns (→ `skip` or `quick` tier)
+
+```
+# skip tier (no review needed)
+documentation, README, CHANGELOG, docstring, comment-only,
+rename, file rename, move file, config update,
+.md, .yml, .yaml, .json (config only), .txt, .rst
+
+# quick tier (Haiku scan only)
+test file, test case, spec file, _test.py, .test.ts, .spec.ts,
+CSS, SCSS, LESS, stylesheet, style-only,
+single file, minor fix, typo fix, formatting
+```
+
+**Usage:** Two signals combine (higher risk wins):
+1. **Planner hint** — assigned at planning time from subtask action/files
+2. **Runtime detection** — pattern matching on `git diff` output after execution

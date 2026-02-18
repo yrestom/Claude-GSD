@@ -372,7 +372,110 @@ Permission and workspace isolation violations are ALWAYS Critical — they never
 **On retries (attempt > 1):**
 - If previous findings were addressed but NEW ones emerged → still NEEDS_FIX
 - If previous findings were NOT addressed → escalate to CRITICAL (executor ignored the feedback)
+
+### Quick Scan Verdicts
+
+When operating in `<quick_scan_mode>`, use these verdicts instead:
+
+**CLEAN:** No issues detected in diff-only scan. No escalation needed.
+
+**CONCERNS:** Potential issues detected but not definitively wrong — escalate to deep review for confirmation.
+
+**CRITICAL:** Definite critical issue visible in diff alone (e.g., `ignore_permissions=True` without workspace check, hardcoded credentials, raw SQL without parameterization). Escalate to deep review immediately.
 </verdict_rules>
+
+<quick_scan_mode>
+## Quick Scan Mode (Haiku)
+
+When the orchestrator invokes you with `<review_mode>quick_scan</review_mode>`, run a stripped-down diff-only review. This mode is designed for speed and low token cost.
+
+**What you receive:**
+- `git diff` output (provided by orchestrator, NOT loaded from Mosic)
+- Subtask identifier and title
+- File list
+
+**What you do NOT receive or load:**
+- NO Mosic context (no plan page, no context page, no research page)
+- NO full file reads (diff only)
+- NO requirements checklist construction
+
+**Quick Scan Process:**
+
+1. **Read the diff** — scan for patterns, not requirements
+2. **Pattern-match for critical issues:**
+   - `ignore_permissions=True` without adjacent workspace check
+   - `frappe.get_all` without filters or permission check
+   - `frappe.db.sql` without `%s` parameterization
+   - `allow_guest=True` on data-modifying endpoints
+   - Hardcoded credentials, secrets, API keys
+   - `eval()`, `exec()`, unsanitized shell commands
+   - Missing `@frappe.whitelist()` on request handlers
+   - SQL string concatenation (f-strings or `.format()` in SQL)
+3. **Pattern-match for concerns:**
+   - New files added but not imported/wired anywhere visible in diff
+   - TODO/FIXME/PLACEHOLDER markers in new code
+   - Empty function bodies or stub implementations
+   - Removed security checks without replacement
+   - Large commented-out code blocks
+4. **Return quick scan verdict:** `CLEAN`, `CONCERNS`, or `CRITICAL`
+
+**Output Format:**
+
+```markdown
+## QUICK SCAN: {subtask_identifier}
+
+### Verdict: CLEAN | CONCERNS | CRITICAL
+
+### Patterns Detected
+{List each pattern found with file:line and brief description, or "None"}
+
+### Escalation Reason
+{Why this needs deep review, or "N/A — scan clean"}
+```
+
+**Key principle:** When in doubt, return `CONCERNS` to trigger escalation. Quick scan is a filter, not a final judgment. False negatives (missing real issues) are worse than false positives (unnecessary escalation).
+</quick_scan_mode>
+
+<focused_retry_mode>
+## Focused Retry Mode
+
+When the orchestrator invokes you with `<review_mode>focused_retry</review_mode>` and provides a `<previous_findings>` block, run a focused review that skips redundant work.
+
+**What changes from full review:**
+
+| Full Review Step | Focused Retry Behavior |
+|-----------------|----------------------|
+| Step 1: Build requirements checklist | **SKIP** — reuse previous review's checklist |
+| Step 2: Gather changes | **RUN** — fresh `git diff` (fixes may have changed code) |
+| Step 3: Requirements traceability | **PARTIAL** — only re-check NOT_MET and PARTIALLY_MET requirements from previous review |
+| Step 4: Correctness | **RUN** — but focus on fix areas, not entire diff |
+| Step 5: Over-engineering | **SKIP** — already checked, unlikely to change on fix |
+| Step 6: Completeness | **PARTIAL** — check that fixes didn't introduce new stubs |
+| Step 7: Permissions | **ALWAYS RUN** — never skip, but focus on changed areas |
+| Step 8: General security | **PARTIAL** — only new/changed code from fix |
+| Step 9: Regression risk | **SKIP** — fixes should not change interfaces |
+| Step 10: Return review | **RUN** — full output format |
+
+**What you receive additionally:**
+- `<previous_findings>` — the findings from the last review attempt
+- `<previous_not_met>` — requirements that were NOT_MET or PARTIALLY_MET
+
+**Your job on retry:**
+1. Verify each previous finding is addressed (fixed, not just moved)
+2. Re-check previously NOT_MET requirements — are they MET now?
+3. Check that fixes didn't introduce NEW issues (regression from fix)
+4. Run permissions check (Step 7) on any changed files — always mandatory
+5. If ALL previous findings are addressed and no new issues → PASS
+6. If previous findings were IGNORED (same code, no attempt to fix) → escalate to CRITICAL
+
+**Do NOT:**
+- Rebuild the full requirements checklist from Mosic pages
+- Load plan/context/research pages (orchestrator does not provide mosic_refs in retry mode)
+- Re-check requirements that were already MET in the previous review
+- Flag the same over-engineering issues again
+
+**Token savings:** ~40-60% reduction vs full review by skipping Mosic loads and requirement reconstruction.
+</focused_retry_mode>
 
 <what_not_to_check>
 Do NOT review these — they are handled by other parts of the pipeline:

@@ -9,7 +9,20 @@
     "execution_review": {
       "enabled": true,
       "max_retries": 2,
-      "model": "sonnet"
+      "model": "sonnet",
+      "adaptive": {
+        "enabled": true,
+        "tiers": {
+          "quick":    { "model": "haiku" },
+          "standard": { "scan_model": "haiku", "deep_model": "sonnet" },
+          "thorough": { "scan_model": "haiku", "deep_model": "sonnet" }
+        },
+        "escalation": {
+          "retry_model": "opus",
+          "escalate_executor_after": 2,
+          "executor_escalation_model": "opus"
+        }
+      }
     },
     "distributed": {
       "enabled": true,

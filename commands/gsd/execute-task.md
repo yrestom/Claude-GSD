@@ -113,7 +113,8 @@ Model lookup:
 | gsd-execution-reviewer | opus | sonnet | haiku |
 
 executor_model = model_overrides["gsd-executor"] ?? lookup(model_profile)
-reviewer_model = model_overrides["gsd-execution-reviewer"] ?? lookup(model_profile)
+# Note: reviewer model is resolved internally by execution-review.md workflow
+# (adaptive path uses tier-specific models; legacy path resolves its own)
 ```
 
 ## 1. Load Task and Validate
@@ -301,6 +302,16 @@ FUNCTION extract_files_from_description(description):
             BREAK  # End of files section
       RETURN files
   RETURN []
+
+# --- Helper: extract_review_tier_from_description(description) ---
+# Parses the subtask's markdown description for a "**Review Tier:** {tier}" line.
+# Returns tier string ("skip", "quick", "standard", "thorough"), or null if not found.
+# Example: "**Review Tier:** thorough\n..." → "thorough"
+FUNCTION extract_review_tier_from_description(description):
+  match = regex_search(description, /\*?\*?Review Tier:?\*?\*?\s*(skip|quick|standard|thorough)/i)
+  IF match:
+    RETURN match[1].lower()
+  RETURN null
 
 # Extract wave metadata from subtask descriptions
 # Wave is in the Metadata section: "**Wave:** N"
@@ -554,7 +565,9 @@ PROCEDURE post_subtask_completion(subtask, st, agent_result, review_enabled, rev
       files_modified: files,
       mosic_refs: mosic_refs,
       config: review_config,
-      model_profile: model_profile
+      model_profile: model_profile,
+      model_overrides: model_overrides,     # Explicit pass — override always wins
+      subtask_description: st.description   # Passed for adaptive tier detection
     })
 
     IF review_loop_result.status == "abort":

@@ -4,6 +4,8 @@ Shared execution review loop used by execute-task.md and execute-phase.md.
 After an executor completes a subtask (or plan), this workflow spawns an independent reviewer agent to verify the work against plan requirements. If issues are found, it spawns a fix/re-execute agent and loops until the review passes or max retries are exhausted.
 
 **This is the SINGLE source of truth for review loop logic.** Orchestrators call into this workflow — they do not duplicate review logic.
+
+**Adaptive review (v2):** When `adaptive.enabled` is true, the review loop uses a two-phase approach: cheap Haiku quick scan → conditional deep review. Risk tiers control which subtasks get which level of scrutiny. When `adaptive.enabled` is false (or absent), the system falls back to the legacy single-model behavior.
 </purpose>
 
 <usage>
@@ -30,127 +32,524 @@ review_context = {
   config: {                              // execution_review config section
     enabled: true,
     max_retries: 2,
-    model: "sonnet"
+    model: "sonnet",                     // Legacy single-model (used when adaptive disabled)
+    adaptive: {                          // Optional — omit or set enabled:false for legacy
+      enabled: true,
+      tiers: { ... },
+      escalation: { ... }
+    }
   },
-  model_profile: "balanced"              // For model resolution
+  model_profile: "balanced",            // For model resolution
+  model_overrides: {},                   // From config.model_overrides — explicit agent model pins
+  subtask_description: "{text}"          // Full subtask description markdown (for tier detection)
 }
 ```
 </review_context_schema>
+
+<tier_detection>
+## Tier Detection
+
+Two signals determine the review tier. Higher risk always wins.
+
+### Planner Hint (from subtask description)
+
+```
+FUNCTION extract_review_tier_from_description(description):
+  # Parses subtask markdown description for "**Review Tier:** {tier}" line
+  match = regex_search(description, /\*?\*?Review Tier:?\*?\*?\s*(skip|quick|standard|thorough)/i)
+  IF match:
+    RETURN match[1].lower()
+  RETURN null  # No planner hint — use runtime detection only
+```
+
+### Runtime Detection (from git diff)
+
+```
+FUNCTION detect_runtime_tier(files_modified):
+  # Get the actual diff content for pattern matching
+  diff_output = Bash("git diff -- " + files_modified.join(" "))
+
+  diff_lower = diff_output.lower()
+
+  # Use keyword lists from @~/.claude/get-shit-done/references/detection-constants.md
+  # "## Review Tier Keywords" section
+
+  # Check high-risk patterns → thorough
+  high_risk_patterns = [
+    "frappe.whitelist", "@frappe.whitelist", "allow_guest",
+    "has_permission", "ignore_permissions", "is_user_member_of_workspace",
+    "frappe.db.sql", "frappe.get_all",
+    "external api", "webhook", "oauth",
+    "schema migration", "database migration"
+  ]
+  IF any(pattern in diff_lower for pattern in high_risk_patterns):
+    RETURN "thorough"
+
+  # Check skip patterns (all files are docs/config only)
+  doc_extensions = [".md", ".yml", ".yaml", ".txt", ".rst"]
+  IF all(any(f.endswith(ext) for ext in doc_extensions) for f in files_modified):
+    RETURN "skip"
+
+  # Check quick patterns (test-only or style-only)
+  test_extensions = ["_test.py", ".test.ts", ".test.js", ".spec.ts", ".spec.js"]
+  style_extensions = [".css", ".scss", ".less"]
+  IF all(any(f.endswith(ext) for ext in test_extensions) for f in files_modified):
+    RETURN "quick"
+  IF all(any(f.endswith(ext) for ext in style_extensions) for f in files_modified):
+    RETURN "quick"
+
+  # Default
+  RETURN "standard"
+```
+
+### Resolution (higher risk wins)
+
+```
+FUNCTION resolve_review_tier(planner_hint, runtime_tier):
+  tier_order = { "skip": 0, "quick": 1, "standard": 2, "thorough": 3 }
+
+  IF planner_hint AND runtime_tier:
+    # Higher risk wins
+    IF tier_order[runtime_tier] > tier_order[planner_hint]:
+      RETURN runtime_tier
+    RETURN planner_hint
+
+  IF planner_hint:
+    RETURN planner_hint
+
+  IF runtime_tier:
+    RETURN runtime_tier
+
+  RETURN "standard"  # Ultimate fallback
+```
+</tier_detection>
+
+<quick_scan>
+## Quick Scan Phase
+
+Cheap Haiku-powered scan of the diff to filter out clean subtasks without loading Mosic context.
+
+```
+FUNCTION run_quick_scan(review_context, scan_model):
+  # Get diff for the subtask's files
+  diff_output = Bash("git diff -- " + review_context.files_modified.join(" "))
+
+  quick_scan_prompt = """
+First, read ~/.claude/agents/gsd-execution-reviewer.md for your role.
+Focus on the <quick_scan_mode> section.
+
+<review_mode>quick_scan</review_mode>
+
+<review_scope>
+<subtask_identifier>""" + review_context.entity_identifier + """</subtask_identifier>
+<subtask_title>""" + review_context.entity_title + """</subtask_title>
+<files_modified>
+""" + review_context.files_modified.join("\n") + """
+</files_modified>
+</review_scope>
+
+<diff>
+""" + diff_output + """
+</diff>
+
+Run a quick scan per your <quick_scan_mode> instructions. Return your verdict: CLEAN, CONCERNS, or CRITICAL.
+"""
+
+  scan_result = Task(
+    prompt = quick_scan_prompt,
+    subagent_type = "general-purpose",
+    model = scan_model,
+    description = "Quick scan: " + review_context.entity_identifier
+  )
+
+  RETURN scan_result
+
+
+FUNCTION parse_quick_scan_verdict(scan_result):
+  match = scan_result.match(/(?:###\s*Verdict:\s*|\*\*Verdict:\*\*\s*)(CLEAN|CONCERNS|CRITICAL)/i)
+  RETURN match ? match[1].toUpperCase() : "CONCERNS"  # Default to CONCERNS (escalate) if unparseable
+
+
+FUNCTION should_escalate_to_deep(scan_verdict, tier):
+  # Skip tier never escalates (no review at all)
+  IF tier == "skip":
+    RETURN false
+
+  # Quick tier only escalates if scan found issues
+  IF tier == "quick":
+    RETURN scan_verdict != "CLEAN"
+
+  # Standard tier escalates if scan found issues
+  IF tier == "standard":
+    RETURN scan_verdict != "CLEAN"
+
+  # Thorough tier ALWAYS escalates (mandatory deep review)
+  IF tier == "thorough":
+    RETURN true
+
+  RETURN true  # Safety fallback
+```
+</quick_scan>
+
+<model_resolution>
+## Model Resolution for Adaptive Review
+
+**Priority chain (highest wins):**
+1. `model_overrides[agent]` — explicit user override, ALWAYS wins
+2. Escalation model — late retry safety net (only when no override set)
+3. Tier-specific model — adaptive config defaults
+4. Profile lookup — ultimate fallback
+
+```
+FUNCTION resolve_review_model(tier, attempt, adaptive_config, model_overrides, model_profile):
+  # 1. model_overrides ALWAYS wins (user's explicit choice)
+  IF model_overrides["gsd-execution-reviewer"]:
+    RETURN model_overrides["gsd-execution-reviewer"]
+
+  # 2. Escalation on late retries (attempt AFTER the threshold, not at it)
+  IF attempt > (adaptive_config.escalation?.escalate_executor_after ?? 2):
+    RETURN adaptive_config.escalation?.retry_model ?? "opus"
+
+  # 3. Tier-specific model
+  IF tier == "quick":
+    RETURN adaptive_config.tiers?.quick?.model ?? "haiku"
+
+  IF tier == "standard":
+    RETURN adaptive_config.tiers?.standard?.deep_model ?? "sonnet"
+
+  IF tier == "thorough":
+    RETURN adaptive_config.tiers?.thorough?.deep_model ?? "sonnet"
+
+  # 4. Fallback to profile lookup
+  RETURN resolve_model("gsd-execution-reviewer", model_profile)
+
+
+FUNCTION resolve_scan_model(tier, adaptive_config, model_overrides):
+  # model_overrides applies to ALL reviewer invocations (including quick scan)
+  IF model_overrides["gsd-execution-reviewer"]:
+    RETURN model_overrides["gsd-execution-reviewer"]
+
+  # Tier-specific scan model (look up the tier's own scan_model first)
+  tier_config = adaptive_config.tiers?[tier]
+  IF tier_config?.scan_model:
+    RETURN tier_config.scan_model
+  IF tier_config?.model:
+    RETURN tier_config.model
+
+  # Fallback: standard tier's scan model, then haiku
+  RETURN adaptive_config.tiers?.standard?.scan_model ?? "haiku"
+
+
+FUNCTION resolve_executor_model_for_fix(attempt, adaptive_config, model_overrides, model_profile):
+  # 1. model_overrides ALWAYS wins
+  IF model_overrides["gsd-executor"]:
+    RETURN model_overrides["gsd-executor"]
+
+  # 2. Escalate executor on late retries
+  IF attempt > (adaptive_config.escalation?.escalate_executor_after ?? 2):
+    RETURN adaptive_config.escalation?.executor_escalation_model ?? "opus"
+
+  # 3. Normal executor model from profile
+  RETURN resolve_model("gsd-executor", model_profile)
+```
+</model_resolution>
+
+<build_focused_retry_prompt>
+## Build Focused Retry Prompt
+
+Used on retries (attempt > 1) to skip redundant work and focus on previous findings.
+
+```
+FUNCTION build_focused_retry_prompt(context, files, executor_result, attempt, previous_findings):
+
+  prompt = """
+First, read ~/.claude/agents/gsd-execution-reviewer.md for your role.
+Focus on the <focused_retry_mode> section.
+
+<review_mode>focused_retry</review_mode>
+
+<review_scope>
+<subtask_identifier>""" + context.entity_identifier + """</subtask_identifier>
+<subtask_title>""" + context.entity_title + """</subtask_title>
+<files_modified>
+""" + files.join("\n") + """
+</files_modified>
+<executor_verification>
+""" + extract_verification_section(executor_result) + """
+</executor_verification>
+<attempt_number>""" + attempt + """</attempt_number>
+</review_scope>
+
+<previous_findings>
+""" + format_findings(previous_findings) + """
+</previous_findings>
+
+<previous_not_met>
+""" + format_not_met_requirements(previous_findings) + """
+</previous_not_met>
+
+Review the fix attempt per your <focused_retry_mode> instructions:
+1. Run `git diff` to see current state
+2. Verify each previous finding is addressed
+3. Check for regressions from the fix
+4. Run permissions check (Step 7) on changed files — ALWAYS mandatory
+5. Return your verdict
+"""
+
+  RETURN prompt
+```
+</build_focused_retry_prompt>
 
 <review_loop>
 ## Review Loop
 
 ```
 max_retries = review_context.config.max_retries ?? 2
-model_overrides = config.model_overrides or {}
+model_overrides = review_context.model_overrides or {}
+adaptive_config = review_context.config.adaptive or { enabled: false }
+adaptive_enabled = adaptive_config.enabled === true
 
-# Model resolution: override takes precedence over profile lookup
-Model lookup:
-| Agent | quality | balanced | budget |
-|-------|---------|----------|--------|
-| gsd-execution-reviewer | opus | sonnet | haiku |
-| gsd-executor | opus | sonnet | sonnet |
+# ============================================================
+# LEGACY PATH — when adaptive is disabled or absent
+# ============================================================
+IF NOT adaptive_enabled:
 
-reviewer_model = model_overrides["gsd-execution-reviewer"] ?? resolve_model("gsd-execution-reviewer", review_context.model_profile)
-executor_model = model_overrides["gsd-executor"] ?? resolve_model("gsd-executor", review_context.model_profile)
+  # Model resolution: override takes precedence over profile lookup
+  Model lookup:
+  | Agent | quality | balanced | budget |
+  |-------|---------|----------|--------|
+  | gsd-execution-reviewer | opus | sonnet | haiku |
+  | gsd-executor | opus | sonnet | sonnet |
 
-attempt = 1
-current_executor_result = review_context.executor_result
-current_files = review_context.files_modified
-previous_findings = null
+  reviewer_model = model_overrides["gsd-execution-reviewer"] ?? resolve_model("gsd-execution-reviewer", review_context.model_profile)
+  executor_model = model_overrides["gsd-executor"] ?? resolve_model("gsd-executor", review_context.model_profile)
 
-WHILE attempt <= max_retries + 1:  # +1 because first run is not a "retry"
+  attempt = 1
+  current_executor_result = review_context.executor_result
+  current_files = review_context.files_modified
+  previous_findings = null
 
-  # --- SPAWN REVIEWER ---
-  reviewer_prompt = build_reviewer_prompt(
-    review_context,
-    current_files,
-    current_executor_result,
-    attempt,
-    previous_findings
-  )
+  WHILE attempt <= max_retries + 1:  # +1 because first run is not a "retry"
 
-  review_result = Task(
-    prompt = reviewer_prompt,
-    subagent_type = "general-purpose",
-    model = reviewer_model,
-    description = "Review: " + review_context.entity_identifier
-  )
-
-  verdict = parse_verdict(review_result)
-  # Parse verdict by looking for "### Verdict: PASS|PASS_WITH_NOTES|NEEDS_FIX|CRITICAL"
-
-  IF verdict == "PASS":
-    Display: "Review PASSED for " + review_context.entity_identifier
-    RETURN { status: "pass", files: current_files, review: review_result, executor_result: current_executor_result }
-
-  IF verdict == "PASS_WITH_NOTES":
-    Display: "Review PASSED (with notes) for " + review_context.entity_identifier
-    RETURN { status: "pass", files: current_files, review: review_result, executor_result: current_executor_result }
-
-  # --- REVIEW FAILED ---
-  findings = parse_findings(review_result)
-  Display: "Review found issues (attempt " + attempt + "/" + (max_retries + 1) + ")"
-  Display: review_result  # Show findings to user
-
-  IF attempt > max_retries:
-    # Max retries exhausted — ask user
-    AskUserQuestion({
-      questions: [{
-        question: "Reviewer found issues after " + attempt + " attempts for " + review_context.entity_identifier + ". How to proceed?",
-        header: "Review",
-        options: [
-          { label: "Commit anyway", description: "Accept current state, commit with known issues" },
-          { label: "Skip subtask", description: "Don't commit, mark as failed, continue" },
-          { label: "Stop execution", description: "Abort remaining work" }
-        ],
-        multiSelect: false
-      }]
-    })
-
-    IF user_selection == "Commit anyway":
-      RETURN { status: "pass_with_issues", files: current_files, review: review_result, executor_result: current_executor_result }
-    IF user_selection == "Skip subtask":
-      RETURN { status: "skipped", files: [], review: review_result }
-    IF user_selection == "Stop execution":
-      RETURN { status: "abort", files: [], review: review_result }
-
-  # --- DETERMINE FIX STRATEGY ---
-  has_critical = findings.some(f => f.severity == "Critical")
-
-  IF has_critical:
-    # Critical findings — full re-execution (implementation fundamentally wrong)
-    Display: "CRITICAL issues found. Re-executing " + review_context.entity_identifier + " from scratch..."
-
-    # Clean working tree before re-execution — revert only files changed by previous attempt
-    FOR each file in current_files:
-      Bash("git checkout -- " + file)
-
-    reexecute_prompt = build_reexecute_prompt(review_context, findings, attempt)
-    fix_result = Task(
-      prompt = reexecute_prompt,
-      subagent_type = "general-purpose",
-      model = executor_model,
-      description = "Re-execute: " + review_context.entity_identifier + " (attempt " + (attempt + 1) + ")"
+    # --- SPAWN REVIEWER ---
+    reviewer_prompt = build_reviewer_prompt(
+      review_context,
+      current_files,
+      current_executor_result,
+      attempt,
+      previous_findings
     )
 
-  ELSE:
-    # Warning findings only — targeted fix (specific files, specific issues)
-    Display: "Fixing " + findings.length + " issue(s) for " + review_context.entity_identifier + "..."
-
-    fix_prompt = build_fix_prompt(review_context, findings, current_files, attempt)
-    fix_result = Task(
-      prompt = fix_prompt,
+    review_result = Task(
+      prompt = reviewer_prompt,
       subagent_type = "general-purpose",
-      model = executor_model,
-      description = "Fix: " + review_context.entity_identifier + " (attempt " + (attempt + 1) + ")"
+      model = reviewer_model,
+      description = "Review: " + review_context.entity_identifier
     )
 
-  # Update for next iteration
-  current_executor_result = fix_result
-  current_files = parse_file_list(fix_result)
-  previous_findings = findings
-  attempt += 1
+    verdict = parse_verdict(review_result)
+
+    IF verdict == "PASS":
+      Display: "Review PASSED for " + review_context.entity_identifier
+      RETURN { status: "pass", files: current_files, review: review_result, executor_result: current_executor_result }
+
+    IF verdict == "PASS_WITH_NOTES":
+      Display: "Review PASSED (with notes) for " + review_context.entity_identifier
+      RETURN { status: "pass", files: current_files, review: review_result, executor_result: current_executor_result }
+
+    # --- REVIEW FAILED ---
+    findings = parse_findings(review_result)
+    Display: "Review found issues (attempt " + attempt + "/" + (max_retries + 1) + ")"
+    Display: review_result
+
+    IF attempt > max_retries:
+      AskUserQuestion({
+        questions: [{
+          question: "Reviewer found issues after " + attempt + " attempts for " + review_context.entity_identifier + ". How to proceed?",
+          header: "Review",
+          options: [
+            { label: "Commit anyway", description: "Accept current state, commit with known issues" },
+            { label: "Skip subtask", description: "Don't commit, mark as failed, continue" },
+            { label: "Stop execution", description: "Abort remaining work" }
+          ],
+          multiSelect: false
+        }]
+      })
+
+      IF user_selection == "Commit anyway":
+        RETURN { status: "pass_with_issues", files: current_files, review: review_result, executor_result: current_executor_result }
+      IF user_selection == "Skip subtask":
+        RETURN { status: "skipped", files: [], review: review_result }
+      IF user_selection == "Stop execution":
+        RETURN { status: "abort", files: [], review: review_result }
+
+    # --- DETERMINE FIX STRATEGY ---
+    has_critical = findings.some(f => f.severity == "Critical")
+
+    IF has_critical:
+      Display: "CRITICAL issues found. Re-executing " + review_context.entity_identifier + " from scratch..."
+      FOR each file in current_files:
+        Bash("git checkout -- " + file)
+
+      reexecute_prompt = build_reexecute_prompt(review_context, findings, attempt)
+      fix_result = Task(
+        prompt = reexecute_prompt,
+        subagent_type = "general-purpose",
+        model = executor_model,
+        description = "Re-execute: " + review_context.entity_identifier + " (attempt " + (attempt + 1) + ")"
+      )
+
+    ELSE:
+      Display: "Fixing " + findings.length + " issue(s) for " + review_context.entity_identifier + "..."
+      fix_prompt = build_fix_prompt(review_context, findings, current_files, attempt)
+      fix_result = Task(
+        prompt = fix_prompt,
+        subagent_type = "general-purpose",
+        model = executor_model,
+        description = "Fix: " + review_context.entity_identifier + " (attempt " + (attempt + 1) + ")"
+      )
+
+    current_executor_result = fix_result
+    current_files = parse_file_list(fix_result)
+    previous_findings = findings
+    attempt += 1
+
+# ============================================================
+# ADAPTIVE PATH — two-phase review with tier-based depth
+# ============================================================
+ELSE:
+
+  attempt = 1
+  current_executor_result = review_context.executor_result
+  current_files = review_context.files_modified
+  previous_findings = null
+
+  # --- TIER DETECTION ---
+  planner_hint = extract_review_tier_from_description(review_context.subtask_description or "")
+  runtime_tier = detect_runtime_tier(current_files)
+  tier = resolve_review_tier(planner_hint, runtime_tier)
+
+  Display: "Review tier: " + tier + " (planner=" + (planner_hint or "none") + ", runtime=" + runtime_tier + ")"
+
+  # --- SKIP TIER: No review at all ---
+  IF tier == "skip":
+    Display: "Skipping review for " + review_context.entity_identifier + " (docs/config only)"
+    RETURN { status: "pass", files: current_files, review: "Skipped (tier=skip)", executor_result: current_executor_result }
+
+  WHILE attempt <= max_retries + 1:
+
+    # --- PHASE 1: QUICK SCAN ---
+    scan_model = resolve_scan_model(tier, adaptive_config, model_overrides)
+
+    IF attempt == 1:
+      # First attempt: run quick scan
+      scan_result = run_quick_scan(review_context, scan_model)
+      scan_verdict = parse_quick_scan_verdict(scan_result)
+
+      Display: "Quick scan verdict: " + scan_verdict + " for " + review_context.entity_identifier
+
+      IF NOT should_escalate_to_deep(scan_verdict, tier):
+        Display: "Review PASSED (quick scan clean) for " + review_context.entity_identifier
+        RETURN { status: "pass", files: current_files, review: scan_result, executor_result: current_executor_result }
+
+      Display: "Escalating to deep review..."
+
+    # --- PHASE 2: DEEP REVIEW ---
+    deep_model = resolve_review_model(tier, attempt, adaptive_config, model_overrides, review_context.model_profile)
+
+    IF attempt > 1 AND previous_findings:
+      # Retry: use focused retry prompt (skips Mosic loads, focuses on previous findings)
+      reviewer_prompt = build_focused_retry_prompt(
+        review_context,
+        current_files,
+        current_executor_result,
+        attempt,
+        previous_findings
+      )
+    ELSE:
+      # First deep review: full prompt with Mosic context
+      reviewer_prompt = build_reviewer_prompt(
+        review_context,
+        current_files,
+        current_executor_result,
+        attempt,
+        previous_findings
+      )
+
+    review_result = Task(
+      prompt = reviewer_prompt,
+      subagent_type = "general-purpose",
+      model = deep_model,
+      description = "Deep review: " + review_context.entity_identifier + " (attempt " + attempt + ")"
+    )
+
+    verdict = parse_verdict(review_result)
+
+    IF verdict == "PASS":
+      Display: "Review PASSED for " + review_context.entity_identifier
+      RETURN { status: "pass", files: current_files, review: review_result, executor_result: current_executor_result }
+
+    IF verdict == "PASS_WITH_NOTES":
+      Display: "Review PASSED (with notes) for " + review_context.entity_identifier
+      RETURN { status: "pass", files: current_files, review: review_result, executor_result: current_executor_result }
+
+    # --- REVIEW FAILED ---
+    findings = parse_findings(review_result)
+    Display: "Review found issues (attempt " + attempt + "/" + (max_retries + 1) + ")"
+    Display: review_result
+
+    IF attempt > max_retries:
+      AskUserQuestion({
+        questions: [{
+          question: "Reviewer found issues after " + attempt + " attempts for " + review_context.entity_identifier + ". How to proceed?",
+          header: "Review",
+          options: [
+            { label: "Commit anyway", description: "Accept current state, commit with known issues" },
+            { label: "Skip subtask", description: "Don't commit, mark as failed, continue" },
+            { label: "Stop execution", description: "Abort remaining work" }
+          ],
+          multiSelect: false
+        }]
+      })
+
+      IF user_selection == "Commit anyway":
+        RETURN { status: "pass_with_issues", files: current_files, review: review_result, executor_result: current_executor_result }
+      IF user_selection == "Skip subtask":
+        RETURN { status: "skipped", files: [], review: review_result }
+      IF user_selection == "Stop execution":
+        RETURN { status: "abort", files: [], review: review_result }
+
+    # --- DETERMINE FIX STRATEGY ---
+    has_critical = findings.some(f => f.severity == "Critical")
+    fix_executor_model = resolve_executor_model_for_fix(attempt, adaptive_config, model_overrides, review_context.model_profile)
+
+    IF has_critical:
+      Display: "CRITICAL issues found. Re-executing " + review_context.entity_identifier + " from scratch..."
+      FOR each file in current_files:
+        Bash("git checkout -- " + file)
+
+      reexecute_prompt = build_reexecute_prompt(review_context, findings, attempt)
+      fix_result = Task(
+        prompt = reexecute_prompt,
+        subagent_type = "general-purpose",
+        model = fix_executor_model,
+        description = "Re-execute: " + review_context.entity_identifier + " (attempt " + (attempt + 1) + ")"
+      )
+
+    ELSE:
+      Display: "Fixing " + findings.length + " issue(s) for " + review_context.entity_identifier + "..."
+      fix_prompt = build_fix_prompt(review_context, findings, current_files, attempt)
+      fix_result = Task(
+        prompt = fix_prompt,
+        subagent_type = "general-purpose",
+        model = fix_executor_model,
+        description = "Fix: " + review_context.entity_identifier + " (attempt " + (attempt + 1) + ")"
+      )
+
+    current_executor_result = fix_result
+    current_files = parse_file_list(fix_result)
+    previous_findings = findings
+    attempt += 1
 ```
 
 ### Parsing Helpers
@@ -204,6 +603,25 @@ FUNCTION parse_file_list(executor_result):
       IF file AND NOT file.startsWith("#"):
         files.push(file)
   RETURN files
+
+FUNCTION extract_review_tier_from_description(description):
+  match = regex_search(description, /\*?\*?Review Tier:?\*?\*?\s*(skip|quick|standard|thorough)/i)
+  IF match:
+    RETURN match[1].lower()
+  RETURN null
+
+FUNCTION format_not_met_requirements(findings):
+  # Extract requirements-related findings for focused retry
+  req_findings = findings.filter(f =>
+    f.issue.includes("NOT_MET") OR f.issue.includes("PARTIALLY_MET") OR
+    f.issue.includes("requirement") OR f.issue.includes("missing")
+  )
+  IF req_findings.length == 0:
+    RETURN "No specific requirement gaps from previous review."
+  result = ""
+  FOR each f in req_findings:
+    result += "- " + f.issue + " (" + f.file_line + ")\n"
+  RETURN result
 ```
 </review_loop>
 
