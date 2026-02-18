@@ -237,7 +237,8 @@ Issue: {$ARGUMENTS}
 
 ```
 Task(
-  prompt="
+  prompt="First, read ~/.claude/agents/gsd-debugger.md for your complete role instructions.
+
 <objective>
 Investigate issue: " + slug + "
 
@@ -275,7 +276,7 @@ On inconclusive:
 2. Return: ## INVESTIGATION INCONCLUSIVE with what was checked
 </output>
 ",
-  subagent_type="gsd-debugger",
+  subagent_type="general-purpose",
   model="{debugger_model}",
   description="Debug: " + slug
 )
@@ -360,8 +361,10 @@ WAIT for user response
 IF response == "fix":
   # Spawn fix subagent
   Task(
-    prompt="Apply fix for root cause...",
-    subagent_type="gsd-executor",
+    prompt="First, read ~/.claude/agents/gsd-executor.md for your complete role instructions.
+
+Apply fix for root cause...",
+    subagent_type="general-purpose",
     model="{executor_model}",
     description="Fix: " + slug
   )
@@ -418,7 +421,8 @@ WAIT for user response
 
 # Spawn continuation agent
 Task(
-  prompt="
+  prompt="First, read ~/.claude/agents/gsd-debugger.md for your complete role instructions.
+
 <objective>
 Continue debugging " + slug + ". Evidence is in the debug task.
 </objective>
@@ -437,7 +441,7 @@ Workspace ID: " + WORKSPACE_ID + "
 goal: find_and_fix
 </mode>
 ",
-  subagent_type="gsd-debugger",
+  subagent_type="general-purpose",
   model="{debugger_model}",
   description="Continue debug: " + slug
 )

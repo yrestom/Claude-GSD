@@ -279,7 +279,8 @@ Spawn planner:
 
 ```
 Task(
-  prompt="
+  prompt="First, read ~/.claude/agents/gsd-planner.md for your complete role instructions.
+
 <planning_context>
 
 **Mode:** quick
@@ -307,7 +308,7 @@ Update plan page " + PLAN_PAGE_ID + " with:
 Return: ## PLANNING COMPLETE with task count
 </output>
 ",
-  subagent_type="gsd-planner",
+  subagent_type="general-purpose",
   model="{planner_model}",
   description="Quick plan: " + DESCRIPTION
 )
@@ -324,7 +325,8 @@ After planner returns:
 
 ```
 Task(
-  prompt="
+  prompt="First, read ~/.claude/agents/gsd-executor.md for your complete role instructions.
+
 Execute quick task " + TASK_IDENTIFIER + ".
 
 **Task ID:** " + TASK_ID + "
@@ -345,7 +347,7 @@ After completion:
 3. Return: ## EXECUTION COMPLETE with commit hash
 </output>
 ",
-  subagent_type="gsd-executor",
+  subagent_type="general-purpose",
   model="{executor_model}",
   description="Execute: " + DESCRIPTION
 )

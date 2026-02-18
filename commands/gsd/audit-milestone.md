@@ -137,14 +137,16 @@ FOR each task_list in project.task_lists:
     phase_summaries.push(summary_page.content)
 
 Task(
-  prompt="Check cross-phase integration and E2E flows.
+  prompt="First, read ~/.claude/agents/gsd-integration-checker.md for your complete role instructions.
+
+Check cross-phase integration and E2E flows.
 
 Phases: {phase_list}
 Phase exports: {from summaries}
 API routes: {routes created}
 
 Verify cross-phase wiring and E2E user flows.",
-  subagent_type="gsd-integration-checker",
+  subagent_type="general-purpose",
   model="{integration_checker_model}"
 )
 ```

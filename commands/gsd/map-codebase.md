@@ -165,7 +165,8 @@ DISPLAY: "Spawning 4 parallel mapper agents..."
 
 # Agent 1: Tech Focus
 Task(
-  prompt="
+  prompt="First, read ~/.claude/agents/gsd-codebase-mapper.md for your complete role instructions.
+
 <focus>tech</focus>
 <workspace_id>" + WORKSPACE_ID + "</workspace_id>
 <focus_area>" + ($ARGUMENTS || "entire codebase") + "</focus_area>
@@ -177,14 +178,15 @@ Analyze:
 Output format:
 Return JSON with sections: { stack: {...}, integrations: {...} }
 ",
-  subagent_type="gsd-codebase-mapper",
+  subagent_type="general-purpose",
   model="sonnet",
   description="Map: Tech Stack & Integrations"
 )
 
 # Agent 2: Architecture Focus
 Task(
-  prompt="
+  prompt="First, read ~/.claude/agents/gsd-codebase-mapper.md for your complete role instructions.
+
 <focus>arch</focus>
 <workspace_id>" + WORKSPACE_ID + "</workspace_id>
 <focus_area>" + ($ARGUMENTS || "entire codebase") + "</focus_area>
@@ -196,14 +198,15 @@ Analyze:
 Output format:
 Return JSON with sections: { architecture: {...}, structure: {...} }
 ",
-  subagent_type="gsd-codebase-mapper",
+  subagent_type="general-purpose",
   model="sonnet",
   description="Map: Architecture & Structure"
 )
 
 # Agent 3: Quality Focus
 Task(
-  prompt="
+  prompt="First, read ~/.claude/agents/gsd-codebase-mapper.md for your complete role instructions.
+
 <focus>quality</focus>
 <workspace_id>" + WORKSPACE_ID + "</workspace_id>
 <focus_area>" + ($ARGUMENTS || "entire codebase") + "</focus_area>
@@ -215,14 +218,15 @@ Analyze:
 Output format:
 Return JSON with sections: { conventions: {...}, testing: {...} }
 ",
-  subagent_type="gsd-codebase-mapper",
+  subagent_type="general-purpose",
   model="sonnet",
   description="Map: Conventions & Testing"
 )
 
 # Agent 4: Concerns Focus
 Task(
-  prompt="
+  prompt="First, read ~/.claude/agents/gsd-codebase-mapper.md for your complete role instructions.
+
 <focus>concerns</focus>
 <workspace_id>" + WORKSPACE_ID + "</workspace_id>
 <focus_area>" + ($ARGUMENTS || "entire codebase") + "</focus_area>
@@ -233,7 +237,7 @@ Analyze:
 Output format:
 Return JSON with sections: { concerns: {...} }
 ",
-  subagent_type="gsd-codebase-mapper",
+  subagent_type="general-purpose",
   model="sonnet",
   description="Map: Known Concerns"
 )

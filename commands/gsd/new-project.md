@@ -786,7 +786,8 @@ Return the page_id when done.
 After all 4 agents complete, spawn synthesizer to create Research Summary page:
 
 ```
-Task(prompt="
+Task(prompt="First, read ~/.claude/agents/gsd-research-synthesizer.md for your complete role instructions.
+
 <task>
 Synthesize research outputs into a Research Summary page in Mosic.
 </task>
@@ -813,7 +814,7 @@ Create Mosic page using mosic_create_entity_page:
 Synthesize key findings from all research pages.
 Return the page_id when done.
 </output>
-", subagent_type="gsd-research-synthesizer", model="{synthesizer_model}", description="Synthesize research")
+", subagent_type="general-purpose", model="{synthesizer_model}", description="Synthesize research")
 ```
 
 **Update config.json with research page IDs:**
@@ -1047,7 +1048,8 @@ Display stage banner:
 Spawn gsd-roadmapper agent with context:
 
 ```
-Task(prompt="
+Task(prompt="First, read ~/.claude/agents/gsd-roadmapper.md for your complete role instructions.
+
 <planning_context>
 
 **Project Overview (from Mosic):**
@@ -1129,7 +1131,7 @@ e) Create Depends relations between phases if dependencies exist
   ]
 }
 </instructions>
-", subagent_type="gsd-roadmapper", model="{roadmapper_model}", description="Create roadmap")
+", subagent_type="general-purpose", model="{roadmapper_model}", description="Create roadmap")
 ```
 
 **Handle roadmapper return:**

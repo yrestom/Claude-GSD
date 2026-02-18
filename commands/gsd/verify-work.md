@@ -473,50 +473,53 @@ IF failed > 0:
 IF failed > 0:
   DISPLAY: "Spawning parallel debug agents to diagnose root causes..."
 
-  # Spawn gsd-debugger for each unique issue
+  # Collect all debug prompts first
+  debug_prompts = []
   FOR each issue_task in issue_tasks:
+    debug_prompts.push({
+      prompt: "First, read ./.claude/agents/gsd-debugger.md for your complete role definition and instructions.\n\n" +
+        "<objective>\n" +
+        "Diagnose root cause for UAT failure.\n\n" +
+        "**Issue:** " + issue_task.title + "\n" +
+        "**Description:** " + issue_task.description + "\n" +
+        "</objective>\n\n" +
+        "<context>\n" +
+        "Phase: " + PHASE_TITLE + "\n" +
+        "UAT Page: https://mosic.pro/app/page/" + UAT_PAGE_ID + "\n" +
+        "</context>\n\n" +
+        "<output>\n" +
+        "Update the issue task description with root cause analysis.\n" +
+        "Task ID: " + issue_task.name + "\n" +
+        "</output>",
+      description: "Diagnose: " + issue_task.title
+    })
+
+  # Spawn ALL debug agents in parallel (single response with multiple Task calls)
+  # All Task() calls must be in ONE response for true parallelism
+  FOR each dp in debug_prompts (ALL IN SINGLE RESPONSE):
     Task(
-      prompt="First, read ./.claude/agents/gsd-debugger.md for your complete role definition and instructions.\n\n
-        <objective>
-        Diagnose root cause for UAT failure.
-
-        **Issue:** " + issue_task.title + "
-        **Description:** " + issue_task.description + "
-        </objective>
-
-        <context>
-        Phase: " + PHASE_TITLE + "
-        UAT Page: https://mosic.pro/app/page/" + UAT_PAGE_ID + "
-        </context>
-
-        <output>
-        Update the issue task description with root cause analysis.
-        Task ID: " + issue_task.name + "
-        </output>
-      ",
-      subagent_type="gsd-debugger",
+      prompt=dp.prompt,
+      subagent_type="general-purpose",
       model="{debugger_model}",
-      description="Diagnose: " + issue_task.title
+      description=dp.description
     )
 
-  # Spawn gsd-planner in gaps mode
+  # After all debug agents complete, spawn planner for fix plans
   DISPLAY: "Creating fix plans..."
 
   Task(
-    prompt="
-      <planning_context>
-      **Mode:** gaps
-      **Phase:** " + PHASE_ID + "
-      **Issue Tasks:** " + issue_tasks.map(t => t.name).join(", ") + "
-      </planning_context>
-
-      <constraints>
-      - Create fix plans for each issue task
-      - Plans should be atomic and testable
-      - Link plans to issue tasks via M Relation
-      </constraints>
-    ",
-    subagent_type="gsd-planner",
+    prompt="First, read ./.claude/agents/gsd-planner.md for your complete role instructions.\n\n" +
+      "<planning_context>\n" +
+      "**Mode:** gaps\n" +
+      "**Phase:** " + PHASE_ID + "\n" +
+      "**Issue Tasks:** " + issue_tasks.map(t => t.name).join(", ") + "\n" +
+      "</planning_context>\n\n" +
+      "<constraints>\n" +
+      "- Create fix plans for each issue task\n" +
+      "- Plans should be atomic and testable\n" +
+      "- Link plans to issue tasks via M Relation\n" +
+      "</constraints>",
+    subagent_type="general-purpose",
     model="{planner_model}",
     description="Fix plans for UAT issues"
   )
