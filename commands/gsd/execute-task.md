@@ -33,8 +33,9 @@ Check `config.parallelization` before spawning agents. Parallel execution is con
 **TRUE PARALLEL EXECUTION (when enabled):**
 To spawn agents in parallel within a wave, you MUST make all Task() calls in a SINGLE response message. A FOR loop does NOT create parallel execution.
 
-**ORCHESTRATOR-MANAGED COMMITS (when parallel):**
-Parallel agents do NOT commit. They return lists of modified files. The orchestrator commits sequentially after each wave completes to prevent git conflicts.
+**ORCHESTRATOR-MANAGED COMMITS:**
+All executor agents defer commits. They return lists of modified files.
+The orchestrator commits after each subtask (sequential) or after each wave (parallel).
 
 **ANTI-PATTERN — DO NOT DO THIS:**
 Never override the parallelization formula with subjective reasoning like "tight coupling", "better coherence", or "subtasks reference each other." The planner already accounted for dependencies when assigning waves. If config says parallel and the formula evaluates to true, you MUST run parallel. The ONLY exception is file-overlap detected in step 4.
@@ -43,25 +44,21 @@ Never override the parallelization formula with subjective reasoning like "tight
 <objective>
 Execute a planned task by implementing all subtasks with atomic commits.
 
-**Supports two execution strategies (determined by formula in step 5 — never by subjective judgment):**
-- **Parallel** (when config enables it AND conditions met): Independent subtasks in the same wave run in parallel via separate agents, orchestrator handles commits. This is the PREFERRED mode when the formula evaluates to true.
-- **Sequential** (when few subtasks OR parallelization disabled): One agent per subtask, executed one at a time with per-subtask commits
+Every subtask gets its own dedicated executor agent. The only variable is timing:
+- **Parallel**: Independent subtasks in the same wave run simultaneously
+- **Sequential**: Subtasks execute one at a time
 
-**Key differences from execute-phase:**
-- Executes subtasks of a single parent task (not plan tasks)
-- Creates single Summary Page linked to parent task
-- Marks parent task and subtasks complete
-- Returns to phase execution context after completion
-- Parallelism is at subtask level (finer grained than execute-phase's plan level)
+The orchestrator manages ALL lifecycle operations: commits, summary page,
+task completion, and state updates. Executors handle code only.
 
-**Spawns:** gsd-executor for implementation work (one per subtask in both modes — parallel controls timing, not agent count)
+**Spawns:** gsd-executor for implementation work (one per subtask)
 **Output:** Summary Page + completed task with commit history
 </objective>
 
 <execution_context>
-@./.claude/get-shit-done/references/ui-brand.md
-@./.claude/get-shit-done/workflows/execute-plan.md
-@./.claude/get-shit-done/workflows/execution-review.md
+@~/.claude/get-shit-done/references/ui-brand.md
+@~/.claude/get-shit-done/workflows/execute-plan.md
+@~/.claude/get-shit-done/workflows/execution-review.md
 </execution_context>
 
 <context>
@@ -161,7 +158,16 @@ subtasks = mosic_search_tasks({
 })
 
 IF subtasks.results.length == 0:
-  ERROR: "No subtasks found for task " + TASK_IDENTIFIER + ". Run /gsd:plan-task first."
+  # Check if plan page exists (indicates planner ran but didn't create subtasks)
+  task_pages_check = mosic_get_entity_pages("MTask", TASK_ID)
+  has_plan_page = task_pages_check.some(p => p.title.includes("Plan"))
+
+  IF has_plan_page:
+    ERROR: "Plan page exists for " + TASK_IDENTIFIER + " but no MTask subtasks were created. " +
+           "This plan was likely created before subtask creation was standard. " +
+           "Run /gsd:plan-task " + TASK_IDENTIFIER + " to generate subtasks from the existing plan."
+  ELSE:
+    ERROR: "No subtasks found for task " + TASK_IDENTIFIER + ". Run /gsd:plan-task first."
 
 # Categorize subtasks by status
 incomplete_subtasks = subtasks.results.filter(t => not t.done)
@@ -226,6 +232,16 @@ context_page = phase_pages.find(p => p.title.includes("Context"))
 research_page_id = research_page ? research_page.name : null
 context_page_id = context_page ? context_page.name : null
 requirements_page_id = config.mosic.pages.requirements or null
+
+# Fallback: discover requirements page from project entity pages
+IF NOT requirements_page_id:
+  project_pages = mosic_get_entity_pages("MProject", project_id, {
+    include_subtree: false
+  })
+  req_page = project_pages.find(p => p.title.includes("Requirements"))
+  IF req_page:
+    requirements_page_id = req_page.name
+    Display: "Discovered requirements page: " + requirements_page_id
 ```
 
 ## 4. Group Subtasks by Wave and Detect File Overlaps
@@ -376,14 +392,19 @@ Mode: {execution_mode_label}
 
 ## 6. Execute Subtasks
 
+All executors run in subtask mode with deferred commits. The orchestrator handles
+commits after each subtask completes (with optional review loop when enabled).
+
 ```
 # Resolve execution review config
 review_config = config.workflow?.execution_review ?? { enabled: false }
 review_enabled = review_config.enabled === true
 
-# Build <mosic_references> block — IDs only, no content embedding.
+# Build <mosic_references> base block — IDs only, no content embedding.
 # Executor self-loads all content from Mosic via execute-plan.md workflow.
-mosic_refs = """
+# NOTE: Base does NOT include closing tag — per-subtask element is appended
+# before closing in each prompt construction site (steps 6a/6b).
+mosic_refs_base = """
 <mosic_references>
 <task id="{TASK_ID}" identifier="{TASK_IDENTIFIER}" title="{TASK_TITLE}" />
 <phase id="{phase_id}" title="{phase.title}" number="{PHASE}" />
@@ -394,7 +415,6 @@ mosic_refs = """
 <requirements_page id="{requirements_page_id}" />
 <task_context_page id="{task_context_page_id}" />
 <task_research_page id="{task_research_page_id}" />
-</mosic_references>
 """
 
 all_commits = []        # Collected across all waves
@@ -405,7 +425,8 @@ all_failures = []       # Track failures across all waves
 
 ### 6a. Sequential Execution (when `use_parallel = false`)
 
-**One agent per subtask, executed one at a time.** When review is disabled, each agent uses normal mode (self-commits). When review is enabled, agents use deferred commits and the orchestrator runs the review loop before committing.
+**One agent per subtask, executed one at a time.** Each agent handles one subtask
+with deferred commits. The orchestrator commits after each agent completes.
 
 ```
 IF NOT use_parallel:
@@ -419,27 +440,29 @@ IF NOT use_parallel:
 
       Display: "Executing subtask " + st.identifier + ": " + st.title
 
-      # Build single-subtask prompt
-      # When review enabled: force deferred commits so orchestrator can review before committing
+      # Build single-subtask prompt — always subtask mode with deferred commits
       subtask_prompt = """
 <objective>
 Execute subtask """ + st.identifier + """: """ + st.title + """
 </objective>
+
+**Execution Mode:** subtask
+**Commit Mode:** deferred
 """
 
       IF review_enabled:
         subtask_prompt += """
-**Execution Mode:** subtask
 **Review Mode:** enabled
-**Commit Mode:** deferred
 """
 
       subtask_prompt += """
 <execution_context>
-@./.claude/get-shit-done/workflows/execute-plan.md
+@~/.claude/get-shit-done/workflows/execute-plan.md
 </execution_context>
 
-""" + mosic_refs + """
+""" + mosic_refs_base + """<subtask id=\"""" + st.name + """\" identifier=\"""" + st.identifier + """\" title=\"""" + st.title + """\" />
+</mosic_references>
+""" + """
 
 **Subtask to Execute (ONLY THIS ONE):**
 - **""" + st.identifier + """** (""" + st.name + """): """ + st.title + """
@@ -486,13 +509,8 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
         # ELSE "Continue": retry stays false, WHILE exits, FOR advances to next subtask
 
       ELSE:
-        # Unexpected output — treat as potential success, extract what we can
-        commits = extract_commits(agent_result)
-        files = parse_file_list(extract_file_list(agent_result))
-        all_commits.push(...commits)
-        all_files_changed.push(...files)
-        all_results.push(agent_result)
-        mosic_complete_task(subtask.name)
+        # Unexpected output — treat as potential success, run through standard procedure
+        post_subtask_completion(subtask, st, agent_result, review_enabled, review_config)
 ```
 
 ### Post-Subtask Completion (shared procedure for 6a and 6b)
@@ -514,6 +532,11 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
 
 PROCEDURE post_subtask_completion(subtask, st, agent_result, review_enabled, review_config):
   files = parse_file_list(extract_file_list(agent_result))
+
+  # Build complete mosic_refs for this subtask (used by review loop if enabled)
+  mosic_refs = mosic_refs_base + """<subtask id=\"""" + st.name + """\" identifier=\"""" + st.identifier + """\" title=\"""" + st.title + """\" />
+</mosic_references>
+"""
 
   IF review_enabled:
     # --- EXECUTION REVIEW LOOP (from @execution-review.md) ---
@@ -550,10 +573,14 @@ PROCEDURE post_subtask_completion(subtask, st, agent_result, review_enabled, rev
     all_commits.push({ hash: commit_hash, message: commit_type + "(" + TASK_IDENTIFIER + "): " + st.title })
 
   ELSE:
-    # No review — executor already committed in normal mode
-    commits = extract_commits(agent_result)
-    all_commits.push(...commits)
-    commit_hash = commits.length > 0 ? commits[commits.length - 1].hash : null
+    # No review — orchestrator commits directly (executor deferred)
+    all_files_changed.push(...files)
+    FOR each file in files:
+      git add {file}
+    commit_type = infer_commit_type(agent_result)
+    git commit -m "{commit_type}({TASK_IDENTIFIER}): {st.title}"
+    commit_hash = git rev-parse --short HEAD
+    all_commits.push({ hash: commit_hash, message: commit_type + "(" + TASK_IDENTIFIER + "): " + st.title })
 
   # Mark subtask complete
   mosic_complete_task(subtask.name)
@@ -594,10 +621,12 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
 **Commit Mode:** deferred
 
 <execution_context>
-@./.claude/get-shit-done/workflows/execute-plan.md
+@~/.claude/get-shit-done/workflows/execute-plan.md
 </execution_context>
 
-""" + mosic_refs + """
+""" + mosic_refs_base + """<subtask id=\"""" + st.name + """\" identifier=\"""" + st.identifier + """\" title=\"""" + st.title + """\" />
+</mosic_references>
+""" + """
 
 **Subtask to Execute (ONLY THIS ONE):**
 - **""" + st.identifier + """** (""" + st.name + """): """ + st.title + """
@@ -644,27 +673,29 @@ Return:
 """
 
       ELSE:
-        # Single subtask in wave — normally uses NORMAL mode (self-commits)
-        # When review enabled: force deferred mode for review gate
+        # Single subtask in wave — same mode as multi-subtask
         subtask_prompt = """
 <objective>
 Execute subtask """ + st.identifier + """: """ + st.title + """
 </objective>
+
+**Execution Mode:** subtask
+**Commit Mode:** deferred
 """
 
         IF review_enabled:
           subtask_prompt += """
-**Execution Mode:** subtask
 **Review Mode:** enabled
-**Commit Mode:** deferred
 """
 
         subtask_prompt += """
 <execution_context>
-@./.claude/get-shit-done/workflows/execute-plan.md
+@~/.claude/get-shit-done/workflows/execute-plan.md
 </execution_context>
 
-""" + mosic_refs + """
+""" + mosic_refs_base + """<subtask id=\"""" + st.name + """\" identifier=\"""" + st.identifier + """\" title=\"""" + st.title + """\" />
+</mosic_references>
+""" + """
 
 **Subtask to Execute (ONLY THIS ONE):**
 - **""" + st.identifier + """** (""" + st.name + """): """ + st.title + """
@@ -701,7 +732,7 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
         # Wait for all agents in batch to complete before next batch
 
     ELSE:
-      # Single subtask — run it alone in normal mode
+      # Single subtask in wave — run it
       Task(
         prompt="First, read ./.claude/agents/gsd-executor.md for your role.\n\n" + wave_prompts[0].prompt,
         subagent_type="general-purpose",
@@ -719,17 +750,13 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
         all_files_changed.push(...files)
         all_results.push(agent_result)
 
-        IF NOT wave_parallel AND NOT review_enabled:
-          # Normal-mode agent committed on its own — use shared post-subtask procedure
-          post_subtask_completion(wp.subtask, wp.st, agent_result, false, review_config)
-        ELSE:
-          # Deferred mode (parallel OR review enabled) — collect for orchestrator-managed review + commits
-          wave_results_passed.push({
-            subtask: wp.subtask,
-            st: wp.st,
-            files_modified: files,
-            result_text: agent_result
-          })
+        # All agents use deferred commits — collect for orchestrator processing
+        wave_results_passed.push({
+          subtask: wp.subtask,
+          st: wp.st,
+          files_modified: files,
+          result_text: agent_result
+        })
 
       ELIF agent_result contains "## SUBTASK FAILED":
         wave_current_failures.push({ subtask: wp.subtask, result: agent_result })
@@ -761,7 +788,7 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
         retry_wave = max(wave_nums) + 1
         waves[retry_wave] = wave_current_failures.map(f => f.subtask)
 
-    # 6. Orchestrator-managed review + commits (when deferred: parallel OR review enabled)
+    # 6. Orchestrator-managed commits (all agents use deferred commits)
     IF wave_results_passed.length > 0:
       Display: "Processing wave " + wave_num + " results..."
 
@@ -918,6 +945,8 @@ write config.json
 ```
 Display:
 """
+## TASK EXECUTION COMPLETE
+
 -------------------------------------------
  GSD > TASK COMPLETE
 -------------------------------------------
@@ -1003,9 +1032,9 @@ IF mosic operation fails:
 - [ ] File-overlap safety enforced (overlapping subtasks never parallel)
 - [ ] Phase and task context loaded for executor(s)
 - [ ] Execution strategy determined (sequential vs parallel)
-- [ ] Sequential mode: one agent per subtask, executed one at a time with per-subtask commits
-- [ ] Parallel mode: wave-based execution with orchestrator-managed commits
-- [ ] Parallel mode: post-wave test verification catches cross-subtask regressions
+- [ ] All executors run in subtask mode with deferred commits
+- [ ] Orchestrator commits after each subtask/wave completion
+- [ ] Post-wave test verification catches cross-subtask regressions
 - [ ] Failed subtasks handled (continue/retry/stop options)
 - [ ] Subtasks marked complete
 - [ ] Summary page created linked to task

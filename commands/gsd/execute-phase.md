@@ -32,13 +32,15 @@ Check `config.parallelization` before spawning agents. Parallel execution is con
 **TRUE PARALLEL EXECUTION (when enabled):**
 To spawn agents in parallel within a wave, you MUST make all Task() calls in a SINGLE response message. A FOR loop does NOT create parallel execution - it creates sequential execution.
 
-**PLAN-LEVEL GIT COORDINATION:**
-Unlike `/gsd:execute-task` (which uses subtask mode + orchestrator-managed commits), plan-level parallel executors run in **normal mode** and commit independently. This is safe because:
-- The planner ensures wave-concurrent plans don't modify overlapping files
-- Plan-level tasks operate on genuinely independent areas of the codebase
-- Each executor's commits are atomic per-subtask and don't interfere
+**PLAN-LEVEL ORCHESTRATION:**
+Each plan gets a dedicated plan-orchestrator agent that reads execute-task.md
+and follows its subtask orchestration process. The plan-orchestrator spawns one
+executor per subtask, manages commits/summary/completion for that plan.
 
-If git `index.lock` errors occur during parallel plan execution, fall back to sequential execution for the remaining plans in that wave.
+For parallel plan waves: multiple plan-orchestrators run simultaneously.
+Each manages its own subtasks. Git conflicts between plans are handled by
+the planner ensuring wave-concurrent plans don't modify overlapping files.
+If git `index.lock` errors occur, fall back to sequential execution.
 </critical_requirements>
 
 <objective>
@@ -52,7 +54,6 @@ Orchestrator stays lean: load plans from Mosic, analyze dependencies, group into
 <execution_context>
 @~/.claude/get-shit-done/references/ui-brand.md
 @~/.claude/get-shit-done/workflows/execute-phase.md
-@~/.claude/get-shit-done/workflows/execution-review.md
 </execution_context>
 
 <context>
@@ -94,13 +95,9 @@ MIN_PLANS_FOR_PARALLEL = config.parallelization?.min_plans_for_parallel ?? 2
 Model lookup:
 | Agent | quality | balanced | budget |
 |-------|---------|----------|--------|
-| gsd-executor | opus | sonnet | sonnet |
-| gsd-execution-reviewer | opus | sonnet | haiku |
+| plan-orchestrator | opus | sonnet | sonnet |
 | gsd-verifier | sonnet | sonnet | haiku |
 
-# Resolve execution review config
-review_config = config.workflow?.execution_review ?? { enabled: false }
-review_enabled = review_config.enabled === true
 ```
 
 ## 1. Validate and Load Phase from Mosic
@@ -131,10 +128,20 @@ phase_pages = mosic_get_entity_pages("MTask List", task_list_id, {
 research_page = phase_pages.find(p => p.title contains "Research")
 context_page = phase_pages.find(p => p.title contains "Context" or p.title contains "Decisions")
 
-# Store IDs only — executor self-loads content via execute-plan.md workflow
+# Store IDs only — plan-orchestrator self-loads content via execute-task.md process
 research_page_id = research_page ? research_page.name : null
 context_page_id = context_page ? context_page.name : null
 requirements_page_id = config.mosic.pages.requirements or null
+
+# Fallback: discover requirements page from project entity pages
+IF NOT requirements_page_id:
+  project_pages = mosic_get_entity_pages("MProject", project_id, {
+    include_subtree: false
+  })
+  req_page = project_pages.find(p => p.title.includes("Requirements"))
+  IF req_page:
+    requirements_page_id = req_page.name
+    Display: "Discovered requirements page: " + requirements_page_id
 
 # Filter to plan tasks only (tag-based, consistent with gsd-planner.md and gsd-plan-checker.md)
 plan_tag = config.mosic.tags.plan
@@ -277,32 +284,19 @@ FOR each plan in wave:
   })
 ```
 
-### 4.2 Detect Subtasks and Build Lean Prompts
-
-**Check each plan task for existing subtasks (created by distributed planners):**
-
-```
-FOR each plan in wave:
-  subtasks = mosic_search_tasks({
-    workspace_id: workspace_id,
-    filters: { parent_task: plan.task.name },
-    status__not_in: ["Completed", "Cancelled"]
-  })
-
-  plan.has_subtasks = subtasks.results && subtasks.results.length > 0
-  plan.subtask_count = subtasks.results ? subtasks.results.length : 0
-```
+### 4.2 Build Plan-Orchestrator Prompts
 
 **Build prompts with `<mosic_references>` — IDs only, no content embedding.**
 
-The executor's `execute-plan.md` workflow loads all content from Mosic using these IDs and self-extracts user decisions, requirements, frontend/TDD context.
+Each plan gets a plan-orchestrator agent that reads execute-task.md and follows
+its subtask orchestration process end-to-end (subtask execution, commits, summary, completion).
 
 ```
 # Build prompts for all plans in wave
 executor_prompts = []
 
 FOR each plan in wave:
-  # Build mosic_refs block — IDs only, reused in both prompt and review loop
+  # Build mosic_refs block — IDs only
   plan_mosic_refs = """
 <mosic_references>
 <task id="{plan.task.name}" identifier="{plan.task.identifier}" title="{plan.task.title}" />
@@ -315,68 +309,36 @@ FOR each plan in wave:
 </mosic_references>
 """
 
-  IF plan.has_subtasks:
-    # Route to subtask-aware execution
-    prompt = """
+  prompt = """
 <objective>
-Execute task {plan.task.identifier}: {plan.task.title}
+Orchestrate execution of plan task {plan.task.identifier}: {plan.task.title}
 
-This task has {plan.subtask_count} subtasks. Execute them using wave-based
-coordination. Commit each subtask atomically.
+You are a plan orchestrator. Read and follow the /gsd:execute-task command process
+to manage subtask execution for this plan task.
+
+One executor agent per subtask. Manage commits, summary, and completion.
+The only variable: parallel vs sequential (determined by wave config).
 </objective>
-"""
-    IF review_enabled:
-      prompt += """
-**Review Mode:** enabled
-**Commit Mode:** deferred
-"""
-    prompt += """
+
 <execution_context>
-@~/.claude/get-shit-done/workflows/execute-plan.md
+@~/.claude/commands/gsd/execute-task.md
 </execution_context>
 
 """ + plan_mosic_refs + """
 
-<execution_mode>subtask-aware</execution_mode>
+**Task to orchestrate:** {plan.task.identifier} ({plan.task.name})
 
-<success_criteria>
-- [ ] All {plan.subtask_count} subtasks executed
-- [ ] Each subtask committed individually
-- [ ] Summary page created in Mosic linked to task
-- [ ] Task marked complete in Mosic
-</success_criteria>
-"""
-  ELSE:
-    # Standard execution (no pre-existing subtasks)
-    prompt = """
-<objective>
-Execute task {plan.task.identifier}: {plan.task.title}
-
-Commit each subtask atomically. Create summary page. Update task status.
-</objective>
-"""
-    IF review_enabled:
-      prompt += """
-**Review Mode:** enabled
-**Commit Mode:** deferred
-"""
-    prompt += """
-<execution_context>
-@~/.claude/get-shit-done/workflows/execute-plan.md
-</execution_context>
-
-""" + plan_mosic_refs + """
-
-<success_criteria>
-- [ ] All subtasks executed
-- [ ] Each subtask committed individually
-- [ ] Summary page created in Mosic linked to task
-- [ ] Task marked complete in Mosic
-</success_criteria>
+<instructions>
+- Start from step 0 (Load Mosic Tools and Config), skip step 1 (task already identified above), then follow steps 2-9
+- Follow steps 2-9 of execute-task.md
+- Spawn gsd-executor agents for each subtask (one agent per subtask, always)
+- Manage commits, create summary page, mark task complete
+- Return execution results when done
+</instructions>
 """
 
   executor_prompts.push({
-    prompt: "First, read ~/.claude/agents/gsd-executor.md for your role.\n\n" + prompt,
+    prompt: prompt,
     plan: plan,
     mosic_refs: plan_mosic_refs
   })
@@ -390,8 +352,9 @@ use_parallel = PARALLEL_ENABLED
   AND PARALLEL_PLAN_LEVEL
   AND executor_prompts.length >= MIN_PLANS_FOR_PARALLEL
 
-# Initialize abort flag — set by review loop abort, checked after FOR loop
+# Initialize tracking variables
 aborted = false
+all_failures = []
 ```
 
 **If `use_parallel=true`: Spawn agents in parallel (multiple Task() calls in ONE response)**
@@ -444,17 +407,11 @@ FOR each executor_prompt in executor_prompts:
 
   # IMMEDIATELY handle this result before spawning next agent
   plan = executor_prompt.plan
-  executor_summary = parse_executor_output(agent_result)
 
   # --- Run shared Post-Plan Completion procedure (see 4.4) ---
   post_plan_result = run_post_plan_completion({
     plan: plan,
-    agent_result: agent_result,
-    executor_summary: executor_summary,
-    mosic_refs: executor_prompt.mosic_refs,
-    review_enabled: review_enabled,
-    review_config: review_config,
-    model_profile: model_profile
+    agent_result: agent_result
   })
 
   IF post_plan_result.aborted:
@@ -474,17 +431,11 @@ IF use_parallel:
   # Results correspond to executor_prompts by spawn order
   FOR each (ep, agent_result) in zip(executor_prompts, wave_results):
     plan = ep.plan
-    executor_summary = parse_executor_output(agent_result)
 
     # --- Run shared Post-Plan Completion procedure (see 4.4) ---
     post_plan_result = run_post_plan_completion({
       plan: plan,
-      agent_result: agent_result,
-      executor_summary: executor_summary,
-      mosic_refs: ep.mosic_refs,
-      review_enabled: review_enabled,
-      review_config: review_config,
-      model_profile: model_profile
+      agent_result: agent_result
     })
 
     IF post_plan_result.aborted:
@@ -494,120 +445,80 @@ IF use_parallel:
 
 ### 4.4 Post-Plan Completion (shared procedure)
 
-**This procedure is called by both sequential (4.2) and parallel (4.3) paths after each plan executes.**
+**This procedure is called by both sequential (4.2) and parallel (4.3) paths after each plan-orchestrator completes.**
 
-Given: `plan`, `agent_result`, `executor_summary`, `mosic_refs`, `review_enabled`, `review_config`, `model_profile`
+The plan-orchestrator follows execute-task.md end-to-end, which handles all lifecycle operations internally
+(per-subtask review if enabled, commits, summary page, task completion). So post_plan_completion
+is a lightweight validation and bookkeeping step.
+
+Given: `plan`, `agent_result`
 
 Returns: `{ aborted: bool }`
 
 ```
 function run_post_plan_completion(args):
   plan = args.plan
-  agent_result = args.agent_result
-  executor_summary = args.executor_summary
 
-  # --- EXECUTION REVIEW LOOP (when enabled, from @execution-review.md) ---
-  IF args.review_enabled:
-    files = parse_file_list(extract_file_list(agent_result))
-    review_loop_result = execution_review_loop({
-      entity_type: "plan",
-      entity_identifier: plan.task.identifier,
-      entity_title: plan.task.title,
-      done_criteria: extract_done_criteria(plan.content),
-      executor_result: agent_result,
-      files_modified: files,
-      mosic_refs: args.mosic_refs,
-      config: args.review_config,
-      model_profile: args.model_profile
-    })
+  # Validate plan-orchestrator completed successfully
+  IF agent_result contains "## TASK EXECUTION COMPLETE" or agent_result contains "TASK COMPLETE":
 
-    IF review_loop_result.status == "abort":
-      return { aborted: true }
-    IF review_loop_result.status == "skipped":
-      return { aborted: false }
+    # Find summary page (created by plan-orchestrator via execute-task.md step 7)
+    task_pages = mosic_get_entity_pages("MTask", plan.task.name, { include_subtree: false })
+    summary_page = task_pages.find(p => p.title.includes("Execution Summary"))
 
-    # Re-parse summary from final executor result (may include fix iterations)
-    IF review_loop_result.executor_result:
-      executor_summary = parse_executor_output(review_loop_result.executor_result)
+    IF summary_page:
+      # Tag summary page (idempotent — safe even if plan-orchestrator already tagged)
+      mosic_batch_add_tags_to_document("M Page", summary_page.name, [
+        config.mosic.tags.gsd_managed,
+        config.mosic.tags.summary,
+        config.mosic.tags.phase_tags[phase_key]
+      ])
 
-    # Commit reviewed changes (orchestrator-managed since executor deferred)
-    reviewed_files = review_loop_result.files
-    FOR each file in reviewed_files:
-      git add {file}
-    commit_type = infer_commit_type(review_loop_result.executor_result or agent_result)
-    git commit -m "{commit_type}({plan.task.identifier}): {plan.task.title}"
+      # Store in config
+      config.mosic.pages["phase-" + PHASE + "-summary-" + plan.number] = summary_page.name
 
-  # Ensure task is marked complete (idempotent — executor already did this in normal mode)
-  mosic_complete_task(plan.task.name)
-  mosic_update_document("MTask", plan.task.name, {
-    status: "Completed"
-  })
+      # Create relation between plan page and summary page (page→page)
+      plan_page_id = config.mosic.pages["phase-" + PHASE + "-plan-" + plan.number]
+      IF plan_page_id:
+        mosic_create_document("M Relation", {
+          workspace: workspace_id,
+          source_doctype: "M Page",
+          source_name: plan_page_id,
+          target_doctype: "M Page",
+          target_name: summary_page.name,
+          relation_type: "Related"
+        })
 
-  # Update checklist items based on executor's returned summary
-  task_with_checklists = mosic_get_task(plan.task.name, {
-    include_checklists: true
-  })
-
-  FOR each completed_item in executor_summary.completed_tasks:
-    matching_checklist = task_with_checklists.checklists.find(c =>
-      c.title == completed_item OR
-      c.title.toLowerCase().includes(completed_item.toLowerCase()) OR
-      completed_item.toLowerCase().includes(c.title.toLowerCase())
-    )
-    IF matching_checklist:
-      mosic_update_document("MTask CheckList", matching_checklist.name, {
-        done: true
-      })
-
-  # Find executor's summary page (already created by execute-plan.md workflow in normal mode when review disabled)
-  # When review enabled, executor deferred everything — may not have created summary page
-  task_pages = mosic_get_entity_pages("MTask", plan.task.name, { include_subtree: false })
-  summary_page = task_pages.find(p => p.title.includes("Execution Summary"))
-
-  IF NOT summary_page:
-    # Create summary (expected when review enabled since executor deferred; fallback otherwise)
-    summary_page = mosic_create_entity_page("MTask", plan.task.name, {
-      workspace_id: workspace_id,
-      title: plan.task.identifier + " Execution Summary",
-      page_type: "Document",
-      icon: config.mosic.page_icons.summary,
-      status: "Published",
-      content: convert_to_editorjs(executor_summary),
-      relation_type: "Related"
-    })
-
-  # Tag summary page (idempotent — safe even if executor already tagged)
-  mosic_batch_add_tags_to_document("M Page", summary_page.name, [
-    config.mosic.tags.gsd_managed,
-    config.mosic.tags.summary,
-    config.mosic.tags.phase_tags[phase_key]
-  ])
-
-  # Store in config
-  config.mosic.pages["phase-" + PHASE + "-summary-" + plan.number] = summary_page.name
-
-  # Add orchestrator completion comment with commit details
-  # IMPORTANT: Comments must use HTML format
-  mosic_create_document("M Comment", {
-    workspace: workspace_id,
-    ref_doc: "MTask",
-    ref_name: plan.task.name,
-    content: "<p><strong>Phase Orchestrator: Completed</strong></p>" +
-      "<p><strong>Commits:</strong></p>" +
-      "<ul>" + executor_summary.commits.map(c => "<li><code>" + c.hash + "</code>: " + c.message + "</li>").join("") + "</ul>"
-  })
-
-  # Create relation between plan page and summary page (page→page)
-  plan_page_id = config.mosic.pages["phase-" + PHASE + "-plan-" + plan.number]
-  IF plan_page_id:
-    mosic_create_document("M Relation", {
+    # Add orchestrator completion comment
+    # IMPORTANT: Comments must use HTML format
+    mosic_create_document("M Comment", {
       workspace: workspace_id,
-      source_doctype: "M Page",
-      source_name: plan_page_id,
-      target_doctype: "M Page",
-      target_name: summary_page.name,
-      relation_type: "Related"
+      ref_doc: "MTask",
+      ref_name: plan.task.name,
+      content: "<p><strong>Phase Orchestrator: Plan completed</strong></p>"
     })
+
+  ELSE:
+    # Plan-orchestrator failed
+    all_failures.push({ plan: plan, result: agent_result })
+
+    Display: "Plan " + plan.task.identifier + " failed."
+    Display: agent_result
+
+    AskUserQuestion({
+      questions: [{
+        question: "Plan " + plan.task.identifier + " failed. How should we proceed?",
+        header: "Plan Failed",
+        options: [
+          { label: "Continue", description: "Skip this plan, continue with remaining plans" },
+          { label: "Abort phase", description: "Stop execution of remaining plans" }
+        ],
+        multiSelect: false
+      }]
+    })
+
+    IF user_selection == "Abort phase":
+      return { aborted: true }
 
   return { aborted: false }
 ```
@@ -753,7 +664,7 @@ config.mosic.pages["phase-" + PHASE + "-verification"] = verification_page.name
 # Normal completion arrives here after all plans executed and phase goal verified
 
 # Re-query plan tasks from Mosic for fresh status (local plan_tasks array is stale
-# after execution — tasks were marked complete via mosic_complete_task() in step 4.4)
+# after execution — tasks were marked complete by the plan-orchestrator)
 fresh_phase = mosic_get_task_list(task_list_id, { include_tasks: true })
 plan_tasks = fresh_phase.tasks.filter(t => t.tags.includes(plan_tag))
 
@@ -778,8 +689,8 @@ ELSE:
     ref_doc: "MTask List",
     ref_name: task_list_id,
     content: "<p><strong>Partial Execution</strong></p>" +
-      "<p>Completed " + completed_count + "/" + plan_tasks.length + " plans. " +
-      "Execution aborted after review loop failure.</p>"
+      "<p>Completed " + completed_count + "/" + plan_tasks.length + " plans.</p>" +
+      (all_failures.length > 0 ? "<p>Failed plans: " + all_failures.map(f => f.plan.task.identifier).join(", ") + "</p>" : "")
   })
 
 # Update config session
@@ -946,19 +857,10 @@ Only rule 4 requires user intervention.
 </deviation_rules>
 
 <commit_rules>
-**Per-Task Commits:**
-After each task completes:
-1. Stage only files modified by that task
-2. Commit with format: `{type}({phase}-{plan}): {task-name}`
-3. Types: feat, fix, test, refactor, perf, chore
-4. Record commit hash for summary
-
-**Never use:**
-- `git add .`
-- `git add -A`
-- `git add src/` or any broad directory
-
-**Always stage files individually.**
+**Orchestrator-Managed Commits:**
+Plan-orchestrator agents manage subtask-level commits via execute-task.md process.
+Each subtask gets an atomic commit managed by the plan-orchestrator.
+execute-phase does NOT commit code directly — it manages plan-level orchestration.
 </commit_rules>
 
 <error_handling>

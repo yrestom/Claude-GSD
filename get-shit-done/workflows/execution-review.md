@@ -213,6 +213,8 @@ FUNCTION build_reviewer_prompt(context, files, executor_result, attempt, previou
   prompt = """
 First, read ~/.claude/agents/gsd-execution-reviewer.md for your role.
 
+""" + context.mosic_refs + """
+
 <review_scope>
 <subtask_identifier>""" + context.entity_identifier + """</subtask_identifier>
 <subtask_title>""" + context.entity_title + """</subtask_title>
@@ -239,11 +241,17 @@ First, read ~/.claude/agents/gsd-execution-reviewer.md for your role.
 </review_scope>
 
 Review the changes by:
-1. Run `git diff` (or `git diff --cached` if staged) to see all changes
-2. Read each modified file for full context
-3. Check each done criterion against the diff
-4. Look for stubs, incomplete implementations, broken wiring
-5. Return your verdict using the output format from your agent file
+1. **Load full context from Mosic** using the <mosic_references> above:
+   - Load the subtask's full MTask description: `mosic_get_task(subtask.id, { description_format: "markdown" })` — this has the detailed implementation instructions, expected patterns, gotchas, and file-level specs
+   - Load the plan page: `mosic_get_page(plan_page.id, { content_format: "markdown" })` — full execution plan with architectural decisions
+   - Load the task context page (if provided): `mosic_get_page(task_context_page.id, { content_format: "markdown" })` — locked decisions and constraints
+   - Load the task research page (if provided): `mosic_get_page(task_research_page.id, { content_format: "markdown" })` — technical findings, field name corrections, code patterns
+   - Use this loaded context to build a COMPLETE requirements checklist — not just the done criteria summary
+2. Run `git diff` (or `git diff --cached` if staged) to see all changes
+3. Read each modified file for full context
+4. Check each requirement (from Mosic context + done criteria) against the diff
+5. Look for stubs, incomplete implementations, broken wiring
+6. Return your verdict using the output format from your agent file
 """
 
   RETURN prompt
