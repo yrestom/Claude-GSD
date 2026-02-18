@@ -75,10 +75,14 @@ WHILE attempt <= max_retries + 1:  # +1 because first run is not a "retry"
   )
 
   verdict = parse_verdict(review_result)
-  # Parse verdict by looking for "### Verdict: PASS|NEEDS_FIX|CRITICAL"
+  # Parse verdict by looking for "### Verdict: PASS|PASS_WITH_NOTES|NEEDS_FIX|CRITICAL"
 
   IF verdict == "PASS":
     Display: "Review PASSED for " + review_context.entity_identifier
+    RETURN { status: "pass", files: current_files, review: review_result, executor_result: current_executor_result }
+
+  IF verdict == "PASS_WITH_NOTES":
+    Display: "Review PASSED (with notes) for " + review_context.entity_identifier
     RETURN { status: "pass", files: current_files, review: review_result, executor_result: current_executor_result }
 
   # --- REVIEW FAILED ---
@@ -115,6 +119,10 @@ WHILE attempt <= max_retries + 1:  # +1 because first run is not a "retry"
     # Critical findings — full re-execution (implementation fundamentally wrong)
     Display: "CRITICAL issues found. Re-executing " + review_context.entity_identifier + " from scratch..."
 
+    # Clean working tree before re-execution — revert only files changed by previous attempt
+    FOR each file in current_files:
+      Bash("git checkout -- " + file)
+
     reexecute_prompt = build_reexecute_prompt(review_context, findings, attempt)
     fix_result = Task(
       prompt = reexecute_prompt,
@@ -148,7 +156,7 @@ WHILE attempt <= max_retries + 1:  # +1 because first run is not a "retry"
 FUNCTION parse_verdict(review_text):
   # Reviewer outputs "### Verdict: PASS" (heading format)
   # Also handle "**Verdict:** PASS" (bold format) for robustness
-  match = review_text.match(/(?:###\s*Verdict:\s*|\*\*Verdict:\*\*\s*)(PASS|NEEDS_FIX|CRITICAL)/i)
+  match = review_text.match(/(?:###\s*Verdict:\s*|\*\*Verdict:\*\*\s*)(PASS_WITH_NOTES|PASS|NEEDS_FIX|CRITICAL)/i)
   RETURN match ? match[1].toUpperCase() : "NEEDS_FIX"  # Default to NEEDS_FIX if unparseable
 
 FUNCTION parse_findings(review_text):

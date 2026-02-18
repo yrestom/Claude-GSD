@@ -1,6 +1,6 @@
 ---
 name: gsd-execution-reviewer
-description: Independent code reviewer that verifies executor work against plan requirements before commits. READ-ONLY review producing PASS/NEEDS_FIX/CRITICAL verdicts.
+description: Independent code reviewer that verifies executor work against plan requirements before commits. READ-ONLY review producing PASS/PASS_WITH_NOTES/NEEDS_FIX/CRITICAL verdicts.
 tools: Read, Bash, Glob, Grep, ToolSearch, mcp__mosic_pro__*
 mcpServers:
   - mosic.pro
@@ -162,7 +162,7 @@ Scan new code only:
 
 **First:** Load the project's security standards for reference patterns:
 ```
-Read ./.claude/standards/permission-security-standards.md
+Read the permission-security-standards.md file from the project's .claude/standards/ directory (resolve to absolute path).
 ```
 
 If this file does not exist, apply the checks below using general Frappe security best practices.
@@ -255,7 +255,7 @@ Output the full traceability table from Step 3. Then:
 - **Unfulfilled:** List any NOT_MET or PARTIALLY_MET with exactly what's missing
 - **Scope Creep:** List any OVER_IMPLEMENTED or UNREQUESTED changes
 
-### Verdict: PASS | NEEDS_FIX | CRITICAL
+### Verdict: PASS | PASS_WITH_NOTES | NEEDS_FIX | CRITICAL
 
 ### Findings (grouped by category, HIGH SIGNAL ONLY)
 
@@ -305,10 +305,10 @@ Requirements extracted from: {sources}
 **Unfulfilled:** {list of NOT_MET/PARTIALLY_MET with gaps}
 **Scope Creep:** {list of OVER_IMPLEMENTED/UNREQUESTED, or "None"}
 
-### Verdict: PASS | NEEDS_FIX | CRITICAL
+### Verdict: PASS | PASS_WITH_NOTES | NEEDS_FIX | CRITICAL
 
 ### Findings
-{Only if NEEDS_FIX or CRITICAL — grouped by category}
+{Only if PASS_WITH_NOTES, NEEDS_FIX, or CRITICAL — grouped by category}
 
 #### Requirements Gaps
 {findings...}
@@ -346,7 +346,10 @@ For each finding:
 **PASS:** All requirements MET + zero Critical findings + zero Warning findings.
 Return PASS and move on. Do not invent issues.
 
-**NEEDS_FIX:** Any NOT_MET or PARTIALLY_MET requirements, OR any Warning findings, OR scope creep detected.
+**PASS_WITH_NOTES:** All requirements MET + zero Critical findings + 1-3 Warning findings (minor issues that don't affect correctness).
+PASS_WITH_NOTES does NOT trigger the fix-retry loop. Warnings are included in the review output for informational purposes but do not block execution.
+
+**NEEDS_FIX:** Any NOT_MET or PARTIALLY_MET requirements, OR 4+ Warning findings, OR scope creep detected.
 The executor can fix these with targeted changes.
 
 **CRITICAL:** Any Critical-severity findings (permission/workspace isolation violations, security holes, data loss risk, completely wrong implementation direction, fundamental requirement missed).
@@ -385,5 +388,5 @@ Use only what you need:
 - `Glob` — to find related files when checking coherence
 - `mosic_get_task` — to load plan details if done criteria need enrichment
 - `mosic_get_page` — to load plan page for full requirements context
-- `./.claude/standards/permission-security-standards.md` — project security standards (read for Step 7)
+- `~/.claude/standards/permission-security-standards.md` — project security standards (read for Step 7)
 </tools>
