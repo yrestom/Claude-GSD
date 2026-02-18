@@ -692,14 +692,15 @@ IF plan.depends_on:
 
 <task_mode_subtask_creation>
 
-## Creating Subtasks (Task-Mode and Distributed Phase Planning)
+## Creating Subtasks
 
-**Activation conditions (either triggers subtask creation):**
+**Activation conditions (any triggers subtask creation):**
 
 1. **Task-mode:** Spawned by `/gsd:plan-task` (prompt has `**Mode:** task-planning` or `**Mode:** task-quick`)
-2. **Distributed phase planning:** Prompt has `<assigned_requirements>` (spawned by `/gsd:plan-phase` in distributed mode)
+2. **Phase planning (distributed):** Prompt has `<assigned_requirements>` (spawned by `/gsd:plan-phase` in distributed mode)
+3. **Phase planning (standard):** Spawned by `/gsd:plan-phase` with `<mode>standard</mode>` — create subtasks for each plan task after creating the plan MTask + M Page
 
-In both cases, you create **subtasks** under parent tasks. In distributed mode, each plan task gets subtasks.
+In all cases, create **subtasks** under parent tasks. Each plan task gets 3-15 subtasks with wave metadata, file lists, and verification criteria.
 
 **CRITICAL: You MUST use Mosic MCP tools. DO NOT create local files.**
 
@@ -1268,9 +1269,9 @@ Apply goal-backward methodology.
 Create MTask and M Page for each plan.
 Update config.json with IDs.
 
-**If distributed_mode:** Also create subtasks under each plan task using the
-`<task_mode_subtask_creation>` pattern (Steps 2-5). Each plan task should have
-3-8 subtasks with wave metadata, file lists, action, verify, done fields.
+**After creating each plan MTask + M Page:** Create subtasks under each plan task
+using the `<task_mode_subtask_creation>` pattern (Steps 2-5). Each plan task should
+have 3-15 subtasks with wave metadata, file lists, action, verify, done fields.
 This gives executors granular work items instead of coarse plan tasks.
 </step>
 
@@ -1390,6 +1391,8 @@ Phase planning complete when:
 - [ ] config.json updated with task and page IDs
 - [ ] Roadmap page updated in Mosic
 - [ ] config.json committed
+- [ ] Subtasks created under each plan task (3-15 per plan, with wave metadata)
+- [ ] Subtask MTask entities have parent_task set to plan task ID
 - [ ] User knows next steps and wave structure
 
 ## Gap Closure Mode

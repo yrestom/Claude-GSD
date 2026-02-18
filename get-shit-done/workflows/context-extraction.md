@@ -98,15 +98,9 @@ IF requirements_content:
       IF row.phase matches current_phase:
         phase_requirements.append({ id: row.req_id, description: row.description })
 
-  # Fallback: phase overview Requirements section
-  IF not phase_requirements AND phase_pages:
-    phase_overview = phase_pages.find(p => p.title.includes("Overview"))
-    IF phase_overview:
-      overview_content = mosic_get_page(phase_overview.name, { content_format: "markdown" }).content
-      requirements_section = extract_section(overview_content, "## Requirements")
-      IF requirements_section:
-        FOR each line matching "- {REQ-ID}: {description}" or "- **{REQ-ID}**: {description}":
-          phase_requirements.append({ id: REQ-ID, description: description })
+  # Fallback: warn if requirements page was loaded but no rows matched current phase
+  IF not phase_requirements AND requirements_content:
+    WARN: "Requirements page loaded but no requirements mapped to phase: " + current_phase
 
 # Filter to assigned requirements (distributed mode)
 IF prompt.includes("<assigned_requirements>"):

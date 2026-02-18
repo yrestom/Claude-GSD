@@ -25,6 +25,10 @@ Quick mode is the same system with a shorter path:
 - All state tracked in Mosic, config.json stores entity IDs
 
 Use when: You know exactly what to do and the task is small enough to not need research or verification.
+
+**Design note:** Quick mode deliberately does NOT create MTask subtask entities.
+The executor receives all tasks as text in the plan page and executes them sequentially.
+This is intentional — quick tasks are too small to benefit from subtask orchestration.
 </objective>
 
 <execution_context>
@@ -334,9 +338,11 @@ Execute quick task " + TASK_IDENTIFIER + ".
 **Workspace ID:** " + WORKSPACE_ID + "
 
 <constraints>
-- Execute all tasks in the plan
+- **Execution Mode:** normal (no subtask mode — execute all tasks from plan page)
+- Execute all tasks listed in the plan page sequentially
 - Commit each task atomically
 - Create summary by updating the task description
+- Mark task as complete when done
 - Track progress via M Comment on the task
 </constraints>
 

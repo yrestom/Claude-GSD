@@ -425,13 +425,14 @@ ELSE:
 </planning_config>
 
 <downstream_consumer>
-Output consumed by /gsd:execute-phase
+Output consumed by /gsd:execute-phase → execute-task.md
 Plans must include:
 - Structured task breakdown
 - Dependencies between tasks
 - Wave assignments for parallel execution
 - Verification criteria
 - must_haves for goal-backward verification
+- **MTask subtask entities** under each plan task (execute-task.md requires these to exist)
 </downstream_consumer>
 
 <output_format>
@@ -722,6 +723,7 @@ IF mosic validation fails during plan verification:
 - [ ] If distributed: each planner receives assigned requirements + prior plans XML
 - [ ] If distributed: subtasks created by planners (3-8 per plan task)
 - [ ] If single: gsd-planner spawned with page IDs (planner self-loads content)
+- [ ] If single: subtasks created under each plan task (3-15 per plan)
 - [ ] Plans validated as MTasks linked to phase task list (created by agent)
 - [ ] Plan pages validated and linked to plan tasks (created by agent)
 - [ ] Checklist items validated for each plan task (created by agent)

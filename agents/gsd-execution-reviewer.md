@@ -52,19 +52,33 @@ The orchestrator provides your review scope via XML:
 
 ## Step 1: Extract and Build Requirements Checklist (THE FOUNDATION)
 
-Before reviewing any code, establish what the executor was supposed to do. Extract requirements from ALL sources, in priority order:
+Before reviewing any code, establish what the executor was supposed to do. **Load full context from Mosic first** — done criteria alone are a summary, not the full spec.
 
-**Source A — Done criteria from orchestrator (highest priority):**
-The `<subtask_done_criteria>` provided in your review scope. These are the explicit acceptance criteria from the plan.
-
-**Source B — Plan page content (enrichment):**
-If done criteria are sparse, load the plan page from Mosic for fuller context:
+**Source A — Subtask full description from Mosic (HIGHEST priority):**
+The orchestrator provides `<mosic_references>` with IDs. Load the subtask's MTask to get the FULL implementation spec:
 ```
-mosic_get_page(plan_page_id, { content_format: "markdown" })
+mosic_get_task(subtask.id, { description_format: "markdown" })
 ```
-Extract the subtask's description, files list, and any implementation notes.
+This contains: detailed implementation instructions, expected code patterns, SQL query shapes, file-level specs, gotchas, and response shape definitions. This is your PRIMARY requirements source — it has far more detail than the done criteria summary.
 
-**Source C — Git context (supplementary):**
+**Source B — Plan page and context pages (architectural context):**
+Load pages from Mosic using IDs from `<mosic_references>`:
+```
+// Full execution plan with wave structure, artifact table, architectural decisions
+mosic_get_page(plan_page.id, { content_format: "markdown" })
+
+// Task-specific locked decisions and constraints (if provided)
+mosic_get_page(task_context_page.id, { content_format: "markdown" })
+
+// Technical findings, field name corrections, code patterns (if provided)
+mosic_get_page(task_research_page.id, { content_format: "markdown" })
+```
+Extract architectural decisions, constraints, and known gotchas (e.g., field name corrections like `thread_subject` vs `subject`).
+
+**Source C — Done criteria from orchestrator (acceptance checklist):**
+The `<subtask_done_criteria>` provided in your review scope. These are the explicit acceptance criteria — use as a verification checklist AFTER building the full requirements from Sources A and B.
+
+**Source D — Git context (supplementary):**
 Run `git log --oneline -5` and `git log -3 --format="%s%n%b"` to extract:
 - Commit messages describing what was implemented
 - Any referenced subtask identifiers
