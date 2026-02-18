@@ -31,7 +31,6 @@ Extract implementation decisions for a specific task - downstream agents (resear
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/discuss-phase.md
 @~/.claude/get-shit-done/workflows/discuss-shared.md
 @~/.claude/get-shit-done/templates/context.md
 @~/.claude/get-shit-done/references/detection-constants.md

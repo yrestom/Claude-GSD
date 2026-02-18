@@ -141,8 +141,8 @@ dependency_order = []
 
 # Extract task requirements from parent plan page's ## Requirements Coverage table
 task_requirements = []
-IF task_pages.find(p => p.page_type == "Plan") or task_pages.find(p => p.page_type == "Spec"):
-  plan_page = task_pages.find(p => p.page_type == "Plan") or task_pages.find(p => p.page_type == "Spec")
+IF task_pages.find(p => p.page_type == "Spec"):
+  plan_page = task_pages.find(p => p.page_type == "Spec")
   plan_content = mosic_get_page(plan_page.name, { content_format: "markdown" }).content
   coverage_section = extract_section(plan_content, "## Requirements Coverage")
   IF coverage_section:
@@ -170,6 +170,8 @@ IF task_requirements.length >= threshold AND (distributed_config.enabled !== fal
 ## 4. Check for Existing Research
 
 ```
+supplement_mode = false
+
 IF existing_research_page:
   existing_content = mosic_get_page(existing_research_page.name, {
     content_format: "markdown"
@@ -386,7 +388,7 @@ ELIF researcher_output contains "## RESEARCH COMPLETE":
     Display:
     """
     -------------------------------------------
-     ⚠ BLOCKING GAPS DETECTED
+     BLOCKING GAPS DETECTED
     -------------------------------------------
 
     Research found gaps that need your input before planning:

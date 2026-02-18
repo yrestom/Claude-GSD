@@ -30,7 +30,8 @@ all_commits = []
 # For phase scope: iterate completed tasks
 # For task scope: single task identifier
 FOR each task in review_scope.completed_tasks:
-  task_commits = run_bash("git log --all --oneline --grep='" + task.identifier + "'")
+  # Search current branch only (not --all, which may find unrelated commits on other branches)
+  task_commits = run_bash("git log --oneline --grep='" + task.identifier + "'")
   IF task_commits:
     all_commits.push(...task_commits)
 
@@ -55,8 +56,10 @@ IF all_commits has identifiable range:
   changed_files = run_bash("git diff --name-only " + oldest + "^.." + newest)
   full_diff = run_bash("git diff " + oldest + "^.." + newest)
 ELSE:
-  changed_files = run_bash("git diff --name-only HEAD~10")
-  full_diff = run_bash("git diff HEAD~10")
+  # Diff against branch base instead of arbitrary HEAD~10
+  base = run_bash("git merge-base main HEAD")
+  changed_files = run_bash("git diff --name-only " + base + "...HEAD")
+  full_diff = run_bash("git diff " + base + "...HEAD")
 
 # Read changed files for context
 FOR each file in changed_files:
@@ -105,7 +108,7 @@ FOR each task in review_scope.completed_tasks:
 
   IF is_tdd_task:
     # Verify TDD commit pattern
-    task_commits = run_bash("git log --all --oneline --grep='" + task.identifier + "'")
+    task_commits = run_bash("git log --oneline --grep='" + task.identifier + "'")
     has_test_commit = task_commits.some(c => c.includes("test("))
     has_feat_commit = task_commits.some(c => c.includes("feat("))
 

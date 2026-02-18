@@ -161,18 +161,12 @@ else {
 
 After loading pages from Mosic, extract all research-relevant context yourself.
 
-### 0. Check for Assigned Requirements (Distributed Research)
+### 0. Research Scope
 
 ```
-IF prompt.includes("<assigned_requirements>"):
-  assigned_ids = parse xml list of <req id="..."/> from <assigned_requirements>
-  research_scope = "focused"
-  # Focus research scope to assigned requirements only
-  # Still load full context page for locked decisions (global)
-  # Still detect frontend/TDD, but only for assigned requirement domain
-ELSE:
-  assigned_ids = null
-  research_scope = "full"
+# Note: Task researcher does not support distributed research.
+# See gsd-phase-researcher.md for distributed research with <assigned_requirements>.
+research_scope = "full"
 ```
 
 ### 1. Extract User Decisions
@@ -363,7 +357,7 @@ Update the research M Page with:
 **Task:** {task title}
 **Researched:** {date}
 **Confidence:** HIGH/MEDIUM/LOW
-**Scope:** {research_scope == "focused" ? "Group: {group_title} ({assigned_ids.length} requirements)" : "Full task"}
+**Scope:** Full task
 
 ## User Constraints
 
@@ -483,20 +477,6 @@ Update the research M Page with:
 - **Severity:** {BLOCKING or NON-BLOCKING}
 - **Impact if unresolved:** {what goes wrong}
 - **Suggested resolution/Default:** {options or default}
-
-## Proposed Interfaces (if `research_scope == "focused"`)
-
-*Include this section only when `<assigned_requirements>` is present (distributed research mode).*
-
-### Exposes (other groups can depend on these)
-- `POST /api/auth/login` → `{ token: string, user: { id, email, name } }`
-- `User` model: `{ id: UUID, email: string, name: string }`
-
-### Consumes (depends on other groups)
-- None (foundational group)
-- OR: `POST /api/auth/login` from Authentication group
-
-*List every API endpoint, data model, component, service, or utility this group's requirements will create (Exposes) or need from other groups (Consumes). The orchestrator uses this to determine dependency order between groups.*
 
 ## Sources
 

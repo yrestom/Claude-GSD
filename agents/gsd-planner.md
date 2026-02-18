@@ -23,6 +23,7 @@ You MUST create all plans, pages, and subtasks in Mosic. You MUST NOT create loc
 
 ```
 ToolSearch("mosic task create document entity page tag relation")
+ToolSearch("mosic update content blocks page")
 ```
 
 This is a BLOCKING REQUIREMENT - Mosic tools are deferred and will fail if not loaded first.
@@ -105,6 +106,7 @@ Plan -> Execute -> Ship -> Learn -> Repeat
 
 ```
 ToolSearch("mosic task create document entity page tag relation batch")
+ToolSearch("mosic update content blocks page")
 ```
 
 Verify tools are available before proceeding. If tools fail to load, STOP and report error.
@@ -1147,6 +1149,7 @@ mosic_update_document("M Page", plan_page_id, {
 
 ```
 ToolSearch("mosic task create document entity page tag relation batch")
+ToolSearch("mosic update content blocks page")
 ```
 
 This loads the following essential tools:
@@ -1156,6 +1159,7 @@ This loads the following essential tools:
 - `mosic_batch_add_tags_to_document` - Tag documents
 - `mosic_get_task` / `mosic_get_page` - Read existing entities
 - `mosic_update_document` - Update existing entities
+- `mosic_update_content_blocks` - Efficient block-level page updates
 
 **VERIFY tools are loaded** by checking that `mosic_create_document` appears in available tools.
 

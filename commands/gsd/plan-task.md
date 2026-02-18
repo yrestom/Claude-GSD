@@ -684,11 +684,109 @@ Return one of:
     description="Verify task plan: " + TASK_IDENTIFIER
   )
 
-  IF checker_output contains "## ISSUES FOUND":
-    Display: "Plan issues found. Revising..."
-    # Could spawn revision here, but for simplicity, present issues to user
-    Display: checker_output
-    EXIT with "Run /gsd:plan-task " + TASK_IDENTIFIER + " to revise"
+  **Handle checker return:**
+
+  iteration_count = 0
+  max_iterations = 3
+
+  WHILE true:
+    IF checker_output contains "## VERIFICATION PASSED":
+      Display: "Plan verification passed."
+      BREAK
+
+    IF checker_output contains "## ISSUES FOUND":
+      iteration_count += 1
+
+      IF iteration_count >= max_iterations:
+        Display: "Plan checker found issues after " + max_iterations + " revision attempts. Manual review needed."
+        Display: checker_output
+        BREAK
+
+      Display: "Checker found issues (attempt " + iteration_count + "/" + max_iterations + "). Auto-revising..."
+
+      # Spawn planner with checker feedback for revision
+      revision_prompt = """
+<revision_context>
+**Task:** """ + TASK_IDENTIFIER + """ - """ + TASK_TITLE + """
+
+**Checker Issues:**
+""" + checker_output + """
+
+**Current Plan Page:** """ + PLAN_PAGE_ID + """
+
+<instructions>
+- Address each issue identified by the checker
+- Update the plan page and subtasks in Mosic
+- Do NOT recreate subtasks — update existing ones
+- Return ## PLANNING COMPLETE when done
+</instructions>
+</revision_context>
+"""
+
+      Task(
+        prompt="First, read ~/.claude/agents/gsd-planner.md for your role.\n\n" + revision_prompt,
+        subagent_type="general-purpose",
+        model="{planner_model}",
+        description="Revise task plan: " + TASK_IDENTIFIER + " (attempt " + iteration_count + ")"
+      )
+
+      # Re-run checker on revised plan
+      plan_content = mosic_get_page(PLAN_PAGE_ID, {
+        content_format: "markdown"
+      }).content
+
+      subtasks = mosic_search_tasks({
+        workspace_id: workspace_id,
+        filters: { parent_task: TASK_ID }
+      })
+
+      subtask_details = ""
+      FOR each subtask in subtasks.results:
+        st = mosic_get_task(subtask.name, { description_format: "markdown" })
+        subtask_details += "\n\n### " + st.identifier + ": " + st.title + "\n" + st.description
+
+      checker_prompt_revised = """
+<verification_context>
+
+**Task:** """ + TASK_IDENTIFIER + """ - """ + TASK_TITLE + """
+
+""" + task_requirements_xml + """
+
+**Plan Page Content:**
+""" + plan_content + """
+
+**Subtasks:**
+""" + subtask_details + """
+
+</verification_context>
+
+<checklist>
+- [ ] Each subtask has clear, specific actions
+- [ ] Each subtask has verification criteria
+- [ ] Each subtask has done criteria
+- [ ] Subtasks are appropriately sized (15-60 min each)
+- [ ] Must-haves are observable and testable
+- [ ] No missing dependencies between subtasks
+- [ ] Every locked decision from context has a corresponding subtask action
+- [ ] No subtask implements or prepares for a deferred idea
+- [ ] Discretion areas are handled with reasonable defaults
+</checklist>
+
+<expected_output>
+Return one of:
+- ## VERIFICATION PASSED - all checks pass
+- ## ISSUES FOUND - structured issue list with specific fixes needed
+</expected_output>
+"""
+
+      Task(
+        prompt="First, read ~/.claude/agents/gsd-plan-checker.md for your role.\n\n" + checker_prompt_revised,
+        subagent_type="general-purpose",
+        model="{checker_model}",
+        description="Re-verify task plan: " + TASK_IDENTIFIER + " (attempt " + iteration_count + ")"
+      )
+
+      # Loop continues with new checker_output
 ```
 
 ## 9. Update Config
