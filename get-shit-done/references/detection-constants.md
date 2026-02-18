@@ -9,10 +9,16 @@ Single source of truth for keyword lists used across agents and commands.
 Keywords that indicate frontend/UI work. Match case-insensitively against phase title + description + requirements.
 
 ```
-UI, frontend, component, page, screen, layout, design, form, button, modal,
-dialog, sidebar, navbar, dashboard, responsive, styling, CSS, Tailwind, React,
-Vue, template, view, UX, interface, widget
+component, Vue component, UI, frontend, layout, responsive,
+dark mode, CSS, Tailwind, modal, dialog, form field,
+sidebar, header, dropdown, tooltip, composable,
+UI design, page layout, web page, detail page,
+user interface, visual, styling, theme,
+screen, form, button, navbar, dashboard, React,
+Vue, UX, widget
 ```
+
+**Removed (too broad, match backend concepts):** "design", "page", "view", "interface", "template" -- replaced with qualified versions above (e.g., "UI design", "page layout", "user interface").
 
 **Usage:** When any keyword matches, load `~/.claude/get-shit-done/references/frontend-design.md` and extract the section appropriate for your role:
 - Researchers: `## For Researchers`

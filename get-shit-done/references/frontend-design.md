@@ -9,9 +9,16 @@ UI, frontend, component, page, screen, layout, design, form, button, modal,
 dialog, sidebar, navbar, dashboard, responsive, styling, CSS, Tailwind, React,
 Vue, template, view, UX, interface, widget
 
+# Frontend detection keywords
+
+# Source of truth: ~/.claude/get-shit-done/references/detection-constants.md (## Frontend Keywords)
+
+# Do not duplicate here -- refer to detection-constants.md for the canonical list
+
 ## For Researchers (gsd-phase-researcher, gsd-task-researcher)
 
 ### Design System Inventory
+
 Before researching implementation approaches, scan the codebase for:
 
 1. **UI Framework Detection**
@@ -34,6 +41,7 @@ Before researching implementation approaches, scan the codebase for:
    - Note any custom design system components
 
 ### Research Output: Add "Design System Inventory" section
+
 ```markdown
 ## Design System Inventory
 
@@ -42,13 +50,16 @@ Before researching implementation approaches, scan the codebase for:
 **Styling:** {Tailwind CSS v3 / CSS Modules / etc.}
 **Available Components:** {list relevant to this task}
 **Existing Patterns:**
+
 - Layout: {what layout patterns exist}
 - Forms: {what form patterns exist}
 - Navigation: {what nav patterns exist}
 ```
 
 ### Web Research for UI Patterns
+
 Search for UI best practices specific to the feature:
+
 - "[feature] UI best practices [year]"
 - "[component library] [feature] example"
 - "[framework] [feature] pattern"
@@ -60,6 +71,7 @@ Include 1-2 code examples from official docs or high-quality sources.
 When frontend work is detected, add UI-specific gray areas:
 
 ### UI-Specific Gray Areas to Consider
+
 - **Layout approach** — how should the page/component be structured?
 - **Interaction patterns** — how do users interact? (hover, click, drag, etc.)
 - **State visualization** — how are loading, error, empty states shown?
@@ -67,6 +79,7 @@ When frontend work is detected, add UI-specific gray areas:
 - **Component reuse** — extend existing components or create new ones?
 
 ### Presenting Design Options
+
 Present 2-3 layout alternatives using ASCII wireframes:
 
 ```
@@ -94,10 +107,12 @@ Ask the user which direction to take before proceeding.
 ## For Planners (gsd-planner)
 
 ### Design Specification in Plans
+
 When a task involves frontend work, the plan page MUST include a
 `## Design Specification` section with:
 
 1. **Component Skeleton** — simplified JSX/HTML showing structure:
+
 ```jsx
 // Component: NotificationSettings
 <PageLayout title="Notification Preferences">
@@ -127,6 +142,7 @@ When a task involves frontend work, the plan page MUST include a
    - Success state (toast/redirect/inline)
 
 ### Anti-Convergence Rules
+
 - NEVER let the executor choose default styling
 - ALWAYS specify: font family, primary color, border radius
 - Reference project's EXISTING design tokens, not generic ones
@@ -136,6 +152,7 @@ When a task involves frontend work, the plan page MUST include a
 ## For Executors (gsd-executor)
 
 ### Implementation Rules
+
 1. Follow the Design Specification from the plan page EXACTLY
 2. Use the project's existing component library (from Design System Inventory)
 3. If the plan includes a Component Skeleton, implement that structure
@@ -146,6 +163,7 @@ When a task involves frontend work, the plan page MUST include a
 7. NEVER use default styling — every visual choice must be intentional
 
 ### Self-Check Before Committing (Frontend)
+
 - [ ] Component structure matches skeleton (if provided)
 - [ ] All states handled (loading, empty, error, success)
 - [ ] Aesthetic direction followed (fonts, colors, spacing)

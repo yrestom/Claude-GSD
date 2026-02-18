@@ -35,13 +35,18 @@ discretion_areas = ""
 
 # Task-level context first (highest priority, task-mode only)
 IF task_context_content:
+  # Defense-in-depth: check canonical heading first, then aliases for old pages
   locked_decisions = extract_section(task_context_content, "## Decisions")
+    || extract_section(task_context_content, "## Updated Decisions")
+    || extract_section(task_context_content, "## Implementation Decisions")
   deferred_ideas = extract_section(task_context_content, "## Deferred Ideas")
   discretion_areas = extract_section(task_context_content, "## Claude's Discretion")
 
 # Phase-level context (merge with task-level)
 IF phase_context_content:
   phase_locked = extract_section(phase_context_content, "## Decisions")
+    || extract_section(phase_context_content, "## Updated Decisions")
+    || extract_section(phase_context_content, "## Implementation Decisions")
   IF phase_locked:
     locked_decisions = locked_decisions
       ? locked_decisions + "\n\n**Inherited from phase:**\n" + phase_locked
@@ -142,10 +147,14 @@ is_frontend = frontend_keywords.some(kw => scope_text.includes(kw.toLowerCase())
 
 IF is_frontend:
   frontend_design_content = Read("~/.claude/get-shit-done/references/frontend-design.md")
-  # Extract role-specific section:
-  # - Researchers: extract_section(frontend_design_content, "## For Researchers")
-  # - Planners: extract_section(frontend_design_content, "## For Planners")
-  # - Executors: extract_section(frontend_design_content, "## For Executors")
+  # Extract role-specific section using PREFIX matching:
+  # extract_section uses startsWith/prefix matching, so:
+  # extract_section(content, "## For Researchers") matches "## For Researchers (gsd-phase-researcher, ...)"
+  # extract_section(content, "## For Planners") matches "## For Planners (gsd-planner)"
+  # extract_section(content, "## For Executors") matches "## For Executors (gsd-executor)"
+  researcher_guidance = extract_section(frontend_design_content, "## For Researchers")  # prefix match
+  planner_guidance = extract_section(frontend_design_content, "## For Planners")  # prefix match
+  executor_guidance = extract_section(frontend_design_content, "## For Executors")  # prefix match
 ```
 
 **Output:** `is_frontend` boolean + `frontend_design_context` string (role-appropriate section).

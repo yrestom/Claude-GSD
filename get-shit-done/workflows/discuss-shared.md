@@ -352,11 +352,18 @@ context_content = build_context_markdown({
 
 ```
 IF existing_context_page:
-  # Append new decisions to existing page
+  # Append new decisions WITHIN the existing ## Decisions section
+  # Do NOT create a separate "## Updated Decisions" heading — downstream
+  # agents (context-extraction.md) parse "## Decisions" as the canonical heading.
+  # Find the ## Decisions section and append new decisions after existing content
+  # within that section (before the next ## heading).
+  updated_content = append_within_section(
+    existing_content,
+    "## Decisions",
+    "\n\n---\n\n**Re-discussion additions:**\n\n" + new_decisions
+  )
   mosic_update_document("M Page", existing_context_page.name, {
-    content: convert_to_editorjs(
-      existing_content + "\n\n---\n\n## Updated Decisions\n\n" + new_decisions
-    ),
+    content: convert_to_editorjs(updated_content),
     status: "Published"
   })
   context_page_id = existing_context_page.name
