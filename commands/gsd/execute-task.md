@@ -237,6 +237,50 @@ FOR each subtask in incomplete_subtasks:
   st = mosic_get_task(subtask.name, { description_format: "markdown" })
   subtask_details_map[subtask.name] = st
 
+# --- Helper: extract_wave_from_description(description) ---
+# Parses the subtask's markdown description for a "**Wave:** N" or "Wave: N" line.
+# Returns integer wave number, or 1 as default if not found.
+# Example: "**Wave:** 2\nImplement the auth module..." → 2
+# Example: "No wave metadata here..." → 1
+FUNCTION extract_wave_from_description(description):
+  match = regex_search(description, /\*?\*?Wave:?\*?\*?\s*(\d+)/i)
+  IF match:
+    RETURN int(match[1])
+  RETURN 1
+
+# --- Helper: extract_files_from_description(description) ---
+# Parses the subtask's markdown description for a "**Files:**" section.
+# Expects a comma-separated list or markdown list of file paths.
+# Returns array of file path strings, or empty array if not found.
+# Example: "**Files:** src/foo.ts, src/bar.ts\n..." → ["src/foo.ts", "src/bar.ts"]
+# Example: "**Files:**\n- src/foo.ts\n- src/bar.ts" → ["src/foo.ts", "src/bar.ts"]
+FUNCTION extract_files_from_description(description):
+  match = regex_search(description, /\*?\*?Files:?\*?\*?\s*(.+)/i)
+  IF match:
+    files_text = match[1].trim()
+    IF files_text contains ",":
+      RETURN files_text.split(",").map(f => f.trim()).filter(f => f.length > 0)
+    ELSE:
+      # Check for markdown list items on subsequent lines
+      lines = description.split("\n")
+      files = []
+      in_files_section = false
+      FOR each line in lines:
+        IF line matches /\*?\*?Files:?\*?\*?/i:
+          in_files_section = true
+          # Check for inline content after "Files:"
+          inline = line.replace(/\*?\*?Files:?\*?\*?\s*/i, "").trim()
+          IF inline.length > 0:
+            files.push(inline)
+          CONTINUE
+        IF in_files_section:
+          IF line matches /^\s*[-*]\s+(.+)/:
+            files.push(regex_match[1].trim())
+          ELIF line.trim().length == 0 or line matches /^\*?\*?\w+:?\*?\*?/:
+            BREAK  # End of files section
+      RETURN files
+  RETURN []
+
 # Extract wave metadata from subtask descriptions
 # Wave is in the Metadata section: "**Wave:** N"
 waves = {}
@@ -367,25 +411,30 @@ all_failures = []       # Track failures across all waves
 IF NOT use_parallel:
   FOR each subtask in incomplete_subtasks:
     st = subtask_details_map[subtask.name]
+    retry = true
 
-    Display: "Executing subtask " + st.identifier + ": " + st.title
+    # Retry loop: WHILE retry is true, re-execute the SAME subtask
+    WHILE retry:
+      retry = false
 
-    # Build single-subtask prompt
-    # When review enabled: force deferred commits so orchestrator can review before committing
-    subtask_prompt = """
+      Display: "Executing subtask " + st.identifier + ": " + st.title
+
+      # Build single-subtask prompt
+      # When review enabled: force deferred commits so orchestrator can review before committing
+      subtask_prompt = """
 <objective>
 Execute subtask """ + st.identifier + """: """ + st.title + """
 </objective>
 """
 
-    IF review_enabled:
-      subtask_prompt += """
+      IF review_enabled:
+        subtask_prompt += """
 **Execution Mode:** subtask
 **Review Mode:** enabled
 **Commit Mode:** deferred
 """
 
-    subtask_prompt += """
+      subtask_prompt += """
 <execution_context>
 @./.claude/get-shit-done/workflows/execute-plan.md
 </execution_context>
@@ -396,104 +445,125 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
 - **""" + st.identifier + """** (""" + st.name + """): """ + st.title + """
 """
 
-    # Spawn ONE agent for THIS subtask
-    Task(
-      prompt="First, read ./.claude/agents/gsd-executor.md for your role.\n\n" + subtask_prompt,
-      subagent_type="general-purpose",
-      model="{executor_model}",
-      description="Subtask: " + st.identifier
-    )
+      # Spawn ONE agent for THIS subtask
+      Task(
+        prompt="First, read ./.claude/agents/gsd-executor.md for your role.\n\n" + subtask_prompt,
+        subagent_type="general-purpose",
+        model="{executor_model}",
+        description="Subtask: " + st.identifier
+      )
 
-    # IMMEDIATELY process result before spawning next agent
-    IF agent_result contains "EXECUTION COMPLETE" or agent_result contains "SUBTASK COMPLETE":
-      files = parse_file_list(extract_file_list(agent_result))
-      all_files_changed.push(...files)
-      all_results.push(agent_result)
+      # IMMEDIATELY process result before spawning next agent
+      IF agent_result contains "EXECUTION COMPLETE" or agent_result contains "SUBTASK COMPLETE":
+        # --- Post-Subtask Completion (see shared procedure below step 6b) ---
+        post_subtask_completion(subtask, st, agent_result, review_enabled, review_config)
 
-      IF review_enabled:
-        # --- EXECUTION REVIEW LOOP (from @execution-review.md) ---
-        review_loop_result = execution_review_loop({
-          entity_type: "subtask",
-          entity_identifier: st.identifier,
-          entity_title: st.title,
-          done_criteria: extract_done_criteria(st.description),
-          executor_result: agent_result,
-          files_modified: files,
-          mosic_refs: mosic_refs,
-          config: review_config,
-          model_profile: model_profile
+        Display: "Subtask " + st.identifier + " complete."
+
+      ELIF agent_result contains "SUBTASK FAILED" or agent_result contains "EXECUTION FAILED":
+        all_failures.push({ subtask: subtask, result: agent_result })
+        Display: "Subtask " + st.identifier + " FAILED."
+        Display: agent_result
+
+        AskUserQuestion({
+          questions: [{
+            question: "Subtask " + st.identifier + " failed. How should we proceed?",
+            header: "Failed",
+            options: [
+              { label: "Continue", description: "Skip this subtask, continue with remaining" },
+              { label: "Retry", description: "Re-run this subtask" },
+              { label: "Stop execution", description: "Abort remaining subtasks" }
+            ],
+            multiSelect: false
+          }]
         })
 
-        IF review_loop_result.status == "abort":
-          GOTO step 7  # Create partial summary
-        IF review_loop_result.status == "skipped":
-          all_failures.push({ subtask: subtask, result: "Skipped after failed review" })
-          CONTINUE  # Next subtask
-
-        # Update file list from review (fix iterations may change files)
-        reviewed_files = review_loop_result.files
-        all_files_changed = all_files_changed.filter(f => !files.includes(f))  # Remove initial
-        all_files_changed.push(...reviewed_files)  # Add final
-
-        # Commit changes (orchestrator-managed since executor deferred)
-        FOR each file in reviewed_files:
-          git add {file}
-        commit_type = infer_commit_type(review_loop_result.executor_result or agent_result)
-        git commit -m "{commit_type}({TASK_IDENTIFIER}): {st.title}"
-        commit_hash = git rev-parse --short HEAD
-        all_commits.push({ hash: commit_hash, message: commit_type + "(" + TASK_IDENTIFIER + "): " + st.title })
+        IF user_selection == "Stop execution":
+          GOTO step 7  # Create partial summary with what completed so far
+        IF user_selection == "Retry":
+          retry = true
+          CONTINUE  # Re-enters WHILE loop, re-executes the SAME subtask
+        # ELSE "Continue": retry stays false, WHILE exits, FOR advances to next subtask
 
       ELSE:
-        # No review — executor already committed in normal mode
+        # Unexpected output — treat as potential success, extract what we can
         commits = extract_commits(agent_result)
+        files = parse_file_list(extract_file_list(agent_result))
         all_commits.push(...commits)
+        all_files_changed.push(...files)
+        all_results.push(agent_result)
+        mosic_complete_task(subtask.name)
+```
 
-      # Mark subtask complete
-      mosic_complete_task(subtask.name)
-      mosic_create_document("M Comment", {
-        workspace: workspace_id,
-        ref_doc: "MTask",
-        ref_name: subtask.name,
-        content: "<p><strong>Completed</strong></p>" +
-          (all_commits.length > 0 ? "<p>Commit: <code>" + all_commits[all_commits.length - 1].hash + "</code></p>" : "")
-      })
+### Post-Subtask Completion (shared procedure for 6a and 6b)
 
-      Display: "Subtask " + st.identifier + " complete."
+```
+# Inline procedure: post_subtask_completion(subtask, st, agent_result, review_enabled, review_config)
+#
+# Called after a subtask agent returns a successful result.
+# Handles: review loop (if enabled), commit, mark complete, comment.
+#
+# Inputs:
+#   subtask        - the MTask object for the subtask
+#   st             - the detailed subtask object (from subtask_details_map)
+#   agent_result   - the raw result text from the executor agent
+#   review_enabled - boolean, whether execution review is active
+#   review_config  - the review configuration object
+#
+# Side effects: mutates all_commits, all_files_changed, all_failures
 
-    ELIF agent_result contains "SUBTASK FAILED" or agent_result contains "EXECUTION FAILED":
-      all_failures.push({ subtask: subtask, result: agent_result })
-      Display: "Subtask " + st.identifier + " FAILED."
-      Display: agent_result
+PROCEDURE post_subtask_completion(subtask, st, agent_result, review_enabled, review_config):
+  files = parse_file_list(extract_file_list(agent_result))
 
-      AskUserQuestion({
-        questions: [{
-          question: "Subtask " + st.identifier + " failed. How should we proceed?",
-          header: "Failed",
-          options: [
-            { label: "Continue", description: "Skip this subtask, continue with remaining" },
-            { label: "Retry", description: "Re-run this subtask" },
-            { label: "Stop execution", description: "Abort remaining subtasks" }
-          ],
-          multiSelect: false
-        }]
-      })
+  IF review_enabled:
+    # --- EXECUTION REVIEW LOOP (from @execution-review.md) ---
+    review_loop_result = execution_review_loop({
+      entity_type: "subtask",
+      entity_identifier: st.identifier,
+      entity_title: st.title,
+      done_criteria: extract_done_criteria(st.description),
+      executor_result: agent_result,
+      files_modified: files,
+      mosic_refs: mosic_refs,
+      config: review_config,
+      model_profile: model_profile
+    })
 
-      IF user_selection == "Stop execution":
-        GOTO step 7  # Create partial summary with what completed so far
-      IF user_selection == "Retry":
-        # Retry: re-execute the same subtask with fix applied
-        CONTINUE to next iteration of the loop with the same subtask
+    IF review_loop_result.status == "abort":
+      GOTO step 7  # Create partial summary
+    IF review_loop_result.status == "skipped":
+      all_failures.push({ subtask: subtask, result: "Skipped after failed review" })
+      RETURN
 
-    ELSE:
-      # Unexpected output — treat as potential success, extract what we can
-      commits = extract_commits(agent_result)
-      files = parse_file_list(extract_file_list(agent_result))
-      all_commits.push(...commits)
-      all_files_changed.push(...files)
-      all_results.push(agent_result)
-      mosic_complete_task(subtask.name)
+    # Update file list from review (fix iterations may change files)
+    reviewed_files = review_loop_result.files
+    all_files_changed = all_files_changed.filter(f => !files.includes(f))  # Remove initial
+    all_files_changed.push(...reviewed_files)  # Add final
+    files = reviewed_files
 
-    # Continue to next subtask
+    # Commit changes (orchestrator-managed since executor deferred)
+    FOR each file in files:
+      git add {file}
+    commit_type = infer_commit_type(review_loop_result.executor_result or agent_result)
+    git commit -m "{commit_type}({TASK_IDENTIFIER}): {st.title}"
+    commit_hash = git rev-parse --short HEAD
+    all_commits.push({ hash: commit_hash, message: commit_type + "(" + TASK_IDENTIFIER + "): " + st.title })
+
+  ELSE:
+    # No review — executor already committed in normal mode
+    commits = extract_commits(agent_result)
+    all_commits.push(...commits)
+    commit_hash = commits.length > 0 ? commits[commits.length - 1].hash : null
+
+  # Mark subtask complete
+  mosic_complete_task(subtask.name)
+  mosic_create_document("M Comment", {
+    workspace: workspace_id,
+    ref_doc: "MTask",
+    ref_name: subtask.name,
+    content: "<p><strong>Completed</strong></p>" +
+      (commit_hash ? "<p>Commit: <code>" + commit_hash + "</code></p>" : "")
+  })
 ```
 
 ### 6b. Parallel Wave Execution (when `use_parallel = true`)
@@ -650,17 +720,8 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
         all_results.push(agent_result)
 
         IF NOT wave_parallel AND NOT review_enabled:
-          # Normal-mode agent committed on its own — extract commit info
-          commits = extract_commits(agent_result)
-          all_commits.push(...commits)
-          mosic_complete_task(wp.subtask.name)
-          mosic_create_document("M Comment", {
-            workspace: workspace_id,
-            ref_doc: "MTask",
-            ref_name: wp.subtask.name,
-            content: "<p><strong>Completed</strong></p>" +
-              (commits.length > 0 ? "<p>Commit: <code>" + commits[0].hash + "</code></p>" : "")
-          })
+          # Normal-mode agent committed on its own — use shared post-subtask procedure
+          post_subtask_completion(wp.subtask, wp.st, agent_result, false, review_config)
         ELSE:
           # Deferred mode (parallel OR review enabled) — collect for orchestrator-managed review + commits
           wave_results_passed.push({
@@ -705,51 +766,8 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
       Display: "Processing wave " + wave_num + " results..."
 
       FOR each result in wave_results_passed:
-        subtask = result.subtask
-        files = result.files_modified
-
-        # --- EXECUTION REVIEW LOOP (when enabled, from @execution-review.md) ---
-        IF review_enabled:
-          review_loop_result = execution_review_loop({
-            entity_type: "subtask",
-            entity_identifier: result.st.identifier,
-            entity_title: result.st.title,
-            done_criteria: extract_done_criteria(result.st.description),
-            executor_result: result.result_text,
-            files_modified: files,
-            mosic_refs: mosic_refs,
-            config: review_config,
-            model_profile: model_profile
-          })
-
-          IF review_loop_result.status == "abort":
-            GOTO step 7  # Create partial summary
-          IF review_loop_result.status == "skipped":
-            all_failures.push({ subtask: subtask, result: "Skipped after failed review" })
-            CONTINUE
-
-          # Use potentially updated files from fix iterations
-          files = review_loop_result.files
-
-        # Stage files individually
-        FOR each file in files:
-          git add {file}
-
-        # Determine commit type from result text content
-        commit_type = infer_commit_type(result.result_text)
-        git commit -m "{commit_type}({TASK_IDENTIFIER}): {subtask.title}"
-        commit_hash = git rev-parse --short HEAD
-        all_commits.push({ hash: commit_hash, message: commit_type + "(" + TASK_IDENTIFIER + "): " + subtask.title })
-
-        # Mark subtask complete
-        mosic_complete_task(subtask.name)
-        mosic_create_document("M Comment", {
-          workspace: workspace_id,
-          ref_doc: "MTask",
-          ref_name: subtask.name,
-          content: "<p><strong>Completed</strong></p>" +
-            "<p>Commit: <code>" + commit_hash + "</code></p>"
-        })
+        # Use shared post-subtask procedure with review enabled
+        post_subtask_completion(result.subtask, result.st, result.result_text, review_enabled, review_config)
 
     # 7. Run test verification after each wave (catch cross-subtask regressions)
     Display: "Running verification after wave " + wave_num + "..."
@@ -834,15 +852,22 @@ mosic_batch_add_tags_to_document("M Page", SUMMARY_PAGE_ID, [
   config.mosic.tags.summary
 ])
 
+# Re-query subtasks for fresh completion status (step 2 data is stale after execution)
+all_subtasks_fresh = mosic_search_tasks({
+  workspace_id: workspace_id,
+  filters: { parent_task: TASK_ID }
+})
+complete_subtasks = all_subtasks_fresh.results.filter(t => t.done)
+
 # Update task checklist if exists
 task_with_checklists = mosic_get_task(TASK_ID, { include_checklists: true })
 IF task_with_checklists.checklists:
   FOR each checklist in task_with_checklists.checklists:
-    matching_subtask = complete_subtasks.concat(incomplete_subtasks).find(s =>
+    matching_subtask = complete_subtasks.find(s =>
       s.title.toLowerCase().includes(checklist.title.toLowerCase()) or
       checklist.title.toLowerCase().includes(s.title.toLowerCase())
     )
-    IF matching_subtask and matching_subtask.done:
+    IF matching_subtask:
       mosic_update_document("MTask CheckList", checklist.name, {
         done: true
       })

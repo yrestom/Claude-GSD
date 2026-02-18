@@ -389,6 +389,9 @@ Commit each subtask atomically. Create summary page. Update task status.
 use_parallel = PARALLEL_ENABLED
   AND PARALLEL_PLAN_LEVEL
   AND executor_prompts.length >= MIN_PLANS_FOR_PARALLEL
+
+# Initialize abort flag — set by review loop abort, checked after FOR loop
+aborted = false
 ```
 
 **If `use_parallel=true`: Spawn agents in parallel (multiple Task() calls in ONE response)**
@@ -443,8 +446,68 @@ FOR each executor_prompt in executor_prompts:
   plan = executor_prompt.plan
   executor_summary = parse_executor_output(agent_result)
 
+  # --- Run shared Post-Plan Completion procedure (see 4.4) ---
+  post_plan_result = run_post_plan_completion({
+    plan: plan,
+    agent_result: agent_result,
+    executor_summary: executor_summary,
+    mosic_refs: executor_prompt.mosic_refs,
+    review_enabled: review_enabled,
+    review_config: review_config,
+    model_profile: model_profile
+  })
+
+  IF post_plan_result.aborted:
+    aborted = true
+    BREAK  # Exit the FOR loop — skip remaining plans
+
+  # THEN continue to next plan in wave
+```
+
+### 4.3 Handle Executor Results (Parallel Mode Only)
+
+After all parallel executors in wave complete, pair results with plans:
+
+```
+# This section only applies to parallel mode — sequential results are handled inline above
+IF use_parallel:
+  # Results correspond to executor_prompts by spawn order
+  FOR each (ep, agent_result) in zip(executor_prompts, wave_results):
+    plan = ep.plan
+    executor_summary = parse_executor_output(agent_result)
+
+    # --- Run shared Post-Plan Completion procedure (see 4.4) ---
+    post_plan_result = run_post_plan_completion({
+      plan: plan,
+      agent_result: agent_result,
+      executor_summary: executor_summary,
+      mosic_refs: ep.mosic_refs,
+      review_enabled: review_enabled,
+      review_config: review_config,
+      model_profile: model_profile
+    })
+
+    IF post_plan_result.aborted:
+      aborted = true
+      BREAK  # Exit the FOR loop — skip remaining plans
+```
+
+### 4.4 Post-Plan Completion (shared procedure)
+
+**This procedure is called by both sequential (4.2) and parallel (4.3) paths after each plan executes.**
+
+Given: `plan`, `agent_result`, `executor_summary`, `mosic_refs`, `review_enabled`, `review_config`, `model_profile`
+
+Returns: `{ aborted: bool }`
+
+```
+function run_post_plan_completion(args):
+  plan = args.plan
+  agent_result = args.agent_result
+  executor_summary = args.executor_summary
+
   # --- EXECUTION REVIEW LOOP (when enabled, from @execution-review.md) ---
-  IF review_enabled:
+  IF args.review_enabled:
     files = parse_file_list(extract_file_list(agent_result))
     review_loop_result = execution_review_loop({
       entity_type: "plan",
@@ -453,15 +516,15 @@ FOR each executor_prompt in executor_prompts:
       done_criteria: extract_done_criteria(plan.content),
       executor_result: agent_result,
       files_modified: files,
-      mosic_refs: executor_prompt.mosic_refs,
-      config: review_config,
-      model_profile: model_profile
+      mosic_refs: args.mosic_refs,
+      config: args.review_config,
+      model_profile: args.model_profile
     })
 
     IF review_loop_result.status == "abort":
-      GOTO step 7  # Update phase status as PARTIAL (not Completed)
+      return { aborted: true }
     IF review_loop_result.status == "skipped":
-      CONTINUE  # Skip to next plan
+      return { aborted: false }
 
     # Re-parse summary from final executor result (may include fix iterations)
     IF review_loop_result.executor_result:
@@ -546,127 +609,19 @@ FOR each executor_prompt in executor_prompts:
       relation_type: "Related"
     })
 
-  # THEN continue to next plan in wave
+  return { aborted: false }
 ```
 
-### 4.3 Handle Executor Results (Parallel Mode Only)
+### 4.5 Proceed to Next Wave
 
-After all parallel executors in wave complete, pair results with plans:
+After all plans in wave complete, check abort flag:
 
 ```
-# This section only applies to parallel mode — sequential results are handled inline above
-IF use_parallel:
-  # Results correspond to executor_prompts by spawn order
-  FOR each (ep, agent_result) in zip(executor_prompts, wave_results):
-    plan = ep.plan
-    executor_summary = parse_executor_output(agent_result)
-
-    # --- EXECUTION REVIEW LOOP (when enabled, from @execution-review.md) ---
-    IF review_enabled:
-      files = parse_file_list(extract_file_list(agent_result))
-      review_loop_result = execution_review_loop({
-        entity_type: "plan",
-        entity_identifier: plan.task.identifier,
-        entity_title: plan.task.title,
-        done_criteria: extract_done_criteria(plan.content),
-        executor_result: agent_result,
-        files_modified: files,
-        mosic_refs: ep.mosic_refs,
-        config: review_config,
-        model_profile: model_profile
-      })
-
-      IF review_loop_result.status == "abort":
-        GOTO step 7  # Update phase status as PARTIAL (not Completed)
-      IF review_loop_result.status == "skipped":
-        CONTINUE  # Skip to next plan
-
-      # Re-parse summary from final executor result (may include fix iterations)
-      IF review_loop_result.executor_result:
-        executor_summary = parse_executor_output(review_loop_result.executor_result)
-
-      # Commit reviewed changes (orchestrator-managed since executor deferred)
-      reviewed_files = review_loop_result.files
-      FOR each file in reviewed_files:
-        git add {file}
-      commit_type = infer_commit_type(review_loop_result.executor_result or agent_result)
-      git commit -m "{commit_type}({plan.task.identifier}): {plan.task.title}"
-
-    # Ensure task is marked complete (idempotent — executor already did this in normal mode)
-    mosic_complete_task(plan.task.name)
-    mosic_update_document("MTask", plan.task.name, {
-      status: "Completed"
-    })
-
-    # Update checklist items based on executor's returned summary
-    task_with_checklists = mosic_get_task(plan.task.name, {
-      include_checklists: true
-    })
-
-    FOR each completed_item in executor_summary.completed_tasks:
-      matching_checklist = task_with_checklists.checklists.find(c =>
-        c.title == completed_item OR
-        c.title.toLowerCase().includes(completed_item.toLowerCase()) OR
-        completed_item.toLowerCase().includes(c.title.toLowerCase())
-      )
-      IF matching_checklist:
-        mosic_update_document("MTask CheckList", matching_checklist.name, {
-          done: true
-        })
-
-    # Find executor's summary page
-    # When review enabled, executor deferred everything — may not have created summary page
-    task_pages = mosic_get_entity_pages("MTask", plan.task.name, { include_subtree: false })
-    summary_page = task_pages.find(p => p.title.includes("Execution Summary"))
-
-    IF NOT summary_page:
-      # Create summary (expected when review enabled; fallback otherwise)
-      summary_page = mosic_create_entity_page("MTask", plan.task.name, {
-        workspace_id: workspace_id,
-        title: plan.task.identifier + " Execution Summary",
-        page_type: "Document",
-        icon: config.mosic.page_icons.summary,
-        status: "Published",
-        content: convert_to_editorjs(executor_summary),
-        relation_type: "Related"
-      })
-
-    # Tag summary page (idempotent — safe even if executor already tagged)
-    mosic_batch_add_tags_to_document("M Page", summary_page.name, [
-      config.mosic.tags.gsd_managed,
-      config.mosic.tags.summary,
-      config.mosic.tags.phase_tags[phase_key]
-    ])
-
-    # Store in config
-    config.mosic.pages["phase-" + PHASE + "-summary-" + plan.number] = summary_page.name
-
-    # Add orchestrator completion comment
-    mosic_create_document("M Comment", {
-      workspace: workspace_id,
-      ref_doc: "MTask",
-      ref_name: plan.task.name,
-      content: "<p><strong>Phase Orchestrator: Completed</strong></p>" +
-        "<p><strong>Commits:</strong></p>" +
-        "<ul>" + executor_summary.commits.map(c => "<li><code>" + c.hash + "</code>: " + c.message + "</li>").join("") + "</ul>"
-    })
-
-    # Create relation between plan page and summary page (page→page)
-    plan_page_id = config.mosic.pages["phase-" + PHASE + "-plan-" + plan.number]
-    IF plan_page_id:
-      mosic_create_document("M Relation", {
-        workspace: workspace_id,
-        source_doctype: "M Page",
-        source_name: plan_page_id,
-        target_doctype: "M Page",
-        target_name: summary_page.name,
-        relation_type: "Related"
-      })
+IF aborted:
+  BREAK  # Exit the wave loop — skip remaining waves, go to step 7
 ```
 
-### 4.4 Proceed to Next Wave
-
-After all plans in wave complete, proceed to next wave.
+Proceed to next wave.
 
 ## 5. Aggregate Results
 
@@ -674,8 +629,9 @@ After all plans in wave complete, proceed to next wave.
 # Collect summaries from all plans
 all_summaries = []
 
-FOR each plan_task in plan_tasks:
-  summary_page_id = config.mosic.pages["phase-" + PHASE + "-summary-" + plan.number]
+FOR each (plan_task, index) in plan_tasks:
+  plan_number = extract_plan_number(plan_task.title)  # Uses helper from step 3
+  summary_page_id = config.mosic.pages["phase-" + PHASE + "-summary-" + plan_number]
   IF summary_page_id:
     summary = mosic_get_page(summary_page_id, {
       content_format: "markdown"
@@ -753,8 +709,8 @@ Return structured verification report.
 
 ```
 Task(
-  prompt=verifier_prompt,
-  subagent_type="gsd-verifier",
+  prompt="First, read ~/.claude/agents/gsd-verifier.md for your complete role instructions.\n\n" + verifier_prompt,
+  subagent_type="general-purpose",
   model="{verifier_model}",
   description="Verify Phase {PHASE}"
 )
@@ -793,8 +749,13 @@ config.mosic.pages["phase-" + PHASE + "-verification"] = verification_page.name
 
 ```
 # Determine if arriving from an abort (partial completion) or normal completion
-# Abort arrives here when review_loop_result.status == "abort" in steps 4.2/4.3
+# Abort arrives here when aborted == true from steps 4.2/4.3
 # Normal completion arrives here after all plans executed and phase goal verified
+
+# Re-query plan tasks from Mosic for fresh status (local plan_tasks array is stale
+# after execution — tasks were marked complete via mosic_complete_task() in step 4.4)
+fresh_phase = mosic_get_task_list(task_list_id, { include_tasks: true })
+plan_tasks = fresh_phase.tasks.filter(t => t.tags.includes(plan_tag))
 
 # Check if all plan tasks are actually complete
 all_plans_done = plan_tasks.every(t => t.done or t.status == "Completed")
