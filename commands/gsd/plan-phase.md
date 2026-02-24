@@ -68,7 +68,7 @@ model_overrides = config.model_overrides or {}
 Model lookup:
 | Agent | quality | balanced | budget |
 |-------|---------|----------|--------|
-| gsd-phase-researcher | opus | sonnet | haiku |
+| gsd-phase-researcher | opus | opus | haiku |
 | gsd-planner | opus | opus | sonnet |
 | gsd-plan-checker | sonnet | sonnet | haiku |
 
