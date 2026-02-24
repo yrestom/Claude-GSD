@@ -1,7 +1,7 @@
 <purpose>
 Single-subtask execution workflow for the gsd-executor agent.
 
-Loads context from Mosic, executes ONE specified subtask, runs verification,
+Loads context from Mosic, executes ONE specified subtask, performs artifact self-check,
 and returns structured results to the orchestrator.
 
 The orchestrator (execute-task or execute-phase) handles commits, summary
@@ -312,7 +312,7 @@ Execute the single specified subtask. **Deviations are normal** — handle them 
    - **If CLI/API returns authentication error:** Handle as authentication gate
    - **When you discover additional work not in plan:** Apply deviation rules automatically
    - Continue implementing, applying rules as needed
-   - Run the verification
+   - Run artifact self-check (verify implementation is complete and non-stub; do NOT run the test suite — that is done inside TDD tasks via RED-GREEN-REFACTOR, or by /gsd:verify-task for full acceptance verification)
    - Confirm done criteria met
    - Record modified files via `git status --short` (NO commit)
    - Skip to structured return
@@ -428,8 +428,8 @@ DURATION_MIN=$(( DURATION_SEC / 60 ))
 - path/to/file1.ts
 - path/to/file2.ts
 
-### Verification Results
-{What was verified and how}
+### Artifact Self-Check
+{Files present, non-stub, correctly wired up — or issues found}
 
 ### Deviations
 {Any deviations from plan, or "None"}
@@ -463,7 +463,7 @@ DURATION_MIN=$(( DURATION_SEC / 60 ))
 <success_criteria>
 - [ ] Mosic context loaded (task, plan page, context)
 - [ ] Single specified subtask executed
-- [ ] Subtask verification passes
+- [ ] Artifact self-check passes (implementation complete, non-stub, correctly integrated)
 - [ ] Modified files recorded via `git status --short` (no git write operations)
 - [ ] Structured SUBTASK COMPLETE or SUBTASK FAILED returned to orchestrator
 - [ ] No commits made (orchestrator handles)

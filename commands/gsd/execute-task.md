@@ -653,7 +653,7 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
 **DEFERRED COMMITS — DO NOT COMMIT.**
 You are running in subtask mode as part of a parallel wave.
 - Execute the subtask implementation
-- Run verification
+- Perform artifact self-check (verify all described files exist, are non-stub, and correctly implement the requirements per Step 4 in gsd-executor.md — do NOT run the test suite here)
 - Record modified files via `git status --short`
 - DO NOT run `git add` or `git commit`
 - The orchestrator will handle commits after all parallel agents complete
@@ -663,7 +663,7 @@ You are running in subtask mode as part of a parallel wave.
 
 <success_criteria>
 - [ ] Subtask implementation matches description
-- [ ] Verification criteria pass
+- [ ] Artifact self-check passed (files exist, non-stub, correctly integrated)
 - [ ] Modified files recorded
 - [ ] No git add/commit operations performed
 </success_criteria>
@@ -679,8 +679,8 @@ Return:
 ### Files Modified
 - path/to/file.ts
 
-### Verification Results
-{pass/fail details}
+### Artifact Self-Check
+{files present, non-stub, wired up — or issues found}
 
 ### Deviations
 {or "None"}
@@ -814,10 +814,10 @@ Execute subtask """ + st.identifier + """: """ + st.title + """
         # Use shared post-subtask procedure with review enabled
         post_subtask_completion(result.subtask, result.st, result.result_text, review_enabled, review_config)
 
-    # 7. Run test verification after each wave (catch cross-subtask regressions)
-    Display: "Running verification after wave " + wave_num + "..."
-    # Run test suite if applicable to catch interference between parallel subtasks
-    # If tests fail, report before proceeding to next wave
+    # 7. Wave complete — proceed to next wave
+    # NOTE: Do NOT run tests here. Test execution happens inside TDD subtasks (RED-GREEN-REFACTOR).
+    # Full verification (goal-backward, requirements tracing, artifact checking) is done
+    # separately by gsd-verifier via /gsd:verify-task after the entire task completes.
 
     Display: "Wave " + wave_num + " complete."
 
@@ -1052,7 +1052,7 @@ IF mosic operation fails:
 - [ ] Execution strategy determined (sequential vs parallel)
 - [ ] All executors run in subtask mode with deferred commits
 - [ ] Orchestrator commits after each subtask/wave completion
-- [ ] Post-wave test verification catches cross-subtask regressions
+- [ ] Waves complete — no mid-wave test suite runs (verification is done via /gsd:verify-task)
 - [ ] Failed subtasks handled (continue/retry/stop options)
 - [ ] Subtasks marked complete
 - [ ] Summary page created linked to task
