@@ -59,18 +59,6 @@ process.stdin.on('end', () => {
       }
     }
 
-    // GSD update available?
-    let gsdUpdate = '';
-    const cacheFile = path.join(homeDir, '.claude', 'cache', 'gsd-update-check.json');
-    if (fs.existsSync(cacheFile)) {
-      try {
-        const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
-        if (cache.update_available) {
-          gsdUpdate = '\x1b[33m⬆ /gsd:update\x1b[0m │ ';
-        }
-      } catch (e) {}
-    }
-
     // Mosic project status (Mosic-only architecture - no local .planning files)
     let mosicStatus = '';
     const configFile = path.join(dir, 'config.json');
@@ -96,9 +84,9 @@ process.stdin.on('end', () => {
     // Output
     const dirname = path.basename(dir);
     if (task) {
-      process.stdout.write(`${gsdUpdate}${mosicStatus}\x1b[2m${model}\x1b[0m │ \x1b[1m${task}\x1b[0m │ \x1b[2m${dirname}\x1b[0m${ctx}`);
+      process.stdout.write(`${mosicStatus}\x1b[2m${model}\x1b[0m │ \x1b[1m${task}\x1b[0m │ \x1b[2m${dirname}\x1b[0m${ctx}`);
     } else {
-      process.stdout.write(`${gsdUpdate}${mosicStatus}\x1b[2m${model}\x1b[0m │ \x1b[2m${dirname}\x1b[0m${ctx}`);
+      process.stdout.write(`${mosicStatus}\x1b[2m${model}\x1b[0m │ \x1b[2m${dirname}\x1b[0m${ctx}`);
     }
   } catch (e) {
     // Silent fail - don't break statusline on parse errors
