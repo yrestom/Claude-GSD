@@ -225,8 +225,8 @@ stack_page = mosic_create_entity_page("MProject", project_id, {
 })
 
 mosic_batch_add_tags_to_document("M Page", stack_page.name, [
-  tag_ids["gsd-managed"],
-  tag_ids["research"]
+  resolve_tag("gsd-managed", workspace_id),
+  resolve_tag("research", workspace_id)
 ])
 
 # Derive topic tags from Recommended Stack table
@@ -300,8 +300,8 @@ features_page = mosic_create_entity_page("MProject", project_id, {
 })
 
 mosic_batch_add_tags_to_document("M Page", features_page.name, [
-  tag_ids["gsd-managed"],
-  tag_ids["research"]
+  resolve_tag("gsd-managed", workspace_id),
+  resolve_tag("research", workspace_id)
 ])
 ```
 
@@ -353,8 +353,8 @@ architecture_page = mosic_create_entity_page("MProject", project_id, {
 })
 
 mosic_batch_add_tags_to_document("M Page", architecture_page.name, [
-  tag_ids["gsd-managed"],
-  tag_ids["research"]
+  resolve_tag("gsd-managed", workspace_id),
+  resolve_tag("research", workspace_id)
 ])
 ```
 
@@ -372,8 +372,8 @@ pitfalls_page = mosic_create_entity_page("MProject", project_id, {
 })
 
 mosic_batch_add_tags_to_document("M Page", pitfalls_page.name, [
-  tag_ids["gsd-managed"],
-  tag_ids["research"]
+  resolve_tag("gsd-managed", workspace_id),
+  resolve_tag("research", workspace_id)
 ])
 ```
 
@@ -390,9 +390,10 @@ summary_page = mosic_create_entity_page("MProject", project_id, {
   relation_type: "Related"
 })
 
+# Use resolve_tag (search-first, create-last) — see tag-operations.md
 mosic_batch_add_tags_to_document("M Page", summary_page.name, [
-  tag_ids["gsd-managed"],
-  tag_ids["research"]
+  resolve_tag("gsd-managed", workspace_id),
+  resolve_tag("research", workspace_id)
 ])
 ```
 

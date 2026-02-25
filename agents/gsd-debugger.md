@@ -412,11 +412,12 @@ session_page = mosic_create_entity_page("MProject", project_id, {
   relation_type: "Related"
 })
 
-# Tag the session
+# Tag the session — use resolve_tag (search-first, create-last)
+# See @~/.claude/get-shit-done/references/tag-operations.md
 mosic_batch_add_tags_to_document("M Page", session_page.name, [
-  tag_ids["gsd-managed"],
-  tag_ids["debug"],
-  tag_ids["active"]
+  resolve_tag("gsd-managed", workspace_id),
+  resolve_tag("debug", workspace_id),
+  resolve_tag("active", workspace_id)
 ])
 ```
 
@@ -481,8 +482,8 @@ mosic_update_content_blocks(session_page_id, {
 **Archive resolved session:**
 ```
 # Remove active tag, add resolved tag
-mosic_remove_tag_from_document("M Page", session_page_id, tag_ids["active"])
-mosic_add_tag_to_document("M Page", session_page_id, tag_ids["resolved"])
+mosic_remove_tag_from_document("M Page", session_page_id, resolve_tag("active", workspace_id))
+mosic_add_tag_to_document("M Page", session_page_id, resolve_tag("resolved", workspace_id))
 
 # Update status in page content
 mosic_update_document("M Page", session_page_id, {
@@ -515,11 +516,13 @@ Extract:
 **First:** Check for active debug sessions in Mosic.
 
 ```
+debug_tag_id  = resolve_tag("debug", workspace_id)
+active_tag_id = resolve_tag("active", workspace_id)
 active_sessions = mosic_search_pages({
   workspace_id: workspace_id,
   query: "Debug",
   filters: {
-    tags: [tag_ids["debug"], tag_ids["active"]]
+    tags: [debug_tag_id, active_tag_id]
   }
 })
 ```

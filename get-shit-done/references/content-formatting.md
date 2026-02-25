@@ -253,7 +253,7 @@ M Comment content uses HTML format for rich text display.
 #### Simple Status Comment
 ```javascript
 mosic_create_document("M Comment", {
-  workspace_id: workspace_id,
+  workspace: workspace_id,
   ref_doc: "MTask",
   ref_name: task_id,
   content: "<p><strong>Status Update</strong></p><p>Task is now in progress.</p>"
@@ -263,7 +263,7 @@ mosic_create_document("M Comment", {
 #### Completion Comment with Details
 ```javascript
 mosic_create_document("M Comment", {
-  workspace_id: workspace_id,
+  workspace: workspace_id,
   ref_doc: "MTask",
   ref_name: task_id,
   content: "<p><strong>Completed</strong></p>" +
@@ -275,7 +275,7 @@ mosic_create_document("M Comment", {
 #### Comment with List
 ```javascript
 mosic_create_document("M Comment", {
-  workspace_id: workspace_id,
+  workspace: workspace_id,
   ref_doc: "MTask",
   ref_name: task_id,
   content: "<p><strong>Task Complete</strong></p>" +
@@ -291,7 +291,7 @@ mosic_create_document("M Comment", {
 #### UAT Result Comment
 ```javascript
 mosic_create_document("M Comment", {
-  workspace_id: workspace_id,
+  workspace: workspace_id,
   ref_doc: "M Page",
   ref_name: uat_page_id,
   content: "<p><strong>UAT Complete</strong></p>" +
@@ -409,3 +409,24 @@ mosic_create_document("M Comment", {
 | Create MTask | Editor.js | `description: { blocks: [...] }` |
 | Update MTask | Editor.js | `description: { blocks: [...] }` |
 | Create M Comment | HTML | `content: "<p><strong>...</strong></p>"` |
+
+## `workspace` vs `workspace_id` Field Names
+
+M Comment (and MTask, MProject, MTask List, M Relation) use `workspace` as the document field.
+`workspace_id` is correct only as an MCP function parameter or for the M Tag doctype.
+
+```javascript
+// CORRECT — document field uses "workspace"
+mosic_create_document("M Comment",   { workspace: workspace_id, ... })  // ✓
+mosic_create_document("MTask",       { workspace: workspace_id, ... })  // ✓
+mosic_create_document("MTask List",  { workspace: workspace_id, ... })  // ✓
+mosic_create_document("M Relation",  { workspace: workspace_id, ... })  // ✓
+
+// CORRECT — M Tag is the exception; uses workspace_id as document field
+mosic_create_document("M Tag", { workspace_id: workspace_id, ... })     // ✓
+
+// WRONG — workspace_id as document field for non-Tag entities
+mosic_create_document("M Comment", { workspace_id: workspace_id, ... }) // ✗
+```
+
+> Full tag handling guide: `@~/.claude/get-shit-done/references/tag-operations.md`

@@ -76,7 +76,8 @@ roadmap_content = mosic_get_page(roadmap_page_id, {
 
 **Load plan pages for must-haves:**
 ```
-plan_tasks = phase.tasks.filter(t => t.tags.includes(tag_ids["plan"]))
+plan_tag_id = resolve_tag("plan", workspace_id)
+plan_tasks = phase.tasks.filter(t => t.tags.includes(plan_tag_id))
 
 FOR each plan_task:
   plan_pages = mosic_get_entity_pages("MTask", plan_task.name, {
@@ -263,10 +264,11 @@ verification_page = mosic_create_entity_page("MTask List", phase_task_list_id, {
 # Tag the page (structural + topic tags)
 phase_topic_titles = config.mosic.tags.phase_topic_tags["phase-{N}"] or []
 phase_topic_ids = [config.mosic.tags.topic_tags[t] for t in phase_topic_titles if t in config.mosic.tags.topic_tags]
+# Use resolve_tag (search-first, create-last) — see tag-operations.md
 mosic_batch_add_tags_to_document("M Page", verification_page.name, [
-  tag_ids["gsd-managed"],
-  tag_ids["verification"],
-  tag_ids["phase-{N}"]
+  resolve_tag("gsd-managed", workspace_id),
+  resolve_tag("verification", workspace_id),
+  resolve_tag("phase-{N}", workspace_id)
 ] + phase_topic_ids)
 ```
 

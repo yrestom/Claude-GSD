@@ -182,11 +182,12 @@ summary_page = mosic_create_entity_page("MProject", project_id, {
   relation_type: "Related"
 })
 
-# Tag the summary
+# Tag the summary — use resolve_tag (search-first, create-last)
+# See @~/.claude/get-shit-done/references/tag-operations.md
 mosic_batch_add_tags_to_document("M Page", summary_page.name, [
-  tag_ids["gsd-managed"],
-  tag_ids["research"],
-  tag_ids["summary"]
+  resolve_tag("gsd-managed", workspace_id),
+  resolve_tag("research", workspace_id),
+  resolve_tag("summary", workspace_id)
 ])
 ```
 

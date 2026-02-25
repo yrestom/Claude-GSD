@@ -329,11 +329,12 @@ report_page = mosic_create_entity_page("MProject", project_id, {
   relation_type: "Related"
 })
 
-# Tag the report
+# Tag the report — use resolve_tag (search-first, create-last)
+# See @~/.claude/get-shit-done/references/tag-operations.md
 mosic_batch_add_tags_to_document("M Page", report_page.name, [
-  tag_ids["gsd-managed"],
-  tag_ids["integration"],
-  tag_ids["verification"]
+  resolve_tag("gsd-managed", workspace_id),
+  resolve_tag("integration", workspace_id),
+  resolve_tag("verification", workspace_id)
 ])
 ```
 

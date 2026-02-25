@@ -88,8 +88,10 @@ phase = mosic_get_task_list(phase_task_list_id, {
 })
 
 # Get all plan tasks in this phase
+# resolve_tag: search-first, create-last (see tag-operations.md)
+plan_tag_id = resolve_tag("plan", workspace_id)
 plan_tasks = phase.tasks.filter(t =>
-  t.tags.includes(tag_ids["plan"])
+  t.tags.includes(plan_tag_id)
 )
 
 # For each plan task, get the plan detail page
@@ -412,7 +414,7 @@ phase = mosic_get_task_list(phase_task_list_id, {
 })
 
 FOR each plan_task in phase.tasks:
-  IF plan_task.tags.includes(tag_ids["plan"]):
+  IF plan_task.tags.includes(plan_tag_id):  // plan_tag_id resolved above
     plan_pages = mosic_get_entity_pages("MTask", plan_task.name, {
       content_format: "markdown"
     })

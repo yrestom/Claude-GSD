@@ -232,7 +232,7 @@ phase_tag = mosic_create_document("M Tag", {
 
 # Create MTask List for the phase
 task_list = mosic_create_document("MTask List", {
-  workspace_id: workspace_id,
+  workspace: workspace_id,
   project: project_id,
   title: "Phase {N}: {phase_name}",
   description: "{phase_goal}",
@@ -242,8 +242,8 @@ task_list = mosic_create_document("MTask List", {
   status: "Open"
 })
 
-# Tag the task list (structural tags)
-task_list_tags = [tag_ids["gsd-managed"], phase_tag.name]
+# Tag the task list (structural tags) — use resolve_tag (see tag-operations.md)
+task_list_tags = [resolve_tag("gsd-managed", workspace_id), phase_tag.name]
 
 # If topic tags exist for this phase (e.g., from prior research), apply them
 phase_topic_titles = (config.mosic.tags.phase_topic_tags || {})["phase-{N}"] or []
@@ -274,7 +274,7 @@ phase_overview = mosic_create_entity_page("MTask List", task_list.name, {
 
 # Tag the page
 mosic_batch_add_tags_to_document("M Page", phase_overview.name, [
-  tag_ids["gsd-managed"],
+  resolve_tag("gsd-managed", workspace_id),
   phase_tag.name
 ])
 
@@ -324,7 +324,7 @@ roadmap_page = mosic_create_entity_page("MProject", project_id, {
 
 # Tag the page
 mosic_batch_add_tags_to_document("M Page", roadmap_page.name, [
-  tag_ids["gsd-managed"]
+  resolve_tag("gsd-managed", workspace_id)
 ])
 
 # Store in config.json
@@ -390,7 +390,7 @@ FOR each phase where phase.depends_on:
   FOR each dependency:
     dep_list_id = config.mosic.task_lists["phase-{dep}"]
     mosic_create_document("M Relation", {
-      workspace_id: workspace_id,
+      workspace: workspace_id,
       source_doctype: "MTask List",
       source_name: task_list.name,
       target_doctype: "MTask List",

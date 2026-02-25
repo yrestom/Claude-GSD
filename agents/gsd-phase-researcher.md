@@ -936,10 +936,11 @@ research_page = mosic_create_entity_page("MTask List", phase_task_list_id, {
 })
 
 # Tag the page (structural tags first, topic tags added in Step 5b)
+# Use resolve_tag (search-first, create-last) — see tag-operations.md
 mosic_batch_add_tags_to_document("M Page", research_page.name, [
-  tag_ids["gsd-managed"],
-  tag_ids["research"],
-  tag_ids["phase-{N}"]
+  resolve_tag("gsd-managed", workspace_id),
+  resolve_tag("research", workspace_id),
+  resolve_tag("phase-{N}", workspace_id)
 ])
 ```
 

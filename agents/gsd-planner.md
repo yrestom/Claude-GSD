@@ -675,7 +675,7 @@ For each plan identified:
 
 ```
 plan_task = mosic_create_document("MTask", {
-  workspace_id: workspace_id,
+  workspace: workspace_id,
   task_list: phase_task_list_id,
   title: "Plan {M}: {Plan Name}",
   description: "[Brief objective summary]",
@@ -684,12 +684,13 @@ plan_task = mosic_create_document("MTask", {
   color: "[wave-based color]"
 })
 
-# Tag the task
-tags = [tag_ids["gsd-managed"], tag_ids["plan"], tag_ids["phase-{N}"]]
+# Tag the task — use resolve_tag (search-first, create-last)
+# See @~/.claude/get-shit-done/references/tag-operations.md
+tags = [resolve_tag("gsd-managed", workspace_id), resolve_tag("plan", workspace_id), resolve_tag("phase-{N}", workspace_id)]
 
 # If TDD task (when tdd_mode is "prefer" or "auto" and heuristic matched)
 IF task.tdd == true:
-  tags.push(tag_ids["tdd"] or "tdd")
+  tags.push(resolve_tag("tdd", workspace_id))
   # Add RED/GREEN/REFACTOR checklist items
   plan_task.check_list = [
     { title: "RED: Failing test written", done: false },
@@ -719,7 +720,7 @@ plan_page = mosic_create_entity_page("MTask", plan_task.name, {
 })
 
 # Tag the page (structural + topic tags)
-page_tags = [tag_ids["gsd-managed"], tag_ids["plan"], tag_ids["phase-{N}"]] + phase_topic_ids
+page_tags = [resolve_tag("gsd-managed", workspace_id), resolve_tag("plan", workspace_id), resolve_tag("phase-{N}", workspace_id)] + phase_topic_ids
 mosic_batch_add_tags_to_document("M Page", plan_page.name, page_tags)
 ```
 
@@ -730,7 +731,7 @@ IF plan.depends_on:
   FOR each dependency in plan.depends_on:
     dep_task_id = config.mosic.tasks["phase-{N}-plan-{dep}"]
     mosic_create_document("M Relation", {
-      workspace_id: workspace_id,
+      workspace: workspace_id,
       source_doctype: "MTask",
       source_name: plan_task.name,
       target_doctype: "MTask",
@@ -1160,8 +1161,9 @@ Triggered when orchestrator provides `<revision_context>` with checker issues.
 ### Step 1: Load Existing Plans from Mosic
 
 ```
+plan_tag_id = resolve_tag("plan", workspace_id)
 existing_plans = phase.tasks.filter(t =>
-  t.tags.includes(tag_ids["plan"])
+  t.tags.includes(plan_tag_id)
 )
 
 FOR each plan in existing_plans:
