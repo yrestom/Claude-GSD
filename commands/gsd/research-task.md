@@ -243,6 +243,17 @@ ELSE:
 Display: "Research page: https://mosic.pro/app/page/" + RESEARCH_PAGE_ID
 ```
 
+## 5.5. Write Session State (Pre-Research)
+
+```
+config.mosic.session.active_task = TASK_ID
+config.mosic.session.active_task_identifier = TASK_IDENTIFIER
+config.mosic.session.last_action = "research-task"
+config.mosic.session.last_updated = new Date().toISOString()
+
+write config.json
+```
+
 ## 6. Spawn Task Researcher Agent(s)
 
 ```

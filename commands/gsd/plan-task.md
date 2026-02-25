@@ -311,6 +311,17 @@ ELSE:
 
 *Step 5.5 removed — planner self-extracts requirements from Mosic pages.*
 
+## 5.75. Write Session State (Pre-Planning)
+
+```
+config.mosic.session.active_task = TASK_ID
+config.mosic.session.active_task_identifier = TASK_IDENTIFIER
+config.mosic.session.last_action = "plan-task"
+config.mosic.session.last_updated = new Date().toISOString()
+
+write config.json
+```
+
 ## 6. Spawn gsd-planner Agent(s)
 
 ```

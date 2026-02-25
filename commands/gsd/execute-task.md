@@ -403,6 +403,17 @@ Mode: {execution_mode_label}
 }
 ```
 
+## 5.5. Write Session State (Pre-Execution)
+
+```
+config.mosic.session.active_task = TASK_ID
+config.mosic.session.active_task_identifier = TASK_IDENTIFIER
+config.mosic.session.last_action = "execute-task"
+config.mosic.session.last_updated = new Date().toISOString()
+
+write config.json
+```
+
 ## 6. Execute Subtasks
 
 All executors run in subtask mode with deferred commits. The orchestrator handles
