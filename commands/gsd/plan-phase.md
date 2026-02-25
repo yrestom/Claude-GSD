@@ -327,13 +327,30 @@ IF --gaps:
 Follow `@~/.claude/get-shit-done/workflows/decompose-requirements.md`:
 
 ```
-# 1. Check for existing decomposition from research-phase
+distributed_config = config.workflow?.distributed ?? {}
+planning_threshold = distributed_config.planning_threshold ?? distributed_config.threshold ?? 6
+
+# 1. Extract phase requirements upfront (for decompose threshold check AND Steps 9-10)
+phase_requirements = []
+IF requirements_page_id:
+  # Use <requirements_extraction> from @context-extraction.md
+  phase_requirements = extract_phase_requirements(requirements_page_id, PHASE, phase.title)
+
+# 2. Fallback: if traceability table has no entries for this phase, derive from research page
+#    This handles later phases not yet added to the traceability table
+IF phase_requirements.length == 0 AND research_page_id AND NOT --gaps:
+  research_content = mosic_get_page(research_page_id, { content_format: "plain" }).content
+  # Scan for requirement-style IDs (e.g. AUTH-01, DISC-3, EXPIRY-1)
+  req_ids = unique(research_content.match(/\b([A-Z]{2,8}-\d{1,3})\b/g) ?? [])
+  IF req_ids.length > 0:
+    phase_requirements = req_ids.map(id => ({ id, description: "" }))
+    Display: "No traceability entries for Phase {PHASE} — derived {phase_requirements.length} requirement IDs from research page"
+
+# 3. Check for existing decomposition from research-phase (reuse path)
 decomposition = config.mosic.session?.decomposition
 use_distributed = false
 requirement_groups = []
 dependency_order = []
-distributed_config = config.workflow?.distributed ?? {}
-planning_threshold = distributed_config.planning_threshold ?? distributed_config.threshold ?? 6
 
 IF decomposition AND decomposition.phase == PHASE:
   # Reuse: follow <decompose> "reuse existing" path
@@ -341,21 +358,12 @@ IF decomposition AND decomposition.phase == PHASE:
   dependency_order = decomposition.dependency_order
   use_distributed = true
 
-ELIF requirements_page_id AND NOT --gaps:
-  # Decompose fresh: follow <decompose> with these inputs:
-  #   requirements_page_id, current phase (PHASE / phase.title), config
-  # Extract phase_requirements using <requirements_extraction> from @context-extraction.md
-  # Then group, merge/split, order using <decompose> + <tier_based_ordering>
-  result = decompose(requirements_page_id, PHASE, phase.title, config, { threshold_override: planning_threshold })
+ELIF phase_requirements.length >= planning_threshold AND (distributed_config.enabled !== false) AND NOT --gaps:
+  # Decompose fresh using pre-extracted requirements
+  result = decompose(phase_requirements, config, { threshold_override: planning_threshold })
   use_distributed = result.use_distributed
   requirement_groups = result.requirement_groups
   dependency_order = result.dependency_order
-
-# CRITICAL: Always extract phase_requirements for Steps 9-10 (coverage + checker)
-phase_requirements = []
-IF requirements_page_id:
-  # Use <requirements_extraction> from @context-extraction.md
-  phase_requirements = extract_phase_requirements(requirements_page_id, PHASE, phase.title)
 ```
 
 ## 8. Spawn gsd-planner Agent(s)
