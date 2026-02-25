@@ -54,6 +54,7 @@ Orchestrator stays lean: load plans from Mosic, analyze dependencies, group into
 <execution_context>
 @~/.claude/get-shit-done/references/ui-brand.md
 @~/.claude/get-shit-done/workflows/execute-phase.md
+@~/.claude/get-shit-done/workflows/execution-review.md
 </execution_context>
 
 <context>
@@ -92,6 +93,10 @@ PARALLEL_ENABLED = config.parallelization?.enabled ?? true
 PARALLEL_PLAN_LEVEL = config.parallelization?.plan_level ?? true
 MAX_CONCURRENT = config.parallelization?.max_concurrent_agents ?? 3
 MIN_PLANS_FOR_PARALLEL = config.parallelization?.min_plans_for_parallel ?? 2
+
+# Execution review config (same as execute-task)
+review_config = config.workflow?.execution_review ?? { enabled: false }
+review_enabled = review_config.enabled === true
 
 # Model resolution: override takes precedence over profile lookup
 Model lookup:
@@ -502,6 +507,44 @@ function run_post_plan_completion(args):
       ref_name: plan.task.name,
       content: "<p><strong>Phase Orchestrator: Plan completed</strong></p>"
     })
+
+    # [NEW] Inline plan review using shared execution-review.md workflow
+    IF review_enabled:
+      # Build mosic_refs for the reviewer (same pattern as execute-task)
+      plan_review_mosic_refs = """
+<mosic_references>
+<task id="{plan.task.name}" identifier="{plan.task.identifier}" title="{plan.task.title}" />
+<phase id="{task_list_id}" title="{phase.title}" number="{PHASE}" />
+<workspace id="{workspace_id}" />
+<plan_page id="{plan.page.name}" />
+<research_page id="{research_page_id}" />
+<context_page id="{context_page_id}" />
+<requirements_page id="{requirements_page_id}" />
+</mosic_references>
+"""
+
+      review_loop_result = execution_review_loop({
+        entity_type: "plan",
+        entity_identifier: plan.task.identifier,
+        entity_title: plan.task.title,
+        done_criteria: extract_must_haves(plan.content),
+        executor_result: agent_result,
+        files_modified: parse_file_list(agent_result),
+        mosic_refs: plan_review_mosic_refs,
+        config: review_config,
+        model_profile: model_profile,
+        model_overrides: model_overrides,
+        subtask_description: plan.content
+      })
+
+      IF review_loop_result.status == "abort":
+        return { aborted: true }
+
+      IF review_loop_result.status == "skipped":
+        all_failures.push({ plan: plan, result: "Skipped after failed review" })
+        return { aborted: false }
+
+      # "pass" / "pass_with_issues": fall through, return { aborted: false }
 
   ELSE:
     # Plan-orchestrator failed
