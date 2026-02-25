@@ -960,22 +960,24 @@ function install(isGlobal, runtime = 'claude') {
     failures.push('VERSION');
   }
 
-  // Copy hooks from dist/ (bundled with dependencies)
-  const hooksSrc = path.join(src, 'hooks', 'dist');
+  // Copy hooks from dist/ (bundled) or hooks/ (local dev fallback)
+  const hooksSrcDist = path.join(src, 'hooks', 'dist');
+  const hooksSrcDev  = path.join(src, 'hooks');
+  const useDistDir   = fs.existsSync(hooksSrcDist);
+  const hooksSrc     = useDistDir ? hooksSrcDist : hooksSrcDev;
   if (fs.existsSync(hooksSrc)) {
     const hooksDest = path.join(targetDir, 'hooks');
     fs.mkdirSync(hooksDest, { recursive: true });
     const hookEntries = fs.readdirSync(hooksSrc);
     for (const entry of hookEntries) {
       const srcFile = path.join(hooksSrc, entry);
-      // Only copy files, not directories
-      if (fs.statSync(srcFile).isFile()) {
-        const destFile = path.join(hooksDest, entry);
-        fs.copyFileSync(srcFile, destFile);
+      // When using dev fallback, only copy .js files (skip CLAUDE.md, etc.)
+      if (fs.statSync(srcFile).isFile() && (useDistDir || entry.endsWith('.js'))) {
+        fs.copyFileSync(srcFile, path.join(hooksDest, entry));
       }
     }
     if (verifyInstalled(hooksDest, 'hooks')) {
-      console.log(`  ${green}✓${reset} Installed hooks (bundled)`);
+      console.log(`  ${green}✓${reset} Installed hooks (${useDistDir ? 'bundled' : 'dev fallback'})`);
     } else {
       failures.push('hooks');
     }

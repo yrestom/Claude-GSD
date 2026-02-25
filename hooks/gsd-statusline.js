@@ -73,18 +73,20 @@ process.stdin.on('end', () => {
 
     // Mosic project status (Mosic-only architecture - no local .planning files)
     let mosicStatus = '';
-    const configFile = path.join(dir, 'gsd-config.json');
+    const configFile = path.join(dir, 'config.json');
     if (fs.existsSync(configFile)) {
       try {
         const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
         if (config.mosic?.enabled && config.mosic?.project_id) {
           // Has active Mosic project - show active task or project indicator
-          const activeTask = config.mosic?.session?.active_task;
-          if (activeTask) {
+          const activeTask = config.mosic?.session?.active_task_identifier
+                          || config.mosic?.session?.active_task;
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(activeTask || '');
+          if (activeTask && !isUuid) {
             // Show active task identifier (e.g., "AUTH-1")
             mosicStatus = `\x1b[32m◉ ${activeTask}\x1b[0m │ `;
           } else {
-            // Show Mosic is connected but no active task
+            // Show Mosic is connected but no active task (or only UUID available)
             mosicStatus = '\x1b[32m◉ Mosic\x1b[0m │ ';
           }
         }

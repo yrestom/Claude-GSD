@@ -202,6 +202,7 @@ Output: `context_page_id` stored in config via `config_key`
 ```
 config.mosic.pages["task-" + TASK_IDENTIFIER + "-context"] = context_page_id
 config.mosic.session.active_task = TASK_ID
+config.mosic.session.active_task_identifier = TASK_IDENTIFIER
 config.mosic.session.last_action = "discuss-task"
 config.mosic.session.last_updated = new Date().toISOString()
 

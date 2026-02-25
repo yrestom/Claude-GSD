@@ -321,6 +321,7 @@ Update config.json with task workflow state:
 ```
 # Track task workflow state
 config.mosic.session.active_task = TASK_ID
+config.mosic.session.active_task_identifier = TASK_IDENTIFIER
 config.mosic.session.task_workflow_level = workflow_level
 config.mosic.session.last_action = "task-create"
 config.mosic.session.last_updated = new Date().toISOString()

@@ -775,6 +775,7 @@ Return one of:
 ```
 config.mosic.pages["task-" + TASK_IDENTIFIER + "-plan"] = PLAN_PAGE_ID
 config.mosic.session.active_task = TASK_ID
+config.mosic.session.active_task_identifier = TASK_IDENTIFIER
 config.mosic.session.last_action = "plan-task"
 config.mosic.session.last_updated = new Date().toISOString()
 

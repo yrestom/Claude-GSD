@@ -946,6 +946,7 @@ IF plan_page:
 ```
 config.mosic.pages["task-" + TASK_IDENTIFIER + "-summary"] = SUMMARY_PAGE_ID
 config.mosic.session.active_task = null
+config.mosic.session.active_task_identifier = null
 config.mosic.session.task_workflow_level = null
 config.mosic.session.paused_for_task = false
 config.mosic.session.last_action = "execute-task"
@@ -1027,6 +1028,7 @@ IF executor fails mid-execution:
 
   # Store state for resume
   config.mosic.session.active_task = TASK_ID
+  config.mosic.session.active_task_identifier = TASK_IDENTIFIER
   config.mosic.session.last_action = "execute-task-interrupted"
   config.mosic.session.last_updated = new Date().toISOString()
 

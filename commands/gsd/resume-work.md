@@ -679,6 +679,7 @@ IF inferred_workflow.startsWith("task_"):
 
     # Clear stale task workflow state
     config.mosic.session.active_task = null
+    config.mosic.session.active_task_identifier = null
     config.mosic.session.task_workflow_level = null
     config.mosic.session.paused_for_task = false
 
@@ -816,6 +817,7 @@ AskUserQuestion({
 config.mosic.session = {
   active_phase: mosic_current_phase?.name or null,
   active_task: mosic_current_task?.name or null,
+  active_task_identifier: mosic_current_task?.identifier or null,
   last_action: "resume-work",
   last_updated: new Date().toISOString(),
   inferred_workflow: inferred_workflow,

@@ -443,6 +443,7 @@ IF NOT use_distributed:
 # which writes config.mosic.session.task_decomposition with groups[] and dependency_order[]
 
 config.mosic.session.active_task = TASK_ID
+config.mosic.session.active_task_identifier = TASK_IDENTIFIER
 config.mosic.session.last_action = "research-task"
 config.mosic.session.last_updated = new Date().toISOString()
 
