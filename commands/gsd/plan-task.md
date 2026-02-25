@@ -254,10 +254,10 @@ ELIF NOT quick_mode:
         task_requirements.append({ id: row.req_id, description: row.description })
 
   distributed_config = config.workflow?.distributed ?? {}
-  threshold = distributed_config.threshold ?? 6
+  planning_threshold = distributed_config.planning_threshold ?? distributed_config.threshold ?? 6
 
-  IF task_requirements.length >= threshold AND (distributed_config.enabled !== false):
-    result = decompose(task_requirements, config)
+  IF task_requirements.length >= planning_threshold AND (distributed_config.enabled !== false):
+    result = decompose(task_requirements, config, { threshold_override: planning_threshold })
     use_distributed = result.use_distributed
     requirement_groups = result.requirement_groups
     dependency_order = result.dependency_order
@@ -265,7 +265,7 @@ ELIF NOT quick_mode:
     IF use_distributed:
       Display:
       """
-      Distributed planning: {task_requirements.length} requirements in {requirement_groups.length} groups
+      Distributed planning: {task_requirements.length} requirements ≥ threshold ({planning_threshold}) → {requirement_groups.length} groups
       """
 ```
 

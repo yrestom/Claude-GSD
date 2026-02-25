@@ -161,14 +161,16 @@ IF requirements_page_id AND (config.workflow?.distributed?.enabled !== false):
   phase_requirements = extract_phase_requirements(requirements_content, PHASE)
 
   # 2. Decompose using @decompose-requirements.md <decompose>
-  result = decompose(phase_requirements, config)
+  distributed_config = config.workflow?.distributed ?? {}
+  research_threshold = distributed_config.research_threshold ?? distributed_config.threshold ?? 6
+  result = decompose(phase_requirements, config, { threshold_override: research_threshold })
   use_distributed = result.use_distributed
   requirement_groups = result.requirement_groups
 
   IF use_distributed:
     Display:
     """
-    Distributed research: {phase_requirements.length} requirements in {requirement_groups.length} groups
+    Distributed research: {phase_requirements.length} requirements ≥ threshold ({research_threshold}) → {requirement_groups.length} groups
     {requirement_groups.map(g => "  " + g.number + ". " + g.title + " (" + g.requirement_ids.length + " reqs)").join("\n")}
     """
 ELSE:

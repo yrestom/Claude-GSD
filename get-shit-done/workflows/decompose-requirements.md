@@ -12,11 +12,11 @@ and determines execution order via tier heuristics or interface-based topologica
 
 ## Group Requirements by Prefix
 
-**Input:** `phase_requirements[]` — array of `{ id, description }`, plus config thresholds
+**Input:** `phase_requirements[]` — array of `{ id, description }`, plus config and optional `threshold_override`
 
 ```
 distributed_config = config.workflow?.distributed ?? {}
-threshold = distributed_config.threshold ?? 6
+threshold = threshold_override ?? distributed_config.threshold ?? 6
 min_per_group = distributed_config.min_requirements_per_group ?? 2
 max_per_group = distributed_config.max_requirements_per_group ?? 5
 max_groups = distributed_config.max_groups ?? 8

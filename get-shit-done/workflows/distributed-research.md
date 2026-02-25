@@ -19,6 +19,8 @@ that both research-phase and research-task can reference.
 - `tdd_config` — TDD setting from config
 - `scope_label` — "Phase 01" or "AUTH-5" (for display)
 - `requirement_groups[]` — from `@decompose-requirements.md`
+- `distributed_config` — `config.workflow?.distributed ?? {}` (set in calling command's decompose section)
+- `max_groups` — `distributed_config.max_groups ?? 8` (computed by `@decompose-requirements.md`)
 
 ```
 Display:
@@ -29,6 +31,27 @@ Display:
 
 {requirement_groups.length} researchers spawning in parallel...
 """
+
+# Cap research agents to max_research_agents
+max_research_agents = distributed_config.max_research_agents ?? max_groups
+IF requirement_groups.length > max_research_agents:
+  Display: "Capping research agents at {max_research_agents} (config: max_research_agents)"
+  # Merge smallest groups until under cap
+  WHILE requirement_groups.length > max_research_agents:
+    sorted_by_size = requirement_groups.sort_by(g => g.requirements.length)
+    a = sorted_by_size[0]
+    b = sorted_by_size[1]
+    merged = {
+      number: a.number,   # keep first group's number; renumber all below
+      title: a.title + " + " + b.title,
+      prefix: a.prefix,
+      requirement_ids: a.requirement_ids + b.requirement_ids,
+      requirements: a.requirements + b.requirements
+    }
+    requirement_groups = [merged] + requirement_groups.filter(g => g != a AND g != b)
+  # Renumber sequentially after merging (prevents gaps in group numbers)
+  FOR i, group in enumerate(requirement_groups):
+    group.number = i + 1
 
 # Build and spawn ALL researchers in ONE response (parallel execution)
 FOR each group in requirement_groups:

@@ -332,6 +332,8 @@ decomposition = config.mosic.session?.decomposition
 use_distributed = false
 requirement_groups = []
 dependency_order = []
+distributed_config = config.workflow?.distributed ?? {}
+planning_threshold = distributed_config.planning_threshold ?? distributed_config.threshold ?? 6
 
 IF decomposition AND decomposition.phase == PHASE:
   # Reuse: follow <decompose> "reuse existing" path
@@ -344,7 +346,7 @@ ELIF requirements_page_id AND NOT --gaps:
   #   requirements_page_id, current phase (PHASE / phase.title), config
   # Extract phase_requirements using <requirements_extraction> from @context-extraction.md
   # Then group, merge/split, order using <decompose> + <tier_based_ordering>
-  result = decompose(requirements_page_id, PHASE, phase.title, config)
+  result = decompose(requirements_page_id, PHASE, phase.title, config, { threshold_override: planning_threshold })
   use_distributed = result.use_distributed
   requirement_groups = result.requirement_groups
   dependency_order = result.dependency_order
@@ -369,7 +371,7 @@ IF use_distributed:
    GSD > PLANNING PHASE {PHASE} (DISTRIBUTED)
   -------------------------------------------
 
-  {requirement_groups.length} groups, executing in dependency order:
+  {phase_requirements.length} requirements ≥ threshold ({planning_threshold}) → {requirement_groups.length} groups, executing in dependency order:
   {dependency_order.map(g => g.number + ". " + g.title).join("\n")}
   """
 

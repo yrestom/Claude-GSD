@@ -26,10 +26,13 @@
     },
     "distributed": {
       "enabled": true,
+      "research_threshold": 4,
+      "planning_threshold": 10,
       "threshold": 6,
       "max_groups": 8,
       "max_requirements_per_group": 5,
-      "min_requirements_per_group": 2
+      "min_requirements_per_group": 2,
+      "max_research_agents": 8
     }
   },
   "parallelization": {

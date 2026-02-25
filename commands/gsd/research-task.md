@@ -145,14 +145,14 @@ IF task_pages.find(p => p.page_type == "Spec"):
   coverage_section = extract_section(plan_content, "## Requirements Coverage")
   IF coverage_section:
     FOR each row in parse_markdown_table(coverage_section):
-      task_requirements.append({ id: row.req_id, description: row.description })
+      task_requirements.append({ id: row.req_id })
 
 distributed_config = config.workflow?.distributed ?? {}
-threshold = distributed_config.threshold ?? 6
+research_threshold = distributed_config.research_threshold ?? distributed_config.threshold ?? 6
 
-IF task_requirements.length >= threshold AND (distributed_config.enabled !== false):
+IF task_requirements.length >= research_threshold AND (distributed_config.enabled !== false):
   # Decompose using @decompose-requirements.md <decompose>
-  result = decompose(task_requirements, config)
+  result = decompose(task_requirements, config, { threshold_override: research_threshold })
   use_distributed = result.use_distributed
   requirement_groups = result.requirement_groups
   dependency_order = result.dependency_order
@@ -160,7 +160,7 @@ IF task_requirements.length >= threshold AND (distributed_config.enabled !== fal
   IF use_distributed:
     Display:
     """
-    Distributed research: {task_requirements.length} requirements in {requirement_groups.length} groups
+    Distributed research: {task_requirements.length} requirements ≥ threshold ({research_threshold}) → {requirement_groups.length} groups
     {requirement_groups.map(g => "  " + g.number + ". " + g.title + " (" + g.requirement_ids.length + " reqs)").join("\n")}
     """
 ```
