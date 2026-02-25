@@ -86,6 +86,7 @@ process.stdin.on('end', () => {
             'research-phase':           'RS',
             'plan-task':                'PL',
             'plan-phase':               'PL',
+            'execute-phase':             'EX',
             'execute-task':             'EX',
             'execute-task-interrupted': 'EX!',
             'verify-task':              'VF',
