@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { execSync } = require('child_process');
 
 // Read JSON from stdin
 let input = '';
@@ -65,7 +66,7 @@ process.stdin.on('end', () => {
     if (fs.existsSync(configFile)) {
       try {
         const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-        if (config.mosic?.enabled && config.mosic?.project_id) {
+        if (config.mosic?.project_id) {
           // Has active Mosic project - show active task or project indicator
           const activeTask = config.mosic?.session?.active_task_identifier
                           || config.mosic?.session?.active_task;
@@ -77,16 +78,43 @@ process.stdin.on('end', () => {
             // Show Mosic is connected but no active task (or only UUID available)
             mosicStatus = '\x1b[32m◉ Mosic\x1b[0m │ ';
           }
+
+          // Workflow phase indicator from last_action
+          const phaseMap = {
+            'discuss-task':             'DS',
+            'research-task':            'RS',
+            'research-phase':           'RS',
+            'plan-task':                'PL',
+            'plan-phase':               'PL',
+            'execute-task':             'EX',
+            'execute-task-interrupted': 'EX!',
+            'verify-task':              'VF',
+            'verify-work':              'VF',
+          };
+          const lastAction = config.mosic?.session?.last_action;
+          const phase = lastAction ? phaseMap[lastAction] : null;
+          if (phase) {
+            mosicStatus = mosicStatus.replace(/ │ $/, '') + ` \x1b[2;36m${phase}\x1b[0m │ `;
+          }
         }
       } catch (e) {}
     }
 
+    // Git branch (only shown when not main/master)
+    let branch = '';
+    try {
+      const raw = execSync(`git -C "${dir}" branch --show-current 2>/dev/null`, { timeout: 2000 })
+        .toString().trim();
+      if (raw && raw !== 'main' && raw !== 'master') branch = raw;
+    } catch (e) {}
+
     // Output
     const dirname = path.basename(dir);
+    const branchStr = branch ? `\x1b[33m${branch}\x1b[0m │ ` : '';
     if (task) {
-      process.stdout.write(`${mosicStatus}\x1b[2m${model}\x1b[0m │ \x1b[1m${task}\x1b[0m │ \x1b[2m${dirname}\x1b[0m${ctx}`);
+      process.stdout.write(`${mosicStatus}\x1b[2m${model}\x1b[0m │ \x1b[1m${task}\x1b[0m │ ${branchStr}\x1b[2m${dirname}\x1b[0m${ctx}`);
     } else {
-      process.stdout.write(`${mosicStatus}\x1b[2m${model}\x1b[0m │ \x1b[2m${dirname}\x1b[0m${ctx}`);
+      process.stdout.write(`${mosicStatus}\x1b[2m${model}\x1b[0m │ ${branchStr}\x1b[2m${dirname}\x1b[0m${ctx}`);
     }
   } catch (e) {
     // Silent fail - don't break statusline on parse errors
