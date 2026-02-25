@@ -78,14 +78,14 @@ task_identifier = extract_identifier($ARGUMENTS)
 IF task_identifier:
   task = mosic_get_task(task_identifier, {
     workspace_id: workspace_id,
-    description_format: "markdown"
+    description_format: "none"
   })
 ELSE:
   # Use active task from config
   task_id = config.mosic.session?.active_task
   IF not task_id:
     ERROR: "No task identifier provided and no active task. Provide task ID or run /gsd:task first."
-  task = mosic_get_task(task_id, { description_format: "markdown" })
+  task = mosic_get_task(task_id, { description_format: "none" })
 
 TASK_ID = task.name
 TASK_IDENTIFIER = task.identifier
@@ -104,10 +104,13 @@ Display:
 ## 3. Discover Page IDs
 
 ```
-# Get task pages
-task_pages = mosic_get_entity_pages("MTask", TASK_ID, {
-  include_subtree: false
-})
+# Parallelize independent calls: task pages + phase data (phase_id known from task.task_list)
+phase_id = task.task_list
+[task_pages, phase, phase_pages] = parallel(
+  mosic_get_entity_pages("MTask", TASK_ID, { include_subtree: false }),
+  mosic_get_task_list(phase_id, { include_tasks: false }),
+  mosic_get_entity_pages("MTask List", phase_id, { include_subtree: false })
+)
 
 # Check for existing research
 existing_research_page = task_pages.find(p => p.title.includes("Research"))
@@ -115,15 +118,6 @@ existing_research_page = task_pages.find(p => p.title.includes("Research"))
 # Check for context page (from discuss-task)
 task_context_page = task_pages.find(p => p.title.includes("Context"))
 task_context_page_id = task_context_page ? task_context_page.name : null
-
-# Get parent phase
-phase_id = task.task_list
-phase = mosic_get_task_list(phase_id, { include_tasks: false })
-
-# Get phase pages and find IDs
-phase_pages = mosic_get_entity_pages("MTask List", phase_id, {
-  include_subtree: false
-})
 
 phase_research_page = phase_pages.find(p => p.title.includes("Research"))
 phase_research_page_id = phase_research_page ? phase_research_page.name : null
@@ -147,7 +141,7 @@ dependency_order = []
 task_requirements = []
 IF task_pages.find(p => p.page_type == "Spec"):
   plan_page = task_pages.find(p => p.page_type == "Spec")
-  plan_content = mosic_get_page(plan_page.name, { content_format: "markdown" }).content
+  plan_content = mosic_get_page(plan_page.name, { content_format: "plain" }).content
   coverage_section = extract_section(plan_content, "## Requirements Coverage")
   IF coverage_section:
     FOR each row in parse_markdown_table(coverage_section):
@@ -178,7 +172,7 @@ supplement_mode = false
 
 IF existing_research_page:
   existing_content = mosic_get_page(existing_research_page.name, {
-    content_format: "markdown"
+    content_format: "excerpts"
   })
 
   Display:
@@ -186,7 +180,7 @@ IF existing_research_page:
   Existing task research found.
 
   Summary:
-  {existing_content.content.substring(0, 500)}...
+  {existing_content.content}
   """
 
   AskUserQuestion({

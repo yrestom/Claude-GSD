@@ -108,10 +108,10 @@ Research: {existing_research_page ? "Found" : "None"}
 ```
 IF existing_research_page:
   research_content = mosic_get_page(existing_research_page.name, {
-    content_format: "markdown"
+    content_format: "excerpts"
   })
 
-  Display summary of existing research
+  Display: "Existing research found:\n" + research_content.content
 
   Offer:
   1) Update research (re-research with fresh data)
@@ -156,7 +156,7 @@ Follow `@~/.claude/get-shit-done/workflows/decompose-requirements.md`:
 IF requirements_page_id AND (config.workflow?.distributed?.enabled !== false):
   # 1. Extract phase requirements using @context-extraction.md <requirements_extraction>
   requirements_content = mosic_get_page(requirements_page_id, {
-    content_format: "markdown"
+    content_format: "plain"
   }).content
   phase_requirements = extract_phase_requirements(requirements_content, PHASE)
 
@@ -313,10 +313,10 @@ ELSE:
 
     # Validate the agent created the research page in Mosic
     IF research_page_id:
-      # Verify page exists and has content
-      validated_page = mosic_get_page(research_page_id, { content_format: "plain" })
-      IF NOT validated_page OR NOT validated_page.content:
-        ERROR: "Agent reported page ID {research_page_id} but page not found or empty in Mosic"
+      # Existence check only — content_format: "none" avoids loading full page content
+      validated_page = mosic_get_page(research_page_id, { content_format: "none" })
+      IF NOT validated_page:
+        ERROR: "Agent reported page ID {research_page_id} but page not found in Mosic"
     ELSE:
       # Fallback: check entity pages for newly created research page
       phase_pages_updated = mosic_get_entity_pages("MTask List", task_list_id, {

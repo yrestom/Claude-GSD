@@ -123,18 +123,19 @@ executor_model = model_overrides["gsd-executor"] ?? lookup(model_profile)
 # Extract task identifier
 task_identifier = extract_identifier($ARGUMENTS)
 
-# Load task from Mosic
+# Load task from Mosic (include_checklists avoids re-fetch in Step 7)
 IF task_identifier:
   task = mosic_get_task(task_identifier, {
     workspace_id: workspace_id,
-    description_format: "markdown"
+    description_format: "none",
+    include_checklists: true
   })
 ELSE:
   # Use active task from config
   task_id = config.mosic.session?.active_task
   IF not task_id:
     ERROR: "No task identifier provided and no active task. Provide task ID or run /gsd:task first."
-  task = mosic_get_task(task_id, { description_format: "markdown" })
+  task = mosic_get_task(task_id, { description_format: "none", include_checklists: true })
 
 TASK_ID = task.name
 TASK_IDENTIFIER = task.identifier
@@ -183,11 +184,15 @@ IF incomplete_subtasks.length == 0:
   Display: "All subtasks already complete. Creating summary..."
   GOTO step 7
 
-# Get plan page (ID only — executor loads content from Mosic)
-task_pages = mosic_get_entity_pages("MTask", TASK_ID, {
-  include_subtree: false
-})
+# Parallelize independent data loads: task pages + phase data (phase_id known from task.task_list)
+phase_id = task.task_list
+[task_pages, phase, phase_pages] = parallel(
+  mosic_get_entity_pages("MTask", TASK_ID, { include_subtree: false, fields: "minimal" }),
+  mosic_get_task_list(phase_id, { include_tasks: false }),
+  mosic_get_entity_pages("MTask List", phase_id, { include_subtree: false, fields: "minimal" })
+)
 
+# Get plan page (ID only — executor loads content from Mosic)
 plan_page = task_pages.find(p =>
   p.title.includes("Plan") or p.page_type == "Spec"
 )
@@ -215,10 +220,6 @@ Task: {TASK_IDENTIFIER}
 ## 3. Discover Phase Page IDs
 
 ```
-# Get parent phase
-phase_id = task.task_list
-phase = mosic_get_task_list(phase_id, { include_tasks: false })
-
 # Derive phase number from config (reverse-lookup task_list_id)
 PHASE = null
 FOR each key, value in config.mosic.task_lists:
@@ -226,11 +227,7 @@ FOR each key, value in config.mosic.task_lists:
     PHASE = key.replace("phase-", "")  # e.g., "phase-01" → "01"
     BREAK
 
-# Discover phase page IDs (do NOT load content — executor loads from Mosic)
-phase_pages = mosic_get_entity_pages("MTask List", phase_id, {
-  include_subtree: false
-})
-
+# phase_pages already loaded in parallel above — use results
 research_page = phase_pages.find(p => p.title.includes("Research"))
 context_page = phase_pages.find(p => p.title.includes("Context"))
 
@@ -242,7 +239,8 @@ requirements_page_id = config.mosic.pages.requirements or null
 # Fallback: discover requirements page from project entity pages
 IF NOT requirements_page_id:
   project_pages = mosic_get_entity_pages("MProject", project_id, {
-    include_subtree: false
+    include_subtree: false,
+    fields: "minimal"
   })
   req_page = project_pages.find(p => p.title.includes("Requirements"))
   IF req_page:
@@ -256,7 +254,7 @@ IF NOT requirements_page_id:
 # Load full details for all incomplete subtasks
 subtask_details_map = {}
 FOR each subtask in incomplete_subtasks:
-  st = mosic_get_task(subtask.name, { description_format: "markdown" })
+  st = mosic_get_task(subtask.name, { description_format: "plain" })
   subtask_details_map[subtask.name] = st
 
 # --- Helper: extract_wave_from_description(description) ---
@@ -381,11 +379,10 @@ mosic_create_document("M Comment", {
     (use_parallel ? "<p>Waves: " + Object.keys(waves).length + "</p>" : "")
 })
 
-# Mark subtasks as in progress
-FOR each subtask in incomplete_subtasks:
-  mosic_update_document("MTask", subtask.name, {
-    status: "In Progress"
-  })
+# Mark subtasks as in progress (batch update — single call)
+mosic_batch_update_documents("MTask",
+  incomplete_subtasks.map(s => ({ name: s.name, status: "In Progress" }))
+)
 ```
 
 Display:
@@ -904,10 +901,9 @@ all_subtasks_fresh = mosic_search_tasks({
 })
 complete_subtasks = all_subtasks_fresh.results.filter(t => t.done)
 
-# Update task checklist if exists
-task_with_checklists = mosic_get_task(TASK_ID, { include_checklists: true })
-IF task_with_checklists.checklists:
-  FOR each checklist in task_with_checklists.checklists:
+# Update task checklist if exists (task.checklists loaded in Step 1 — no re-fetch needed)
+IF task.checklists:
+  FOR each checklist in task.checklists:
     matching_subtask = complete_subtasks.find(s =>
       s.title.toLowerCase().includes(checklist.title.toLowerCase()) or
       checklist.title.toLowerCase().includes(s.title.toLowerCase())

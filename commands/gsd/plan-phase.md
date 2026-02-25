@@ -174,20 +174,18 @@ Spawning researcher...
 Gather context for research:
 
 ```
-# Load context page content if exists
+# Load context page content (plain — only needed for section extraction of user decisions)
 context_content = ""
 IF context_page:
   context_content = mosic_get_page(context_page.name, {
-    content_format: "markdown"
+    content_format: "plain"
   }).content
 
-# Get requirements page content
+# Requirements page ID only — researcher self-loads content from Mosic
 requirements_page_id = config.mosic.pages.requirements
-requirements_content = ""
-IF requirements_page_id:
-  requirements_content = mosic_get_page(requirements_page_id, {
-    content_format: "markdown"
-  }).content
+
+# Roadmap page ID for mosic_references
+roadmap_page_id = config.mosic.pages.roadmap or null
 ```
 
 **Extract user decisions from context page (if exists):**
@@ -223,6 +221,14 @@ Fill research prompt:
 ```markdown
 """ + user_decisions_xml + """
 
+<mosic_references>
+<phase id="{task_list_id}" title="{phase.title}" number="{PHASE}" />
+<workspace id="{workspace_id}" />
+<context_page id="{context_page ? context_page.name : null}" />
+<requirements_page id="{requirements_page_id}" />
+<roadmap_page id="{roadmap_page_id}" />
+</mosic_references>
+
 <objective>
 Research how to implement Phase {PHASE}: {phase.title}
 
@@ -232,12 +238,6 @@ Answer: "What do I need to know to PLAN this phase well?"
 <context>
 **Phase description:**
 {phase.description}
-
-**Requirements (if any):**
-{requirements_content}
-
-**Phase context (if any):**
-{context_content}
 </context>
 
 <output>
@@ -574,47 +574,24 @@ ELSE:
   Spawning plan checker...
   """
 
-  **Load requirements for verification (deferred from step 7 — not needed by planner):**
+  **Spawn gsd-plan-checker:**
 
-  requirements_content = ""
-  IF config.mosic.pages.requirements:
-    requirements_content = mosic_get_page(config.mosic.pages.requirements, {
-      content_format: "markdown"
-    }).content
-
-  # Extract phase requirements for checker
-  phase_requirements_for_checker = []
-  IF requirements_content:
-    traceability_section = extract_section(requirements_content, "## Traceability")
-    IF NOT traceability_section:
-      traceability_section = extract_section(requirements_content, "## Requirements Traceability")
-    IF traceability_section:
-      FOR each row in parse_markdown_table(traceability_section):
-        IF row.phase matches current phase (PHASE or phase.title):
-          req_description = find_requirement_description(requirements_content, row.requirement_id)
-          phase_requirements_for_checker.append({
-            id: row.requirement_id,
-            description: req_description or row.description
-          })
-
+  # Build requirements XML from phase_requirements already extracted in Step 7.5 (no re-fetch)
   phase_requirements_xml = "<phase_requirements>\n"
-  IF phase_requirements_for_checker:
-    FOR each req in phase_requirements_for_checker:
+  IF phase_requirements:
+    FOR each req in phase_requirements:
       phase_requirements_xml += '<requirement id="' + req.id + '">' + req.description + '</requirement>\n'
   ELSE:
     phase_requirements_xml += "No explicit requirements found for this phase. Derive from phase goal.\n"
   phase_requirements_xml += "</phase_requirements>"
 
-  **Spawn gsd-plan-checker:**
-
-  # Load all plan pages content
-  plans_content = ""
-  FOR each plan_task in created_plan_tasks:
-    plan_page_id = config.mosic.pages["phase-" + PHASE + "-plan-" + plan.number]
-    plan_content = mosic_get_page(plan_page_id, {
-      content_format: "markdown"
-    }).content
-    plans_content += "\n\n---\n\n" + plan_content
+  # Collect plan page IDs for checker's mosic_references (checker self-loads content)
+  plan_page_ids = []
+  FOR each (plan_index, plan_task) in enumerate(created_plan_tasks):
+    plan_number = printf("%02d", plan_index + 1)
+    plan_page_id = config.mosic.pages["phase-" + PHASE + "-plan-" + plan_number]
+    IF plan_page_id:
+      plan_page_ids.push(plan_page_id)
 
   checker_prompt = """
 <verification_context>
@@ -624,13 +601,13 @@ ELSE:
 
 """ + phase_requirements_xml + """
 
-**Plans to verify:**
-{plans_content}
-
-**Requirements (full page, if exists):**
-{requirements_content}
-
 </verification_context>
+
+<mosic_references>
+<phase id=\"""" + task_list_id + """\" title=\"""" + phase.title + """\" number=\"""" + PHASE + """\" />
+<requirements_page id=\"""" + (requirements_page_id or "") + """\" />
+""" + plan_page_ids.map(id => '<plan_page id="' + id + '" />').join("\n") + """
+</mosic_references>
 
 <expected_output>
 Return one of:

@@ -125,19 +125,26 @@ IF completed_tasks.length == 0:
   ERROR: "No completed tasks in phase. Nothing to verify."
   EXIT
 
+# Load all task pages once — cached for Step 2 and Step 3a (avoids duplicate entity_pages calls)
+task_pages_map = {}
+FOR each task in completed_tasks:
+  task_pages_map[task.name] = mosic_get_entity_pages("MTask", task.name, {
+    include_subtree: false
+  })
+
 # Get summary pages linked to tasks
 test_items = []
 
 FOR each task in completed_tasks:
-  # Get pages related to this task
-  pages = mosic_get_entity_pages("MTask", task.name, { include_subtree: false })
+  # Get pages related to this task (from cache)
+  pages = task_pages_map[task.name] or []
 
   # Find summary pages
   summary_page = pages.find(p => p.title.includes("Summary"))
 
   IF summary_page:
     # Get page content in markdown format
-    page_content = mosic_get_page(summary_page.name, { content_format: "markdown" })
+    page_content = mosic_get_page(summary_page.name, { content_format: "plain" })
 
     # Extract testable outcomes from summary
     testable_outcomes = extract_testable_items(page_content)
@@ -173,13 +180,13 @@ Before manual testing, build verification criteria and run automated code review
 phase_verification_criteria = []
 
 FOR each task in completed_tasks:
-  # Get task's plan page for requirements
-  pages = mosic_get_entity_pages("MTask", task.name, { include_subtree: false })
+  # Get task's plan page for requirements (from cache loaded in Step 2)
+  pages = task_pages_map[task.name] or []
   plan_page = pages.find(p => p.title.includes("Plan") or p.page_type == "Spec")
 
   task_requirements = []
   IF plan_page:
-    plan_content = mosic_get_page(plan_page.name, { content_format: "markdown" }).content
+    plan_content = mosic_get_page(plan_page.name, { content_format: "plain" }).content
     must_haves = extract_section(plan_content, "## Must-Haves")
     IF must_haves:
       truths = extract_list_items(must_haves, "Observable Truths")
@@ -421,11 +428,11 @@ IF failed > 0:
     "cosmetic": "Low"
   }
 
-  issue_tasks = []
+  failed_results = results.filter(r => r.status == "failed")
 
-  FOR each result in results.filter(r => r.status == "failed"):
-    # Create MTask for the issue fix
-    issue_task = mosic_create_document("MTask", {
+  # Batch create all issue tasks in one call
+  created_batch = mosic_batch_create_documents("MTask",
+    failed_results.map(result => ({
       workspace: WORKSPACE_ID,
       task_list: PHASE_ID,
       title: "Fix: " + result.test.test.substring(0, 80),
@@ -433,8 +440,12 @@ IF failed > 0:
       icon: "lucide:bug",
       status: "Backlog",
       priority: severity_to_priority[result.severity]
-    })
+    }))
+  )
+  issue_tasks = created_batch.results
 
+  # Tag and link each created task
+  FOR each (result, issue_task) in zip(failed_results, issue_tasks):
     # Tag as issue fix
     mosic_batch_add_tags_to_document("MTask", issue_task.name, [
       config.mosic.tags.gsd_managed,
@@ -462,8 +473,6 @@ IF failed > 0:
       relation_type: "Related"
     })
 
-    issue_tasks.push(issue_task)
-
   DISPLAY: "Created " + issue_tasks.length + " fix tasks in Mosic"
 ```
 
@@ -479,9 +488,8 @@ IF failed > 0:
     debug_prompts.push({
       prompt: "First, read ./.claude/agents/gsd-debugger.md for your complete role definition and instructions.\n\n" +
         "<objective>\n" +
-        "Diagnose root cause for UAT failure.\n\n" +
-        "**Issue:** " + issue_task.title + "\n" +
-        "**Description:** " + issue_task.description + "\n" +
+        "Diagnose root cause for UAT failure.\n" +
+        "Load the issue task from Mosic by ID to get full context.\n" +
         "</objective>\n\n" +
         "<context>\n" +
         "Phase: " + PHASE_TITLE + "\n" +

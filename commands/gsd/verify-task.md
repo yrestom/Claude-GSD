@@ -66,8 +66,9 @@ task_identifier = extract_identifier($ARGUMENTS)
 IF task_identifier:
   task = mosic_get_task(task_identifier, {
     workspace_id: workspace_id,
-    description_format: "markdown",
-    include_checklists: true
+    description_format: "none",
+    include_checklists: true,
+    include_tags: true
   })
 ELSE:
   # Use active task from config or last completed
@@ -86,8 +87,9 @@ ELSE:
     task = recent_tasks.results[0]
   ELSE:
     task = mosic_get_task(task_id, {
-      description_format: "markdown",
-      include_checklists: true
+      description_format: "none",
+      include_checklists: true,
+      include_tags: true
     })
 
 TASK_ID = task.name
@@ -108,37 +110,34 @@ Status: {task.status}
 ## 3. Load Task Artifacts
 
 ```
-# Get task pages
-task_pages = mosic_get_entity_pages("MTask", TASK_ID, {
-  include_subtree: false
-})
+# Parallelize task pages + phase pages (phase_id known from task.task_list)
+phase_id = task.task_list
+[task_pages, phase_pages] = parallel(
+  mosic_get_entity_pages("MTask", TASK_ID, { include_subtree: false }),
+  mosic_get_entity_pages("MTask List", phase_id, { include_subtree: false })
+)
 
 # Find key pages
 plan_page = task_pages.find(p => p.title.includes("Plan") or p.page_type == "Spec")
 summary_page = task_pages.find(p => p.title.includes("Summary"))
 existing_uat_page = task_pages.find(p => p.title.includes("UAT") or p.title.includes("Verification"))
+task_context_page = task_pages.find(p => p.title.includes("Context") or p.title.includes("Decisions"))
+phase_context_page = phase_pages.find(p => p.title.includes("Context"))
 
-# Load plan content for acceptance criteria
-plan_content = ""
-IF plan_page:
-  plan_content = mosic_get_page(plan_page.name, {
-    content_format: "markdown"
-  }).content
+# Parallelize all content loads and subtask fetch (all independent)
+[plan_content_result, summary_content_result, task_context_result, phase_context_result, subtasks] = parallel(
+  plan_page ? mosic_get_page(plan_page.name, { content_format: "plain" }) : null,
+  summary_page ? mosic_get_page(summary_page.name, { content_format: "plain" }) : null,
+  task_context_page ? mosic_get_page(task_context_page.name, { content_format: "plain" }) : null,
+  phase_context_page ? mosic_get_page(phase_context_page.name, { content_format: "plain" }) : null,
+  mosic_search_tasks({ workspace_id: workspace_id, filters: { parent_task: TASK_ID } })
+)
 
-# Load summary content
-summary_content = ""
-IF summary_page:
-  summary_content = mosic_get_page(summary_page.name, {
-    content_format: "markdown"
-  }).content
+# Extract content strings from results
+plan_content = plan_content_result ? plan_content_result.content : ""
+summary_content = summary_content_result ? summary_content_result.content : ""
 
-# Get subtasks
-subtasks = mosic_search_tasks({
-  workspace_id: workspace_id,
-  filters: { parent_task: TASK_ID }
-})
-
-# Get checklists
+# Get checklists (loaded in Step 2 with include_checklists: true)
 checklists = task.checklists or []
 ```
 
@@ -155,39 +154,26 @@ Artifacts found:
 ## 4. Load Context Page Decisions
 
 ```
-# Load task context page (from discuss-task)
-task_context_page = task_pages.find(p => p.title.includes("Context") or p.title.includes("Decisions"))
+# task_pages, phase_pages, task_context_page, phase_context_page all loaded in Step 3
+# task_context_result and phase_context_result content strings also loaded in Step 3
 
-task_context_content = ""
+task_context_content = task_context_result ? task_context_result.content : ""
 locked_decisions = []
 deferred_ideas = []
 
-IF task_context_page:
-  task_context_content = mosic_get_page(task_context_page.name, {
-    content_format: "markdown"
-  }).content
-
+IF task_context_page AND task_context_content:
   # Extract locked decisions
   locked_decisions = extract_list_items(task_context_content, "Decisions")
   deferred_ideas = extract_list_items(task_context_content, "Deferred Ideas")
 
-# Load phase pages for inherited context
-phase_id = task.task_list
-phase_pages = mosic_get_entity_pages("MTask List", phase_id, {
-  include_subtree: false
-})
-
 # Also check phase context for inherited locked decisions
-phase_context_page = phase_pages.find(p => p.title.includes("Context"))
-IF phase_context_page:
-  phase_context_content = mosic_get_page(phase_context_page.name, {
-    content_format: "markdown"
-  }).content
+phase_context_content = phase_context_result ? phase_context_result.content : ""
+IF phase_context_page AND phase_context_content:
   phase_locked = extract_list_items(phase_context_content, "Decisions")
   locked_decisions = locked_decisions.concat(phase_locked)
 
-# Detect TDD task
-task_tags = mosic_get_document_tags("MTask", TASK_ID)
+# Detect TDD task (tags loaded in Step 2 with include_tags: true)
+task_tags = task.tags or []
 is_tdd_task = task_tags.some(t => t.tag == "tdd")
 
 IF is_tdd_task:

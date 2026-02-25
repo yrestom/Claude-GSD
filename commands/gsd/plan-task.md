@@ -91,14 +91,14 @@ skip_verify = $ARGUMENTS contains "--skip-verify" or quick_mode
 IF task_identifier:
   task = mosic_get_task(task_identifier, {
     workspace_id: workspace_id,
-    description_format: "markdown"
+    description_format: "none"
   })
 ELSE:
   # Use active task from config
   task_id = config.mosic.session?.active_task
   IF not task_id:
     ERROR: "No task identifier provided and no active task. Provide task ID or run /gsd:task first."
-  task = mosic_get_task(task_id, { description_format: "markdown" })
+  task = mosic_get_task(task_id, { description_format: "none" })
 
 TASK_ID = task.name
 TASK_IDENTIFIER = task.identifier
@@ -247,7 +247,7 @@ ELIF NOT quick_mode:
   # Extract from plan page coverage table (same as research-task Step 3.5)
   plan_page_for_reqs = task_pages.find(p => p.page_type == "Spec")
   IF plan_page_for_reqs:
-    plan_content = mosic_get_page(plan_page_for_reqs.name, { content_format: "markdown" }).content
+    plan_content = mosic_get_page(plan_page_for_reqs.name, { content_format: "plain" }).content
     coverage_section = extract_section(plan_content, "## Requirements Coverage")
     IF coverage_section:
       FOR each row in parse_markdown_table(coverage_section):
@@ -631,21 +631,11 @@ IF workflow_plan_check and not skip_verify:
     task_requirements_xml += "No explicit requirements found for this task. Derive from task description.\n"
   task_requirements_xml += "</phase_requirements>"
 
-  # Load plan page content
-  plan_content = mosic_get_page(PLAN_PAGE_ID, {
-    content_format: "markdown"
-  }).content
-
-  # Load subtasks
+  # Get subtask IDs for checker's mosic_references (checker self-loads content)
   subtasks = mosic_search_tasks({
     workspace_id: workspace_id,
     filters: { parent_task: TASK_ID }
   })
-
-  subtask_details = ""
-  FOR each subtask in subtasks.results:
-    st = mosic_get_task(subtask.name, { description_format: "markdown" })
-    subtask_details += "\n\n### " + st.identifier + ": " + st.title + "\n" + st.description
 
   checker_prompt = """
 <verification_context>
@@ -654,13 +644,13 @@ IF workflow_plan_check and not skip_verify:
 
 """ + task_requirements_xml + """
 
-**Plan Page Content:**
-""" + plan_content + """
-
-**Subtasks:**
-""" + subtask_details + """
-
 </verification_context>
+
+<mosic_references>
+<task id=\"""" + TASK_ID + """\" identifier=\"""" + TASK_IDENTIFIER + """\" />
+<plan_page id=\"""" + PLAN_PAGE_ID + """\" />
+""" + subtasks.results.map(s => '<subtask id="' + s.name + '" identifier="' + s.identifier + '" />').join("\n") + """
+</mosic_references>
 
 <checklist>
 - [ ] Each subtask has clear, specific actions
@@ -734,20 +724,7 @@ Return one of:
         description="Revise task plan: " + TASK_IDENTIFIER + " (attempt " + iteration_count + ")"
       )
 
-      # Re-run checker on revised plan
-      plan_content = mosic_get_page(PLAN_PAGE_ID, {
-        content_format: "markdown"
-      }).content
-
-      subtasks = mosic_search_tasks({
-        workspace_id: workspace_id,
-        filters: { parent_task: TASK_ID }
-      })
-
-      subtask_details = ""
-      FOR each subtask in subtasks.results:
-        st = mosic_get_task(subtask.name, { description_format: "markdown" })
-        subtask_details += "\n\n### " + st.identifier + ": " + st.title + "\n" + st.description
+      # Re-run checker on revised plan (same plan page ID and subtask IDs; planner updated in place)
 
       checker_prompt_revised = """
 <verification_context>
@@ -756,13 +733,13 @@ Return one of:
 
 """ + task_requirements_xml + """
 
-**Plan Page Content:**
-""" + plan_content + """
-
-**Subtasks:**
-""" + subtask_details + """
-
 </verification_context>
+
+<mosic_references>
+<task id=\"""" + TASK_ID + """\" identifier=\"""" + TASK_IDENTIFIER + """\" />
+<plan_page id=\"""" + PLAN_PAGE_ID + """\" />
+""" + subtasks.results.map(s => '<subtask id="' + s.name + '" identifier="' + s.identifier + '" />').join("\n") + """
+</mosic_references>
 
 <checklist>
 - [ ] Each subtask has clear, specific actions
