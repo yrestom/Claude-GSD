@@ -107,8 +107,19 @@ Model lookup:
 
 orchestrator_model = model_overrides["plan-orchestrator"] ?? lookup(model_profile)
 verifier_model = model_overrides["gsd-verifier"] ?? lookup(model_profile)
+executor_model = model_overrides["gsd-executor"] ?? lookup(model_profile)
 
 ```
+
+**Create Claude Code task list to track orchestration steps:**
+```
+TaskCreate({ subject: "Load phase and incomplete tasks from Mosic", activeForm: "Loading phase tasks" })
+TaskCreate({ subject: "Group tasks by wave", activeForm: "Grouping by wave" })
+TaskCreate({ subject: "Execute task waves", activeForm: "Executing task waves" })
+TaskCreate({ subject: "Aggregate results and verify phase goal", activeForm: "Verifying phase" })
+TaskCreate({ subject: "Update phase status and present results", activeForm: "Finalizing phase" })
+```
+Update each (in_progress → completed) as you move through the steps below.
 
 ## 1. Validate and Load Phase from Mosic
 
@@ -216,42 +227,66 @@ function extract_wave(content):
 waves = {}
 
 FOR each plan_task in incomplete_plans:
-  # Extract plan number for config lookups (from task title "Plan 01: ...")
+  # Extract plan number for config lookups
   plan_number = extract_plan_number(plan_task.title)
 
-  # Get plan page linked to task
-  task_pages = mosic_get_entity_pages("MTask", plan_task.name, {
-    include_subtree: false
-  })
-  plan_page = task_pages.find(p => p.title contains "Plan" or p.page_type == "Spec")
+  # Detect flat task: check for "flat-task" tag (resolved from config)
+  flat_task_tag = config.mosic.tags["flat-task"] or config.mosic.tags.flat_task or "flat-task"
+  is_flat = plan_task.tags?.includes(flat_task_tag) or false
 
   plan_content = ""
   wave = 1
   autonomous = true
 
-  IF plan_page:
-    plan_content = mosic_get_page(plan_page.name, {
-      content_format: "markdown"
-    }).content
+  IF is_flat:
+    # Flat task: load task description to extract wave metadata
+    full_task = mosic_get_task(plan_task.name, {
+      description_format: "markdown",
+      include_checklists: true
+    })
+    plan_content = full_task.description_markdown or ""
+    # Extract wave directly from flat task description sections
+    wave_section = extract_section(plan_content, "## Wave")
+    wave = parseInt(wave_section.trim()) or 1
+    autonomous = true  # flat tasks are always autonomous
 
-    # Extract wave from plan page "## Metadata" section
-    # Format: "- **Wave:** N" or "**Wave:** N"
-    wave = extract_wave(plan_content)
+    waves[wave] = waves[wave] or []
+    waves[wave].push({
+      task: plan_task,
+      full_task: full_task,        # pre-loaded for executor prompt
+      page: null,
+      content: plan_content,
+      number: plan_number,
+      autonomous: true,
+      is_flat: true
+    })
 
-    # Extract autonomous flag from plan page
-    # Format: "- **Autonomous:** yes/no"
-    autonomous_match = plan_content.match(/\*\*Autonomous:\*\*\s*(yes|no|true|false)/i)
-    IF autonomous_match:
-      autonomous = autonomous_match[1].toLowerCase() in ["yes", "true"]
+  ELSE:
+    # Legacy plan task: load plan page for wave extraction
+    task_pages = mosic_get_entity_pages("MTask", plan_task.name, {
+      include_subtree: false
+    })
+    plan_page = task_pages.find(p => p.title contains "Plan" or p.page_type == "Spec")
 
-  waves[wave] = waves[wave] or []
-  waves[wave].push({
-    task: plan_task,
-    page: plan_page,
-    content: plan_content,
-    number: plan_number,
-    autonomous: autonomous
-  })
+    IF plan_page:
+      plan_content = mosic_get_page(plan_page.name, {
+        content_format: "markdown"
+      }).content
+      wave = extract_wave(plan_content)
+      autonomous_match = plan_content.match(/\*\*Autonomous:\*\*\s*(yes|no|true|false)/i)
+      IF autonomous_match:
+        autonomous = autonomous_match[1].toLowerCase() in ["yes", "true"]
+
+    waves[wave] = waves[wave] or []
+    waves[wave].push({
+      task: plan_task,
+      full_task: null,
+      page: plan_page,
+      content: plan_content,
+      number: plan_number,
+      autonomous: autonomous,
+      is_flat: false
+    })
 
 # Sort waves
 sorted_waves = Object.keys(waves).sort((a, b) => parseInt(a) - parseInt(b))
@@ -306,8 +341,49 @@ its subtask orchestration process end-to-end (subtask execution, commits, summar
 executor_prompts = []
 
 FOR each plan in wave:
-  # Build mosic_refs block — IDs only
-  plan_mosic_refs = """
+
+  IF plan.is_flat:
+    # Flat task: spawn gsd-executor directly with lean prompt
+    flat_task_refs = """
+<mosic_references>
+<task id="{plan.task.name}" identifier="{plan.task.identifier}" title="{plan.task.title}" />
+<workspace id="{workspace_id}" />
+</mosic_references>
+"""
+    prompt = """
+<flat_task_mode>true</flat_task_mode>
+
+<objective>
+Execute flat task {plan.task.identifier}: {plan.task.title}
+
+You are a GSD executor. Read and follow your agent instructions at:
+@~/.claude/agents/gsd-executor.md
+
+Then follow the execute-plan.md flat task execution path.
+</objective>
+
+<execution_context>
+@~/.claude/get-shit-done/workflows/execute-plan.md
+</execution_context>
+
+""" + flat_task_refs + """
+
+**Task:** {plan.task.identifier} ({plan.task.name})
+
+<instructions>
+- You are in flat task mode (no subtask)
+- Load your task via mosic_get_task using the ID in mosic_references
+- Follow the flat task execution path in execute-plan.md
+- Create a Claude Code task list from the implementation steps
+- Tick Mosic checklists as each step completes
+- Return TASK COMPLETE with modified files list
+- DO NOT commit — the orchestrator commits after you return
+</instructions>
+"""
+
+  ELSE:
+    # Legacy plan task: existing plan-orchestrator prompt (unchanged)
+    plan_mosic_refs = """
 <mosic_references>
 <task id="{plan.task.name}" identifier="{plan.task.identifier}" title="{plan.task.title}" />
 <phase id="{task_list_id}" title="{phase.title}" number="{PHASE}" />
@@ -319,7 +395,7 @@ FOR each plan in wave:
 </mosic_references>
 """
 
-  prompt = """
+    prompt = """
 <objective>
 Orchestrate execution of plan task {plan.task.identifier}: {plan.task.title}
 
@@ -350,7 +426,7 @@ The only variable: parallel vs sequential (determined by wave config).
   executor_prompts.push({
     prompt: prompt,
     plan: plan,
-    mosic_refs: plan_mosic_refs
+    is_flat: plan.is_flat
   })
 ```
 
@@ -383,13 +459,13 @@ FOR each batch in batches:
     prompt=batch[0].prompt,
     subagent_type="general-purpose",
     model="{executor_model}",
-    description="Execute Plan " + batch[0].plan.number
+    description="Execute " + batch[0].plan.task.identifier + ": " + batch[0].plan.task.title
   )
   Task(
     prompt=batch[1].prompt,
     subagent_type="general-purpose",
     model="{executor_model}",
-    description="Execute Plan " + batch[1].plan.number
+    description="Execute " + batch[1].plan.task.identifier + ": " + batch[1].plan.task.title
   )
   # ALL Task() calls must be in the SAME response message
 
@@ -412,7 +488,7 @@ FOR each executor_prompt in executor_prompts:
     prompt=executor_prompt.prompt,
     subagent_type="general-purpose",
     model="{executor_model}",
-    description="Execute Plan " + executor_prompt.plan.number
+    description="Execute " + executor_prompt.plan.task.identifier + ": " + executor_prompt.plan.task.title
   )
 
   # IMMEDIATELY handle this result before spawning next agent
@@ -468,7 +544,81 @@ Returns: `{ aborted: bool }`
 ```
 function run_post_plan_completion(args):
   plan = args.plan
+  agent_result = args.agent_result
 
+  # --- Flat task path ---
+  IF plan.is_flat:
+    IF agent_result contains "## TASK COMPLETE":
+      # Extract modified files from executor result
+      files_section = extract_section(agent_result, "### Files Modified")
+      modified_files = parse_file_list(files_section)
+
+      # Atomic commit per flat task
+      IF modified_files.length > 0:
+        Bash: git add {modified_files.join(" ")}
+        Bash: git commit -m "feat({plan.task.identifier}): {plan.task.title}"
+
+      # Mark task complete in Mosic
+      mosic_update_document("MTask", plan.task.name, {
+        status: "Completed",
+        done: true
+      })
+      mosic_create_document("M Comment", {
+        workspace: workspace_id,
+        ref_doc: "MTask",
+        ref_name: plan.task.name,
+        content: "<p><strong>Executed successfully</strong></p><p>Files: " + modified_files.join(", ") + "</p>"
+      })
+
+      # Run verifier against task acceptance criteria
+      IF review_enabled:
+        acceptance_criteria = extract_section(plan.content, "## Acceptance Criteria")
+        review_loop_result = execution_review_loop({
+          entity_type: "task",
+          entity_identifier: plan.task.identifier,
+          entity_title: plan.task.title,
+          done_criteria: acceptance_criteria,
+          executor_result: agent_result,
+          files_modified: modified_files,
+          mosic_refs: """
+<mosic_references>
+<task id="{plan.task.name}" identifier="{plan.task.identifier}" title="{plan.task.title}" />
+<workspace id="{workspace_id}" />
+</mosic_references>
+""",
+          config: review_config,
+          model_profile: model_profile,
+          model_overrides: model_overrides,
+          subtask_description: plan.content
+        })
+
+        IF review_loop_result.status == "abort":
+          return { aborted: true }
+
+    ELSE:
+      # Flat task executor failed
+      all_failures.push({ plan: plan, result: agent_result })
+      Display: "Task " + plan.task.identifier + " failed."
+      Display: agent_result
+
+      AskUserQuestion({
+        questions: [{
+          question: "Task " + plan.task.identifier + " failed. How should we proceed?",
+          header: "Task Failed",
+          options: [
+            { label: "Continue", description: "Skip this task, continue with remaining tasks" },
+            { label: "Abort phase", description: "Stop execution" }
+          ],
+          multiSelect: false
+        }]
+      })
+
+      IF user_selection == "Abort phase":
+        return { aborted: true }
+
+    return { aborted: false }
+
+  # --- Legacy plan-orchestrator path (unchanged) ---
   # Validate plan-orchestrator completed successfully
   IF agent_result contains "## TASK EXECUTION COMPLETE" or agent_result contains "TASK COMPLETE":
 
@@ -945,4 +1095,7 @@ IF mosic operation fails:
 - [ ] Requirements page updated (phase requirements marked Complete)
 - [ ] config.json updated with all page IDs
 - [ ] User informed of next steps with Mosic URLs
+- [ ] Flat tasks committed atomically (one commit per task, not per subtask)
+- [ ] Flat task executors spawned directly (not via plan-orchestrator)
+- [ ] Wave-based parallelization respected for flat tasks
 </success_criteria>
