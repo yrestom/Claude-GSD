@@ -504,14 +504,14 @@ Each task should take Claude **10-30 minutes** to execute (ideal), up to 60 minu
 | 30-60 min | Acceptable but prefer splitting               |
 | > 60 min  | Too large — MUST split into smaller tasks     |
 
-**Subtask Target:** Each plan task SHOULD have 3-15 subtasks.
-**Anti-pattern:** A plan task with 0-1 subtasks is likely too coarse.
-Split requirements into many small, verifiable units. Each subtask
-should modify 1-3 files and be independently testable.
+**Phase planning mode (standard):** Create FLAT tasks — no sub-tasks.
+Each task is one focused unit of work executed by a single agent.
+What used to be a sub-task IS now a task. Target: 3-5 implementation
+steps per task, modifying 1-5 files. If a task needs more than 5
+steps → split into two tasks. More tasks, smaller scope, consistent
+quality.
 
-**Why:** More subtasks = better verification granularity, clearer
-progress tracking, easier parallel execution, and more focused
-executor context windows.
+**Task planning mode (plan-task):** Sub-task target 3-15. Unchanged.
 
 ## TDD Detection Heuristic
 
@@ -708,6 +708,11 @@ mosic_batch_add_tags_to_document("MTask", plan_task.name, tags)
 
 ### Step 2: Create M Page with Plan Details
 
+**Skip this step in standard phase planning mode.** Flat tasks embed the plan in the MTask description. Only create plan M Pages in task-mode (plan-task command) and distributed mode.
+
+IF NOT distributed_mode AND prompt does NOT contain "**Mode:** task-planning" AND NOT "**Mode:** task-quick":
+  SKIP to Step 3.
+
 ```
 plan_page = mosic_create_entity_page("MTask", plan_task.name, {
   workspace_id: workspace_id,
@@ -765,9 +770,10 @@ IF plan.depends_on:
 
 1. **Task-mode:** Spawned by `/gsd:plan-task` (prompt has `**Mode:** task-planning` or `**Mode:** task-quick`)
 2. **Phase planning (distributed):** Prompt has `<assigned_requirements>` (spawned by `/gsd:plan-phase` in distributed mode)
-3. **Phase planning (standard):** Spawned by `/gsd:plan-phase` with `<mode>standard</mode>` — create subtasks for each plan task after creating the plan MTask + M Page
 
-In all cases, create **subtasks** under parent tasks. Each plan task gets 3-15 subtasks with wave metadata, file lists, and verification criteria.
+**Phase planning (standard)** does NOT use this section. It uses `<phase_flat_task_creation>` instead — flat tasks with embedded descriptions, no sub-tasks.
+
+In task-mode and distributed mode, create **subtasks** under parent tasks. Each plan task gets 3-15 subtasks with wave metadata, file lists, and verification criteria.
 
 **CRITICAL: You MUST use Mosic MCP tools. DO NOT create local files.**
 
@@ -950,6 +956,184 @@ Cannot proceed. DO NOT fall back to local files.
 ```
 
 </task_mode_subtask_creation>
+
+<phase_flat_task_creation>
+
+## Creating Flat Tasks for Phase Planning (Standard Mode)
+
+**Activation:** Spawned by `/gsd:plan-phase` with `<mode>standard</mode>` (no `<assigned_requirements>` in prompt).
+
+**CRITICAL: No sub-tasks. No separate plan M Pages.** The task description IS the plan. Each flat task is executed by exactly one agent with no further spawning.
+
+---
+
+### Step 0: Load Mosic Tools
+
+ToolSearch("mosic task create document entity page tag relation")
+
+### Step 1: Analyze and decompose requirements into flat tasks
+
+For each feature/requirement in scope:
+
+```
+FOR each unit of work identified:
+  Record:
+  - title: short, imperative ("Implement X", "Add Y endpoint", "Create Z component")
+  - objective: one sentence — what does this accomplish?
+  - context: what the executor needs to know (patterns, decisions, API contracts)
+    Keep this BRIEF — only what's relevant to THIS task
+  - steps: numbered implementation steps (target 3-5, max 6)
+  - files: exact file paths to create/modify
+  - acceptance: 2-4 measurable criteria
+  - wave: 1 if no dependencies, N if depends on wave N-1 outputs
+  - depends_on: task titles this depends on (or "None")
+  - review_tier: skip|quick|standard|thorough (same algorithm as review_tier_assignment)
+```
+
+**Sizing rule:** If a task has more than 5-6 steps → split it. Each step should modify 1-3 files. A task that is clearly too large will cause the executor to miss requirements.
+
+### Step 2: Assign waves (same algorithm as phase-level dependency graph)
+
+```
+Wave 1: Tasks with no dependencies (can run in parallel)
+Wave 2: Tasks depending only on Wave 1 outputs
+Wave 3: Tasks depending on Wave 2 outputs
+
+File-overlap safety: If two tasks modify the SAME file → assign to different waves.
+Checkpoint tasks: assign to their own wave (they block parallel execution).
+```
+
+### Step 3: Create flat MTasks in Mosic
+
+For each task identified, create one MTask directly in the phase task list:
+
+```
+flat_task = mosic_create_document("MTask", {
+  workspace: workspace_id,
+  task_list: phase_task_list_id,
+  # NO parent_task — flat, not nested
+  title: "{task_title}",
+  description: {
+    blocks: [
+      { type: "header", data: { text: "Objective", level: 2 } },
+      { type: "paragraph", data: { text: "{one sentence goal}" } },
+      { type: "header", data: { text: "Context", level: 2 } },
+      { type: "paragraph", data: { text: "{relevant decisions, patterns, API contracts — BRIEF}" } },
+      { type: "header", data: { text: "Wave", level: 2 } },
+      { type: "paragraph", data: { text: "{wave_number}" } },
+      { type: "header", data: { text: "Depends On", level: 2 } },
+      { type: "paragraph", data: { text: "{comma-separated task titles, or 'None'}" } },
+      { type: "header", data: { text: "Review Tier", level: 2 } },
+      { type: "paragraph", data: { text: "{skip|quick|standard|thorough}" } },
+      { type: "header", data: { text: "Files", level: 2 } },
+      { type: "list", data: { style: "unordered", items: [
+        "{path/to/file.py} (create|modify)",
+        ...
+      ]}},
+      { type: "header", data: { text: "Implementation Steps", level: 2 } },
+      { type: "list", data: { style: "ordered", items: [
+        "Step 1: {specific instruction}",
+        "Step 2: {specific instruction}",
+        ...
+      ]}},
+      { type: "header", data: { text: "Acceptance Criteria", level: 2 } },
+      { type: "list", data: { style: "unordered", items: [
+        "{measurable criterion}",
+        ...
+      ]}}
+    ]
+  },
+  status: "Backlog",
+  priority: "Normal"
+})
+```
+
+### Step 4: Tag the task
+
+```
+tags = [
+  resolve_tag("gsd-managed", workspace_id),
+  resolve_tag("plan", workspace_id),        # keep "plan" tag — execute-phase filters by this
+  resolve_tag("phase-{N}", workspace_id),
+  resolve_tag("flat-task", workspace_id)    # marker for execute-phase to detect flat mode
+]
+mosic_batch_add_tags_to_document("MTask", flat_task.name, tags)
+```
+
+### Step 5: Create checklist items matching Implementation Steps
+
+The checklist mirrors the implementation steps. The executor ticks items off as it works.
+The verifier reads them as pass/fail signal.
+
+```
+FOR each step in implementation_steps:
+  mosic_create_document("MTask CheckList", {
+    workspace: workspace_id,
+    task: flat_task.name,
+    title: step,   # exact text of the step
+    done: false
+  })
+```
+
+### Step 6: Create dependencies between tasks
+
+```
+IF task.depends_on:
+  FOR each dep_title in task.depends_on:
+    dep_task = flat_tasks.find(t => t.title == dep_title)
+    IF dep_task:
+      mosic_create_document("M Relation", {
+        workspace: workspace_id,
+        source_doctype: "MTask",
+        source_name: flat_task.name,
+        target_doctype: "MTask",
+        target_name: dep_task.name,
+        relation_type: "Depends"
+      })
+```
+
+### Step 7: Update config.json
+
+```json
+{
+  "mosic": {
+    "tasks": {
+      "phase-{N}-task-{M}": "{flat_task_id}"
+    }
+  }
+}
+```
+
+### Step 8: Return structured completion
+
+```markdown
+## PLANNING COMPLETE
+
+**Tasks Created:** N
+**Waves:** W
+**Mode:** flat-task (no sub-tasks)
+
+### Wave Structure
+
+| Wave | Tasks              | Parallel |
+|------|--------------------|----------|
+| 1    | Task 1, Task 2     | Yes      |
+| 2    | Task 3             | No       |
+
+### Tasks
+
+| # | Title  | Wave | ID           | Steps |
+|---|--------|------|--------------|-------|
+| 1 | {name} | 1    | {task_id}    | 4     |
+| 2 | {name} | 1    | {task_id}    | 3     |
+| 3 | {name} | 2    | {task_id}    | 5     |
+
+### Next Steps
+
+/gsd:execute-phase {PHASE}
+```
+
+</phase_flat_task_creation>
 
 <plan_format>
 
@@ -1211,6 +1395,28 @@ mosic_update_document("M Page", plan_page_id, {
 
 </revision_mode>
 
+<claude_code_task_list>
+
+## Using Claude Code Task List (Always)
+
+**Always create a Claude Code task list at the start of planning** to track your major steps. This keeps you on track even if context grows or gets compacted.
+
+Create these tasks before starting work:
+
+```
+TaskCreate({ subject: "Load Mosic tools", activeForm: "Loading Mosic tools" })
+TaskCreate({ subject: "Load Mosic context", activeForm: "Loading Mosic context" })
+TaskCreate({ subject: "Extract planning context and requirements", activeForm: "Extracting planning context" })
+TaskCreate({ subject: "Break requirements into tasks / subtasks", activeForm: "Breaking into tasks" })
+TaskCreate({ subject: "Build dependency graph and assign waves", activeForm: "Building dependency graph" })
+TaskCreate({ subject: "Create tasks in Mosic", activeForm: "Creating tasks in Mosic" })
+TaskCreate({ subject: "Git commit and offer next steps", activeForm: "Committing and wrapping up" })
+```
+
+Update each task (in_progress → completed) as you move through the execution flow.
+
+</claude_code_task_list>
+
 <execution_flow>
 
 <step name="load_mosic_tools" priority="critical">
@@ -1337,10 +1543,9 @@ Apply goal-backward methodology.
 Create MTask and M Page for each plan.
 Update config.json with IDs.
 
-**After creating each plan MTask + M Page:** Create subtasks under each plan task
-using the `<task_mode_subtask_creation>` pattern (Steps 2-5). Each plan task should
-have 3-15 subtasks with wave metadata, file lists, action, verify, done fields.
-This gives executors granular work items instead of coarse plan tasks.
+**After creating plan tasks:**
+- **Standard phase mode** (not distributed, not task-mode): Follow `<phase_flat_task_creation>` — flat tasks, no sub-tasks, plan is embedded in task description.
+- **Task-mode (plan-task) or distributed mode**: Follow `<task_mode_subtask_creation>` Steps 2-5 — create 3-15 subtasks per plan task.
 </step>
 
 <step name="update_roadmap_page">
