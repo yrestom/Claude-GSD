@@ -1,8 +1,9 @@
 <purpose>
-Single-subtask execution workflow for the gsd-executor agent.
+Single-task execution workflow for the gsd-executor agent.
 
-Loads context from Mosic, executes ONE specified subtask, performs artifact self-check,
-and returns structured results to the orchestrator.
+Supports two execution modes:
+- **Flat task mode:** No subtask assigned. Task description contains all context. Creates Claude Code task list per step, ticks Mosic checklists per step. Returns `## TASK COMPLETE`.
+- **Subtask mode:** Subtask ID provided in mosic_references. Loads plan pages, context pages, research pages. Returns `## SUBTASK COMPLETE`.
 
 The orchestrator (execute-task or execute-phase) handles commits, summary
 creation, task completion, and state updates.
@@ -62,8 +63,13 @@ The orchestrator may pass page IDs directly instead of embedding content:
 if (prompt.includes("<mosic_references>")) {
   refs = parse_mosic_references(prompt)
 
-  task = mosic_get_task(refs.task.id, { description_format: "markdown" })
+  task = mosic_get_task(refs.task.id, { description_format: "markdown", include_checklists: true })
   workspace_id = refs.workspace.id
+
+  // Detect execution mode
+  // flat_task_mode: explicit override OR (no subtask assigned AND task description has flat task sections)
+  flat_task_mode = prompt.includes("<flat_task_mode>true</flat_task_mode>")
+    || (!refs.subtask?.id && task.description_markdown?.includes("## Implementation Steps"))
 
   // Load plan page by direct ID
   plan_content = ""
@@ -133,6 +139,8 @@ else {
   // Get the task with full details
   task = mosic_get_task(task_id, { description_format: "markdown" })
 
+  flat_task_mode = task.description_markdown?.includes("## Implementation Steps")
+
   // Get task pages (plan, context, etc.)
   task_pages = mosic_get_entity_pages("MTask", task_id)
   plan_page = task_pages.find(p => p.title.includes("Plan"))
@@ -198,6 +206,22 @@ else {
     task_research_content = mosic_get_page(task_research_page.name, { content_format: "markdown" }).content
   }
 }
+
+// Flat task mode: no separate pages needed — all context is in task description
+if (flat_task_mode) {
+  // Parse sections from task description (already loaded as task.description)
+  flat_task_context = {
+    objective: extract_section(task.description_markdown, "## Objective"),
+    context: extract_section(task.description_markdown, "## Context"),
+    wave: extract_section(task.description_markdown, "## Wave"),
+    files: extract_section(task.description_markdown, "## Files"),
+    steps: extract_section(task.description_markdown, "## Implementation Steps"),
+    acceptance: extract_section(task.description_markdown, "## Acceptance Criteria"),
+    review_tier: extract_section(task.description_markdown, "## Review Tier")
+  }
+  // Checklists already loaded above (include_checklists: true in initial fetch)
+  flat_task_checklists = task.checklists || []
+}
 ```
 
 **Model lookup table:**
@@ -236,6 +260,8 @@ Store in variables for duration calculation at completion.
 
 
 <step name="load_context">
+**If `flat_task_mode == true`:** Context is in `flat_task_context` (already loaded). Skip this step entirely — proceed to `<step name="execute">`.
+
 Process loaded content into execution context. All content was loaded in `load_mosic_context` step.
 
 ```javascript
@@ -297,6 +323,59 @@ Output: `has_tdd` boolean + `tdd_execution_context` string.
 
 <step name="execute">
 Execute the single specified subtask. **Deviations are normal** — handle them automatically using embedded rules.
+
+**If `flat_task_mode == true`:**
+
+Use the flat task execution path:
+
+1. **Create Claude Code task list** — one task per implementation step:
+   ```
+   FOR each step in flat_task_context.steps:
+     TaskCreate({
+       subject: step,                           // e.g. "Step 2: Add validation to endpoint"
+       description: step,
+       activeForm: step.replace("Step N: ", "") // e.g. "Adding validation to endpoint"
+     })
+   ```
+   Store task IDs in `claude_task_ids[]` matching step order.
+
+2. **Execute each step in order:**
+   ```
+   FOR each (step, i) in flat_task_context.steps:
+     TaskUpdate(claude_task_ids[i], { status: "in_progress" })
+
+     // Implement the step
+     // Read files listed in flat_task_context.files before modifying
+     // Make the change
+
+     // Tick the Mosic checklist item
+     matching_checklist = flat_task_checklists.find(c => c.title == step)
+     IF matching_checklist:
+       mosic_update_document("MTask CheckList", matching_checklist.name, { done: true })
+
+     TaskUpdate(claude_task_ids[i], { status: "completed" })
+   ```
+
+3. **Verify** all acceptance criteria from `flat_task_context.acceptance` are met.
+
+4. **Record modified files** via `git status --short`. DO NOT commit.
+
+5. **Return TASK COMPLETE** (see updated return format below).
+
+Skip to `<step name="record_completion_time">`.
+
+---
+
+**Else (subtask mode):**
+
+0. **Create Claude Code task list** — one task per execution phase:
+   ```
+   TaskCreate({ subject: "Load context files", activeForm: "Loading context files" })
+   TaskCreate({ subject: "Execute: " + subtask.title, activeForm: "Implementing " + subtask.title })
+   TaskCreate({ subject: "Artifact self-check", activeForm: "Running self-check" })
+   TaskCreate({ subject: "Record modified files", activeForm: "Recording modified files" })
+   ```
+   Update each (in_progress → completed) as you move through the steps.
 
 1. Read the @context files listed in the plan
 
@@ -416,6 +495,34 @@ DURATION_MIN=$(( DURATION_SEC / 60 ))
 <step name="return_result">
 **Return structured result to the orchestrator. This is always the final step.**
 
+**If `flat_task_mode == true`:**
+
+```markdown
+## TASK COMPLETE
+
+**Task:** {task.identifier} - {task.title}
+**Status:** passed | failed | partial
+**Duration:** {time}
+
+### Files Modified
+- path/to/file1.py
+- path/to/file2.py
+
+### Checklist
+{N}/{N} implementation steps completed
+
+### Acceptance Criteria
+{List each criterion: ✓ passed / ✗ failed}
+
+### Deviations
+{Any deviations, or "None"}
+
+### Issues
+{Any issues, or "None"}
+```
+
+**If `flat_task_mode == false` (subtask mode):**
+
 ```markdown
 ## SUBTASK COMPLETE
 
@@ -469,4 +576,6 @@ DURATION_MIN=$(( DURATION_SEC / 60 ))
 - [ ] No commits made (orchestrator handles)
 - [ ] No summary page created (orchestrator handles)
 - [ ] No task marked complete (orchestrator handles)
+- [ ] If flat_task_mode: all implementation steps completed (Mosic checklists ticked)
+- [ ] If flat_task_mode: return format is TASK COMPLETE (not SUBTASK COMPLETE)
 </success_criteria>
