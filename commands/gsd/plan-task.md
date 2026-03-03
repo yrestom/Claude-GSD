@@ -76,6 +76,16 @@ Model lookup:
 For each agent: model = model_overrides[agent_name] ?? lookup(model_profile)
 ```
 
+**Create Claude Code task list to track planning steps:**
+```
+TaskCreate({ subject: "Parse arguments and load task from Mosic", activeForm: "Loading task" })
+TaskCreate({ subject: "Load task pages and check existing plan", activeForm: "Checking existing plan" })
+TaskCreate({ subject: "Spawn gsd-planner agent(s)", activeForm: "Running planner" })
+TaskCreate({ subject: "Verify plan completeness", activeForm: "Verifying plan" })
+TaskCreate({ subject: "Update config and present results", activeForm: "Updating config" })
+```
+Update each (in_progress → completed) as you move through the steps below.
+
 ## 2. Parse Arguments and Load Task
 
 ```

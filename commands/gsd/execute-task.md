@@ -117,6 +117,16 @@ executor_model = model_overrides["gsd-executor"] ?? lookup(model_profile)
 # (adaptive path uses tier-specific models; legacy path resolves its own)
 ```
 
+**Create Claude Code task list to track orchestration steps:**
+```
+TaskCreate({ subject: "Load task and subtasks from Mosic", activeForm: "Loading task and subtasks" })
+TaskCreate({ subject: "Group subtasks by wave, detect file overlaps", activeForm: "Building wave groups" })
+TaskCreate({ subject: "Execute subtask waves", activeForm: "Executing subtask waves" })
+TaskCreate({ subject: "Create summary and update Mosic", activeForm: "Creating summary" })
+TaskCreate({ subject: "Git commit and present results", activeForm: "Committing and presenting results" })
+```
+Update each (in_progress → completed) as you move through the steps below.
+
 ## 1. Load Task and Validate
 
 ```
